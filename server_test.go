@@ -1,0 +1,48 @@
+package main
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"regexp"
+	"strings"
+	"testing"
+)
+
+func TestRoutesAndEmbeddedPage(t *testing.T) {
+	handler := newServer(config{maxBytes: 1024}).Handler
+	for _, tt := range []struct {
+		method string
+		path   string
+		status int
+		allow  string
+	}{
+		{http.MethodGet, "/", http.StatusOK, ""},
+		{http.MethodGet, "/missing", http.StatusNotFound, ""},
+		{http.MethodPost, "/", http.StatusMethodNotAllowed, http.MethodGet},
+		{http.MethodGet, "/upload", http.StatusMethodNotAllowed, http.MethodPost},
+	} {
+		t.Run(tt.method+" "+tt.path, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, httptest.NewRequest(tt.method, tt.path, nil))
+			if w.Code != tt.status || w.Header().Get("Allow") != tt.allow {
+				t.Fatalf("status = %d, Allow = %q; want %d, %q", w.Code, w.Header().Get("Allow"), tt.status, tt.allow)
+			}
+			if tt.status == http.StatusOK {
+				body := w.Body.String()
+				if w.Header().Get("Content-Type") != "text/html; charset=utf-8" ||
+					!strings.Contains(body, "Max upload: 1.00 KB") ||
+					!regexp.MustCompile(`const MAX_BYTES =\s*1024\s*;`).MatchString(body) {
+					t.Fatalf("embedded page was not rendered correctly: %s", body)
+				}
+			}
+		})
+	}
+}
+
+func TestRunServerReportsListenErrors(t *testing.T) {
+	err := runServer(context.Background(), &http.Server{Addr: "invalid-address"})
+	if err == nil {
+		t.Fatal("expected a listen error")
+	}
+}
