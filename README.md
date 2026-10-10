@@ -20,8 +20,11 @@ as three lines for automated provisioning.
 
 Open http://127.0.0.1:8080 and sign in. Administrators can open `/admin` to create
 regular users or additional administrators, assign and change disk quotas, delete
-users, and reset passwords. User deletion uses the same confirmation dialog as
-file deletion and preserves the user's uploaded files.
+users, and reset passwords. Creating a user generates a random four-word
+passphrase, separated by hyphens, and shows it to the administrator on the
+creation result page. Copy it before leaving that page; it cannot be retrieved
+later. Only its bcrypt hash is stored. User deletion uses the same confirmation
+dialog as file deletion and preserves the user's uploaded files.
 Regular users can manage their own files but cannot access user management. An administrator
 cannot delete their own account or the last administrator. Resetting a password
 signs that user out on every device; resetting your own password returns you to
@@ -257,6 +260,8 @@ server-side checks.
 
 `main.go` handles startup, `database.go` persists settings and the schema,
 `setup.go` handles first-run provisioning, `users.go` manages accounts, and
+`passphrase.go` generates credentials using the embedded EFF word list (see
+[`wordlists/README.md`](wordlists/README.md) for source and license).
 `session.go` and `auth.go` handle authentication. `admin.go`, `index.go`, and
 `upload.go` serve user management, the explorer page, and the upload endpoint.
 `files.go` lists and manages stored items, `storage.go` validates paths and confines

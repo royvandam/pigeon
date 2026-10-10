@@ -14,7 +14,12 @@ import (
 
 func sessionFor(t *testing.T, cfg config, username string) (*http.Cookie, string) {
 	t.Helper()
-	u, err := cfg.store.authenticate(context.Background(), username, testPassword)
+	return sessionForPassword(t, cfg, username, testPassword)
+}
+
+func sessionForPassword(t *testing.T, cfg config, username, password string) (*http.Cookie, string) {
+	t.Helper()
+	u, err := cfg.store.authenticate(context.Background(), username, password)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +174,7 @@ func TestAdminPermissionsCSRFAndUserLifecycle(t *testing.T) {
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Create a user") {
 		t.Fatalf("management page: %d %s", w.Code, w.Body)
 	}
-	create := url.Values{"action": {"create"}, "username": {"Alice Smith"}, "password": {testPassword}}
+	create := url.Values{"action": {"create"}, "username": {"Alice Smith"}}
 	w = httptest.NewRecorder()
 	cfg.handleAdmin(w, formRequest("/admin", create, adminCookie))
 	if w.Code != http.StatusForbidden {
@@ -178,10 +183,11 @@ func TestAdminPermissionsCSRFAndUserLifecycle(t *testing.T) {
 	create.Set("csrf_token", csrf)
 	w = httptest.NewRecorder()
 	cfg.handleAdmin(w, formRequest("/admin", create, adminCookie))
-	if w.Code != http.StatusSeeOther {
+	if w.Code != http.StatusOK {
 		t.Fatalf("create user: %d %s", w.Code, w.Body)
 	}
-	alice, err := cfg.store.authenticate(ctx, "Alice Smith", testPassword)
+	passphrase := createdPassphrase(t, w)
+	alice, err := cfg.store.authenticate(ctx, "Alice Smith", passphrase)
 	if err != nil || alice.Admin || alice.Slug != "alice-smith" {
 		t.Fatalf("created user: %#v, %v", alice, err)
 	}
@@ -201,7 +207,7 @@ func TestAdminPermissionsCSRFAndUserLifecycle(t *testing.T) {
 	if _, err := cfg.store.createSession(ctx, alice); !errors.Is(err, errInvalidCredentials) {
 		t.Fatalf("password reset accepted a login already in progress: %v", err)
 	}
-	if _, err := cfg.store.authenticate(ctx, "Alice Smith", testPassword); !errors.Is(err, errInvalidCredentials) {
+	if _, err := cfg.store.authenticate(ctx, "Alice Smith", passphrase); !errors.Is(err, errInvalidCredentials) {
 		t.Fatal("old password still works")
 	}
 	alice, err = cfg.store.authenticate(ctx, "Alice Smith", "replacement-password")

@@ -8,12 +8,18 @@ import (
 )
 
 type adminPage struct {
-	Username  string
-	CurrentID int64
-	CSRFToken string
-	Users     []adminUser
-	Error     string
-	Message   string
+	Username    string
+	CurrentID   int64
+	CSRFToken   string
+	Users       []adminUser
+	Error       string
+	Message     string
+	CreatedUser *createdUserCredentials
+}
+
+type createdUserCredentials struct {
+	Username   string
+	Passphrase string
 }
 
 type adminUser struct {
@@ -23,7 +29,7 @@ type adminUser struct {
 	QuotaInput string
 }
 
-func (cfg config) renderAdmin(w http.ResponseWriter, r *http.Request, a authentication, message, problem string, status int) {
+func (cfg config) renderAdmin(w http.ResponseWriter, r *http.Request, a authentication, data adminPage, status int) {
 	users, err := cfg.store.listUsers(r.Context())
 	if err != nil {
 		http.Error(w, "failed to load users", http.StatusInternalServerError)
@@ -39,10 +45,9 @@ func (cfg config) renderAdmin(w http.ResponseWriter, r *http.Request, a authenti
 		rows = append(rows, adminUser{user: u, UsedHuman: humanBytes(used), QuotaHuman: humanBytes(u.QuotaBytes), QuotaInput: quotaInput(u.QuotaBytes)})
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	renderTemplate(w, adminTmpl, adminPage{
-		Username: a.User.Username, CurrentID: a.User.ID, CSRFToken: a.CSRFToken,
-		Users: rows, Message: message, Error: problem,
-	}, status)
+	data.Username, data.CurrentID, data.CSRFToken = a.User.Username, a.User.ID, a.CSRFToken
+	data.Users = rows
+	renderTemplate(w, adminTmpl, data, status)
 }
 
 func (cfg config) handleAdmin(w http.ResponseWriter, r *http.Request) {
@@ -57,7 +62,7 @@ func (cfg config) handleAdmin(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method == http.MethodGet {
 		messages := map[string]string{"created": "User created.", "deleted": "User deleted. Their uploads have been preserved.", "reset": "Password reset. The user must sign in again.", "quota": "Disk quota updated."}
-		cfg.renderAdmin(w, r, a, messages[r.URL.Query().Get("result")], "", http.StatusOK)
+		cfg.renderAdmin(w, r, a, adminPage{Message: messages[r.URL.Query().Get("result")]}, http.StatusOK)
 		return
 	}
 
@@ -70,9 +75,22 @@ func (cfg config) handleAdmin(w http.ResponseWriter, r *http.Request) {
 			quota, err = parseQuota(value)
 		}
 		if err == nil {
-			_, err = cfg.store.createUserWithQuota(r.Context(), r.PostForm.Get("username"), r.PostForm.Get("password"), r.PostForm.Get("admin") == "on", quota)
+			passphrase, generationErr := generatePassphrase()
+			if generationErr != nil {
+				http.Error(w, "failed to generate passphrase", http.StatusInternalServerError)
+				return
+			}
+			var created user
+			created, err = cfg.store.createUserWithQuota(r.Context(), r.PostForm.Get("username"), passphrase, r.PostForm.Get("admin") == "on", quota)
+			if err == nil {
+				// Return the credential in the creation response only, without
+				// putting it in redirect URLs, cookies, or persistent state.
+				cfg.renderAdmin(w, r, a, adminPage{CreatedUser: &createdUserCredentials{
+					Username: created.Username, Passphrase: passphrase,
+				}}, http.StatusOK)
+				return
+			}
 		}
-		result = "created"
 	case "delete", "reset", "quota":
 		id, parseErr := strconv.ParseInt(r.PostForm.Get("user_id"), 10, 64)
 		if parseErr != nil || id <= 0 {
@@ -103,7 +121,7 @@ func (cfg config) handleAdmin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		cfg.renderAdmin(w, r, a, "", err.Error(), http.StatusBadRequest)
+		cfg.renderAdmin(w, r, a, adminPage{Error: err.Error()}, http.StatusBadRequest)
 		return
 	}
 	http.Redirect(w, r, "/admin?result="+result, http.StatusSeeOther)

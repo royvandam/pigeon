@@ -158,17 +158,18 @@ func TestAdminCanAssignAndChangeQuotas(t *testing.T) {
 		t.Fatal(err)
 	}
 	cookie, csrf := sessionFor(t, cfg, "Admin")
-	form := url.Values{"action": {"create"}, "username": {"Quota User"}, "password": {testPassword}, "quota": {"20B"}, "csrf_token": {csrf}}
+	form := url.Values{"action": {"create"}, "username": {"Quota User"}, "quota": {"20B"}, "csrf_token": {csrf}}
 	w := httptest.NewRecorder()
 	cfg.handleAdmin(w, formRequest("/admin", form, cookie))
-	if w.Code != http.StatusSeeOther {
+	if w.Code != http.StatusOK {
 		t.Fatalf("create user with quota: %d, %s", w.Code, w.Body)
 	}
-	u, err := cfg.store.authenticate(ctx, "Quota User", testPassword)
+	passphrase := createdPassphrase(t, w)
+	u, err := cfg.store.authenticate(ctx, "Quota User", passphrase)
 	if err != nil || u.QuotaBytes != 20 {
 		t.Fatalf("assigned quota = %#v, %v", u, err)
 	}
-	userCookie, userCSRF := sessionFor(t, cfg, "Quota User")
+	userCookie, userCSRF := sessionForPassword(t, cfg, "Quota User", passphrase)
 	r := uploadRequest(t, "file.txt", "12345678")
 	r.Header.Del("Authorization")
 	r.AddCookie(userCookie)
@@ -222,7 +223,7 @@ func TestAdminCanAssignAndChangeQuotas(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("invalid quota accepted: %d", w.Code)
 	}
-	u, err = cfg.store.authenticate(ctx, "Quota User", testPassword)
+	u, err = cfg.store.authenticate(ctx, "Quota User", passphrase)
 	if err != nil || u.QuotaBytes != 12 {
 		t.Fatalf("invalid update changed quota: %#v, %v", u, err)
 	}
