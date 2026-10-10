@@ -31,8 +31,10 @@ the login page.
 The home page lists your files and folders with sizes and modification times.
 Open a folder to browse its contents; the breadcrumb links return to its parents.
 Create folders, rename items, move them to another existing folder, or delete
-them. Moving asks for a path relative to **My files**, with an empty path meaning
-the root. Deleting a folder removes its contents too and asks for confirmation.
+them. Rename and move open an edit dialog; changes are submitted only when you
+choose **Save**, and **Cancel** or Escape closes it. Moving asks for a path
+relative to **My files**, with an empty path meaning the root. Deleting a folder
+removes its contents too and asks for confirmation.
 Files download as attachments, and folders download as ZIP archives, including
 empty subfolders.
 

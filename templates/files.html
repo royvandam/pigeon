@@ -16,14 +16,8 @@
         <td class="px-3 py-3">
           <div class="flex flex-wrap items-center justify-end gap-x-3 gap-y-2 text-xs">
             <a href="{{.DownloadURL}}" class="text-zinc-300 hover:underline">{{if .Directory}}Download ZIP{{else}}Download{{end}}</a>
-            <form method="post" action="/files" data-file-action="rename" data-name="{{.Name}}">
-              <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}" /><input type="hidden" name="dir" value="{{$.Directory}}" /><input type="hidden" name="action" value="rename" /><input type="hidden" name="path" value="{{.Path}}" /><input type="hidden" name="name" value="{{.Name}}" />
-              <button type="submit" class="text-zinc-300 hover:underline">Rename</button>
-            </form>
-            <form method="post" action="/files" data-file-action="move" data-name="{{.Name}}">
-              <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}" /><input type="hidden" name="dir" value="{{$.Directory}}" /><input type="hidden" name="action" value="move" /><input type="hidden" name="path" value="{{.Path}}" /><input type="hidden" name="destination" value="" />
-              <button type="submit" class="text-zinc-300 hover:underline">Move</button>
-            </form>
+            <button type="button" data-file-action="rename" data-name="{{.Name}}" data-path="{{.Path}}" class="text-zinc-300 hover:underline">Rename</button>
+            <button type="button" data-file-action="move" data-name="{{.Name}}" data-path="{{.Path}}" class="text-zinc-300 hover:underline">Move</button>
             <form method="post" action="/files" data-file-action="delete" data-name="{{.Name}}" data-directory="{{.Directory}}">
               <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}" /><input type="hidden" name="dir" value="{{$.Directory}}" /><input type="hidden" name="action" value="delete" /><input type="hidden" name="path" value="{{.Path}}" />
               <button type="submit" class="text-red-300 hover:underline">Delete</button>

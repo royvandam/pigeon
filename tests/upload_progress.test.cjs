@@ -19,17 +19,23 @@ function page(size = 10000, options = {}) {
   const requests = [];
   const uploads = [];
   const refreshes = [];
-  const dialogs = {answer: null, confirmed: false, message: ''};
+  const dialogs = {confirmed: false, message: ''};
   for (const match of html.matchAll(/id="([^"]+)"/g)) {
     const events = new Map();
+    let value = '';
     const element = {
       textContent: '', disabled: false, files: [], style: {}, attributes: {},
       classList: {add() {}, remove() {}},
+      contains(node) { return node.inside !== false; },
+      showModal() { this.open = true; },
+      close() { this.open = false; },
+      focus() { this.focused = true; },
+      select() { this.selected = true; },
       setAttribute(name, value) { this.attributes[name] = value; },
       addEventListener(name, callback) { events.set(name, callback); },
       dispatch(name, event) { events.get(name)(event); }
     };
-    Object.defineProperty(element, 'value', {set(value) { if (value === '') this.files = []; }});
+    Object.defineProperty(element, 'value', {get() { return value; }, set(next) { value = next; if (next === '') this.files = []; }});
     elements.set(match[1], element);
   }
   elements.get('directory').webkitdirectory = true;
@@ -44,7 +50,7 @@ function page(size = 10000, options = {}) {
     document: {getElementById(id) { return elements.get(id); }},
     XMLHttpRequest: XHR, FormData, crypto: webcrypto, AbortController,
     window: {
-      prompt(message) { dialogs.message = message; return dialogs.answer; },
+      prompt() { throw new Error('File actions must not use native prompts'); },
       confirm(message) { dialogs.message = message; return dialogs.confirmed; }
     },
     performance: {now() { return now; }},
@@ -130,28 +136,51 @@ test('browser send completion does not advance server progress to 100%', async (
   assert.equal(p.timers.size, 0);
 });
 
-test('file actions prompt for names and destinations and confirm recursive deletion', () => {
+test('rename and move open edit dialogs without submitting prefilled file actions', () => {
   const p = page();
-  const fields = new Map([['name', {value: 'old.txt'}], ['destination', {value: ''}]]);
-  const form = {dataset: {fileAction: 'rename', name: 'old.txt'}, elements: {namedItem(name) { return fields.get(name); }}};
+  const button = {dataset: {fileAction: 'rename', name: 'old.txt', path: 'My folder/docs/old.txt'}};
+  function click() {
+    const event = {target: {closest() { return button; }}, prevented: false, preventDefault() { this.prevented = true; }};
+    p.elements.get('fileList').dispatch('click', event);
+    return event;
+  }
+  assert.equal(click().prevented, true);
+  assert.equal(p.elements.get('fileActionDialog').open, true);
+  assert.equal(p.elements.get('fileActionKind').value, 'rename');
+  assert.equal(p.elements.get('fileActionPath').value, 'My folder/docs/old.txt');
+  assert.equal(p.text('fileActionTitle'), 'Rename "old.txt"');
+  const input = p.elements.get('fileActionValue');
+  assert.equal(input.name, 'name');
+  assert.equal(input.value, 'old.txt');
+  assert.equal(input.required, true);
+  assert.equal(input.maxLength, 255);
+  assert.equal(input.focused && input.selected, true);
+  assert.equal(p.elements.get('fileActionHelp').hidden, true);
+  p.elements.get('fileActionCancel').dispatch('click');
+  assert.equal(p.elements.get('fileActionDialog').open, false);
+  button.dataset.fileAction = 'move';
+  assert.equal(click().prevented, true);
+  assert.equal(p.elements.get('fileActionDialog').open, true);
+  assert.equal(p.elements.get('fileActionKind').value, 'move');
+  assert.equal(input.name, 'destination');
+  assert.equal(input.value, 'My folder/docs');
+  assert.equal(input.required, false);
+  assert.equal(input.maxLength, 4095);
+  assert.equal(p.elements.get('fileActionHelp').hidden, false);
+  assert.equal(p.text('fileActionLabel'), 'Destination folder');
+  assert.equal(p.requests.length, 1); // Only the upload progress poll; no file change.
+  assert.equal(p.refreshes.length, 0);
+  p.xhr.onabort();
+});
+
+test('deleting a directory still requires confirmation', () => {
+  const p = page();
+  const form = {dataset: {fileAction: 'delete', name: 'project', directory: 'true'}};
   function submit() {
     const event = {target: form, prevented: false, preventDefault() { this.prevented = true; }};
     p.elements.get('fileList').dispatch('submit', event);
     return event;
   }
-  assert.equal(submit().prevented, true);
-  p.dialogs.answer = 'new.txt';
-  assert.equal(submit().prevented, false);
-  assert.equal(fields.get('name').value, 'new.txt');
-  form.dataset.fileAction = 'move';
-  p.dialogs.answer = 'Archive/docs';
-  assert.equal(submit().prevented, false);
-  assert.equal(fields.get('destination').value, 'Archive/docs');
-  p.dialogs.answer = '';
-  assert.equal(submit().prevented, false);
-  assert.equal(fields.get('destination').value, '');
-  form.dataset.fileAction = 'delete';
-  form.dataset.directory = 'true';
   assert.equal(submit().prevented, true);
   assert.match(p.dialogs.message, /everything inside it/);
   p.dialogs.confirmed = true;

@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -95,6 +96,38 @@ func TestExplorerFileAndFolderLifecycle(t *testing.T) {
 	action(url.Values{"action": {"delete"}, "path": {"guide.txt"}})
 	if _, err := os.Stat(filepath.Join(cfg.dir, "test-user", "guide.txt")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("deleted file remains: %v", err)
+	}
+}
+
+func TestExplorerEditButtonsRequireDialogConfirmation(t *testing.T) {
+	cfg := newTestConfig(t, 100)
+	cookie, _ := sessionFor(t, cfg, "Test User")
+	writeStoredFile(t, cfg, "test-user", "original.txt", "keep")
+	for _, location := range []string{"/", "/files"} {
+		r := httptest.NewRequest(http.MethodGet, location, nil)
+		r.AddCookie(cookie)
+		w := httptest.NewRecorder()
+		newServer(cfg).Handler.ServeHTTP(w, r)
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET %s: %d, %s", location, w.Code, w.Body)
+		}
+		body := w.Body.String()
+		for _, action := range []string{"rename", "move"} {
+			button := regexp.MustCompile(`<button\b[^>]*data-file-action="` + action + `"[^>]*>`).FindString(body)
+			if button == "" || !strings.Contains(button, `type="button"`) || !strings.Contains(button, `data-path="original.txt"`) {
+				t.Errorf("%s %s must open a dialog without submitting: %q", location, action, button)
+			}
+			if strings.Contains(body, `<form method="post" action="/files" data-file-action="`+action+`"`) {
+				t.Errorf("%s still includes a prefilled %s form", location, action)
+			}
+		}
+		if location == "/" {
+			for _, markup := range []string{`<dialog id="fileActionDialog"`, `<form id="fileActionForm" method="post" action="/files"`, `id="fileActionCancel" type="button"`, `id="fileActionValue"`, `>Save</button>`} {
+				if !strings.Contains(body, markup) {
+					t.Errorf("explorer is missing edit dialog control %s", markup)
+				}
+			}
+		}
 	}
 }
 
