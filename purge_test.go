@@ -39,7 +39,7 @@ func TestPurgeRemovesUploadsAndCredentialsAndReleasesUsername(t *testing.T) {
 	if _, err := cfg.store.db.Exec(`INSERT INTO shares (token, user_id, path, is_directory, created_at) VALUES (?, ?, 'nested/kept.txt', 0, ?)`, strings.Repeat("b", 43), u.ID, time.Now().Unix()); err != nil {
 		t.Fatal(err)
 	}
-	if err := cfg.purgeUser(ctx, u.ID); err != nil {
+	if err := cfg.accounts().purge(ctx, u.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Lstat(filepath.Join(cfg.dir, u.Slug)); !errors.Is(err, os.ErrNotExist) {
@@ -62,7 +62,7 @@ func TestPurgeRemovesUploadsAndCredentialsAndReleasesUsername(t *testing.T) {
 	if err != nil || fresh.Slug != u.Slug || fresh.ID == u.ID {
 		t.Fatalf("purged username or account ID was not safely released: %#v, %v", fresh, err)
 	}
-	root, err := cfg.openUserRoot(fresh)
+	root, err := cfg.filesFor(fresh).open()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestPurgeRemovesUploadsAndCredentialsAndReleasesUsername(t *testing.T) {
 	if err != nil || len(entries) != 0 {
 		t.Fatalf("new account inherited old uploads: %v, %v", entries, err)
 	}
-	if err := cfg.purgeUser(ctx, u.ID); !errors.Is(err, errDeletedUserNotFound) {
+	if err := cfg.accounts().purge(ctx, u.ID); !errors.Is(err, errDeletedUserNotFound) {
 		t.Fatalf("repeated purge accepted an old ID: %v", err)
 	}
 	if _, err := cfg.store.createSession(ctx, u); !errors.Is(err, errInvalidCredentials) {
@@ -90,7 +90,7 @@ func TestPurgeRejectsActiveAccountsAndHandlesMissingUploads(t *testing.T) {
 			}
 			if state == "active" {
 				writeStoredFile(t, cfg, u.Slug, "kept.txt", "preserved")
-				if err := cfg.purgeUser(ctx, u.ID); !errors.Is(err, errDeletedUserNotFound) {
+				if err := cfg.accounts().purge(ctx, u.ID); !errors.Is(err, errDeletedUserNotFound) {
 					t.Fatalf("active account was purged: %v", err)
 				}
 				if _, err := cfg.store.authenticate(ctx, u.Username, testPassword); err != nil {
@@ -107,7 +107,7 @@ func TestPurgeRejectsActiveAccountsAndHandlesMissingUploads(t *testing.T) {
 			if err := cfg.store.deleteUser(ctx, u.ID, 999); err != nil {
 				t.Fatal(err)
 			}
-			if err := cfg.purgeUser(ctx, u.ID); err != nil {
+			if err := cfg.accounts().purge(ctx, u.ID); err != nil {
 				t.Fatalf("purge requires an unused upload directory: %v", err)
 			}
 			if _, err := cfg.store.createUser(ctx, u.Username, "new-account-password", false); err != nil {
@@ -140,7 +140,7 @@ func TestPurgeFailuresKeepDeletedAccountReserved(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if err := cfg.purgeUser(ctx, u.ID); err == nil {
+			if err := cfg.accounts().purge(ctx, u.ID); err == nil {
 				t.Fatal("purging ignored a failure")
 			}
 			var deleted bool
@@ -160,7 +160,7 @@ func TestPurgeFailuresKeepDeletedAccountReserved(t *testing.T) {
 				t.Fatal(err)
 			}
 			cfg.dir = directory
-			if err := cfg.purgeUser(ctx, u.ID); err != nil {
+			if err := cfg.accounts().purge(ctx, u.ID); err != nil {
 				t.Fatalf("purge could not be retried: %v", err)
 			}
 		})
@@ -185,7 +185,7 @@ func TestPurgeDoesNotFollowSymbolicLinks(t *testing.T) {
 			if err := os.Symlink(filepath.Join(cfg.dir, "test-user"), link); err != nil {
 				t.Fatal(err)
 			}
-			if err := cfg.purgeUser(context.Background(), u.ID); err != nil {
+			if err := cfg.accounts().purge(context.Background(), u.ID); err != nil {
 				t.Fatal(err)
 			}
 			if data, err := os.ReadFile(filepath.Join(cfg.dir, "test-user/kept.txt")); err != nil || string(data) != "preserved" {
@@ -208,7 +208,7 @@ func TestPurgeFileRemovalFailureCanBeRetried(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.Chmod(directory, 0o750) })
-	if err := cfg.purgeUser(ctx, u.ID); !errors.Is(err, os.ErrPermission) {
+	if err := cfg.accounts().purge(ctx, u.ID); !errors.Is(err, os.ErrPermission) {
 		t.Fatalf("purge ignored a file removal failure: %v", err)
 	}
 	if id, err := cfg.store.deletedUserIDForUsername(ctx, u.Username); err != nil || id != u.ID {
@@ -220,7 +220,7 @@ func TestPurgeFileRemovalFailureCanBeRetried(t *testing.T) {
 	if err := os.Chmod(directory, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	if err := cfg.purgeUser(ctx, u.ID); err != nil {
+	if err := cfg.accounts().purge(ctx, u.ID); err != nil {
 		t.Fatalf("retry after repairing storage failed: %v", err)
 	}
 }
@@ -235,7 +235,7 @@ func TestPurgeWaitsForUploadsAndSerializesRecycling(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitCtx, cancel := context.WithTimeout(ctx, 20*time.Millisecond)
-	err = cfg.purgeUser(waitCtx, u.ID)
+	err = cfg.accounts().purge(waitCtx, u.ID)
 	cancel()
 	unlock()
 	if !errors.Is(err, context.DeadlineExceeded) {
@@ -245,7 +245,7 @@ func TestPurgeWaitsForUploadsAndSerializesRecycling(t *testing.T) {
 		t.Fatalf("canceled purge removed uploads: %v", err)
 	}
 	results := make(chan error, 2)
-	go func() { results <- cfg.purgeUser(ctx, u.ID) }()
+	go func() { results <- cfg.accounts().purge(ctx, u.ID) }()
 	go func() {
 		_, err := cfg.store.recycleUser(ctx, u.ID, "recycled-account-password")
 		results <- err

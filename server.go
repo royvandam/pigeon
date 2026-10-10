@@ -19,6 +19,7 @@ type config struct {
 func newServer(cfg config) *http.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", cfg.handleIndex)
+	mux.HandleFunc("/assets/", cfg.handleAsset)
 	mux.HandleFunc("/upload", cfg.handleUpload)
 	mux.HandleFunc("/upload-progress", cfg.handleUploadProgress)
 	mux.HandleFunc("/files", cfg.handleFiles)

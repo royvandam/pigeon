@@ -6,8 +6,8 @@ const {test} = require('node:test');
 
 const shareHTML = fs.readFileSync(path.join(__dirname, '../templates/shares.html'), 'utf8');
 const html = fs.readFileSync(path.join(__dirname, '../templates/dialog.html'), 'utf8') + shareHTML;
-const script = html.match(/<script>\s*([\s\S]*?)<\/script>/)[1];
-const shareScript = shareHTML.match(/<script>\s*([\s\S]*?)<\/script>/)[1].replace('{{.CSRFToken}}', JSON.stringify('a'.repeat(43)));
+const script = fs.readFileSync(path.join(__dirname, '../static/dialog.js'), 'utf8');
+const shareScript = fs.readFileSync(path.join(__dirname, '../static/shares.js'), 'utf8');
 
 function page(options = {}) {
   const elements = new Map();
@@ -33,6 +33,7 @@ function page(options = {}) {
     };
   }
   for (const match of html.matchAll(/id="([^"]+)"/g)) elements.set(match[1], element(match[1]));
+  elements.get('actionDialog').dataset.csrfToken = 'a'.repeat(43);
   const document = {
     getElementById(id) { return elements.get(id); },
     createElement() { return element(null); },
@@ -139,10 +140,12 @@ test('user deletion shares confirmation handling and does not retain file fields
 });
 
 test('unsupported actions are ignored without opening or submitting the dialog', () => {
-  const p = page();
-  assert.equal(p.open('unknown').prevented, false);
-  assert.equal(p.dialog.open, undefined);
-  assert.deepEqual(p.fields(), {});
+  for (const action of ['unknown', '__proto__', 'toString']) {
+    const p = page();
+    assert.equal(p.open(action).prevented, false);
+    assert.equal(p.dialog.open, undefined);
+    assert.deepEqual(p.fields(), {});
+  }
 });
 
 test('account recycling explicitly confirms preserved uploads and resets other dialog modes', () => {

@@ -1,72 +1,16 @@
 package main
 
-import (
-	"bytes"
-	_ "embed"
-	"html/template"
-	"net/http"
-	"path/filepath"
-)
-
-//go:embed templates/index.html
-var indexHTML string
-
-//go:embed templates/files.html
-var filesHTML string
-
-//go:embed templates/dialog.html
-var dialogHTML string
-
-//go:embed templates/assets.html
-var assetsHTML string
-
-//go:embed templates/validation.html
-var validationHTML string
-
-//go:embed templates/shares.html
-var sharesHTML string
-
-var indexTmpl = template.Must(template.New("index").Parse(indexHTML + filesHTML + dialogHTML + assetsHTML + validationHTML + sharesHTML))
-var filesTmpl = indexTmpl.Lookup("fileList")
-
-//go:embed templates/login.html
-var loginHTML string
-
-//go:embed templates/admin.html
-var adminHTML string
-
-var (
-	loginTmpl = template.Must(template.New("login").Parse(loginHTML + assetsHTML + validationHTML))
-	adminTmpl = template.Must(template.New("admin").Parse(adminHTML + dialogHTML + assetsHTML + validationHTML + sharesHTML))
-)
-
-type loginPage struct {
-	CSRFToken string
-	Error     string
-}
-
-func renderTemplate(w http.ResponseWriter, tmpl *template.Template, data any, status int) {
-	var body bytes.Buffer
-	if err := tmpl.Execute(&body, data); err != nil {
-		http.Error(w, "template error", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(status)
-	w.Write(body.Bytes())
-}
+import "net/http"
 
 func (cfg config) handleIndex(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
 		return
 	}
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", http.MethodGet)
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !allowMethods(w, r, http.MethodGet) {
 		return
 	}
-	a, ok := cfg.requireAuth(w, r, false, true)
+	a, ok := cfg.requireAuth(w, r, authOptions{Browser: true})
 	if !ok {
 		return
 	}
@@ -76,20 +20,24 @@ func (cfg config) handleIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 func (cfg config) renderIndex(w http.ResponseWriter, r *http.Request, a authentication, directory, message, fileError string, status int) {
-	root, err := cfg.openUserRoot(a.User)
+	access, err := cfg.accessAccount(r.Context(), a.User)
 	if err != nil {
-		message, status := storageError(err)
-		http.Error(w, message, status)
+		writeStorageError(w, err)
+		return
+	}
+	defer access.close()
+	root, err := access.Files.open()
+	if err != nil {
+		writeStorageError(w, err)
 		return
 	}
 	defer root.Close()
 	explorer, err := readExplorer(root, directory, a.CSRFToken)
 	if err != nil {
-		message, status := storageError(err)
-		http.Error(w, message, status)
+		writeStorageError(w, err)
 		return
 	}
-	used, err := diskUsage(r.Context(), filepath.Join(cfg.dir, a.User.Slug))
+	used, err := access.Files.usage(r.Context())
 	if err != nil {
 		http.Error(w, "failed to check storage usage", http.StatusInternalServerError)
 		return
@@ -106,10 +54,10 @@ func (cfg config) renderIndex(w http.ResponseWriter, r *http.Request, a authenti
 		FileError      string
 	}{
 		explorerData:   explorer,
-		QuotaHuman:     humanBytes(a.User.QuotaBytes),
+		QuotaHuman:     humanBytes(access.QuotaBytes),
 		UsedHuman:      humanBytes(used),
-		RemainingHuman: humanBytes(remainingQuota(a.User.QuotaBytes, used)),
-		RemainingBytes: remainingQuota(a.User.QuotaBytes, used),
+		RemainingHuman: humanBytes(remainingQuota(access.QuotaBytes, used)),
+		RemainingBytes: remainingQuota(access.QuotaBytes, used),
 		Username:       a.User.Username,
 		Admin:          a.User.Admin,
 		Message:        message,

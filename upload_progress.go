@@ -111,12 +111,10 @@ func (s *store) uploadProgress(userID int64, id string) (uploadProgressSnapshot,
 
 func (cfg config) handleUploadProgress(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", http.MethodGet)
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !allowMethods(w, r, http.MethodGet) {
 		return
 	}
-	a, ok := cfg.requireAuth(w, r, false, false)
+	a, ok := cfg.requireAuth(w, r, authOptions{})
 	if !ok {
 		return
 	}

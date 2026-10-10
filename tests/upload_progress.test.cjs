@@ -6,10 +6,7 @@ const { webcrypto } = require('node:crypto');
 const { test } = require('node:test');
 
 const html = fs.readFileSync(path.join(__dirname, '../templates/index.html'), 'utf8');
-const script = html.match(/<script>\s*([\s\S]*?)<\/script>/)[1]
-  .replace('{{.RemainingBytes}}', '10000000')
-  .replace('{{.Directory}}', JSON.stringify('My folder/docs'))
-  .replace('{{.CSRFToken}}', JSON.stringify('a'.repeat(43)));
+const script = fs.readFileSync(path.join(__dirname, '../static/upload.js'), 'utf8');
 
 function page(size = 10000, options = {}) {
   let now = 0;
@@ -32,6 +29,7 @@ function page(size = 10000, options = {}) {
     Object.defineProperty(element, 'value', {get() { return value; }, set(next) { value = next; if (next === '') this.files = []; }});
     elements.set(match[1], element);
   }
+  elements.get('uploadPanel').dataset = {remainingBytes: '10000000', csrfToken: 'a'.repeat(43), directory: 'My folder/docs'};
   elements.get('directory').webkitdirectory = true;
   class XHR {
     constructor() { this.upload = {}; this.headers = {}; uploads.push(this); }

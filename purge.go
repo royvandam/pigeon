@@ -4,20 +4,17 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
-	"os"
-	"strings"
 )
 
 // Keep the account and its folder reserved until all uploads have been removed.
 // The shared lock also serializes purging with recycling and outstanding uploads.
-func (cfg config) purgeUser(ctx context.Context, id int64) error {
-	unlock, err := cfg.store.lockUploads(ctx, id)
+func (s *store) purgeUser(ctx context.Context, id int64, removeUploads func(string) error) error {
+	unlock, err := s.lockUploads(ctx, id)
 	if err != nil {
 		return err
 	}
 	defer unlock()
-	tx, err := cfg.store.db.BeginTx(ctx, nil)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -30,20 +27,8 @@ func (cfg config) purgeUser(ctx context.Context, id int64) error {
 	if err != nil {
 		return err
 	}
-	// Require one safe component, even if a stored slug was edited outside the app.
-	if err := validateStoragePath(slug, false); err != nil || strings.Contains(slug, "/") {
-		return fmt.Errorf("%w: invalid account folder", errStoragePath)
-	}
-	root, err := os.OpenRoot(cfg.dir)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err := removeUploads(slug); err != nil {
 		return err
-	}
-	if err == nil {
-		defer root.Close()
-		// RemoveAll unlinks symbolic links without following their targets.
-		if err := root.RemoveAll(slug); err != nil {
-			return err
-		}
 	}
 	// Foreign keys remove any remaining sessions and shares. AUTOINCREMENT keeps
 	// the old ID from being assigned to a new account with the same username.

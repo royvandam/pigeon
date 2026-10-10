@@ -1,10 +1,10 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
-	"net/http"
 	"os"
 	"path"
 	"path/filepath"
@@ -40,8 +40,29 @@ func nativeStoragePath(name string) string {
 	return filepath.FromSlash(name)
 }
 
-func (cfg config) openUserRoot(u user) (*os.Root, error) {
-	dir := filepath.Join(cfg.dir, u.Slug)
+// userStorage owns the filesystem operations for one account. Database and HTTP
+// code pass an identity; they never construct or remove account paths themselves.
+type userStorage struct {
+	directory string
+	slug      string
+}
+
+func (cfg config) filesFor(u user) userStorage {
+	return userStorage{directory: cfg.dir, slug: u.Slug}
+}
+
+func (files userStorage) path() (string, error) {
+	if err := validateStoragePath(files.slug, false); err != nil || strings.Contains(files.slug, "/") {
+		return "", fmt.Errorf("%w: invalid account folder", errStoragePath)
+	}
+	return filepath.Join(files.directory, files.slug), nil
+}
+
+func (files userStorage) open() (*os.Root, error) {
+	dir, err := files.path()
+	if err != nil {
+		return nil, err
+	}
 	info, err := os.Lstat(dir)
 	if errors.Is(err, os.ErrNotExist) {
 		if err := os.MkdirAll(dir, 0o750); err != nil {
@@ -53,6 +74,31 @@ func (cfg config) openUserRoot(u user) (*os.Root, error) {
 		return nil, fmt.Errorf("%w: user storage must be a directory", errStoragePath)
 	}
 	return os.OpenRoot(dir)
+}
+
+func (files userStorage) usage(ctx context.Context) (int64, error) {
+	dir, err := files.path()
+	if err != nil {
+		return 0, err
+	}
+	return diskUsage(ctx, dir)
+}
+
+func (files userStorage) purge() error {
+	if _, err := files.path(); err != nil {
+		return err
+	}
+	root, err := os.OpenRoot(files.directory)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	// Unlink symbolic links without following their targets, including a link
+	// replacing the account's root. Confine removal to the configured uploads root.
+	return root.RemoveAll(files.slug)
 }
 
 // Root confines operations to one account. Reject symbolic links in every
@@ -93,19 +139,4 @@ func requireDirectory(root *os.Root, name string) error {
 		return fmt.Errorf("%w: destination must be a folder", errFileConflict)
 	}
 	return nil
-}
-
-func storageError(err error) (string, int) {
-	switch {
-	case errors.Is(err, errStoragePath):
-		return err.Error(), http.StatusBadRequest
-	case errors.Is(err, errFileConflict), errors.Is(err, os.ErrExist):
-		return err.Error(), http.StatusConflict
-	case errors.Is(err, os.ErrNotExist):
-		return "file or folder not found", http.StatusNotFound
-	case errors.Is(err, errInvalidCredentials):
-		return "unauthorized", http.StatusUnauthorized
-	default:
-		return "unable to access files", http.StatusInternalServerError
-	}
 }

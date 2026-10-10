@@ -5,7 +5,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
-	"path/filepath"
+	"net/url"
 	"strconv"
 	"strings"
 )
@@ -44,7 +44,7 @@ func (cfg config) renderAdmin(w http.ResponseWriter, r *http.Request, a authenti
 	}
 	var rows, deletedRows []adminUser
 	for _, u := range users {
-		used, err := diskUsage(r.Context(), filepath.Join(cfg.dir, u.Slug))
+		used, err := cfg.filesFor(u).usage(r.Context())
 		if err != nil {
 			http.Error(w, "failed to check storage usage", http.StatusInternalServerError)
 			return
@@ -71,12 +71,10 @@ func (cfg config) renderAdmin(w http.ResponseWriter, r *http.Request, a authenti
 }
 
 func (cfg config) handleAdmin(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet && r.Method != http.MethodPost {
-		w.Header().Set("Allow", "GET, POST")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !allowMethods(w, r, http.MethodGet, http.MethodPost) {
 		return
 	}
-	a, ok := cfg.requireAuth(w, r, true, true)
+	a, ok := cfg.requireAuth(w, r, authOptions{Administrator: true, Browser: true})
 	if !ok {
 		return
 	}
@@ -86,80 +84,19 @@ func (cfg config) handleAdmin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var err error
-	result := ""
-	switch r.PostForm.Get("action") {
-	case "create":
-		quota := defaultUserQuota
-		if value := strings.TrimSpace(r.PostForm.Get("quota")); value != "" {
-			quota, err = parseQuota(value)
-		}
-		if err == nil {
-			passphrase, generationErr := generatePassphrase()
-			if generationErr != nil {
-				http.Error(w, "failed to generate passphrase", http.StatusInternalServerError)
-				return
-			}
-			var created user
-			created, err = cfg.store.createUserWithQuota(r.Context(), r.PostForm.Get("username"), passphrase, r.PostForm.Get("admin") == "on", quota)
-			if err == nil {
-				// Return the credential in the creation response only, without
-				// putting it in redirect URLs, cookies, or persistent state.
-				cfg.renderAdmin(w, r, a, adminPage{CreatedUser: &createdUserCredentials{
-					Username: created.Username, Passphrase: passphrase,
-				}}, http.StatusOK)
-				return
-			}
-		}
-	case "delete", "reset", "quota", "recycle", "purge":
-		id, parseErr := strconv.ParseInt(r.PostForm.Get("user_id"), 10, 64)
-		if parseErr != nil || id <= 0 {
-			http.Error(w, "invalid user ID", http.StatusBadRequest)
-			return
-		}
-		if r.PostForm.Get("action") == "purge" {
-			err = cfg.purgeUser(r.Context(), id)
-			if err != nil && !errors.Is(err, errDeletedUserNotFound) {
-				log.Printf("purge account %d: %v", id, err)
-				cfg.renderAdmin(w, r, a, adminPage{Error: "Unable to finish purging this account. Its username remains reserved. Some uploads may have been removed; resolve the storage problem and try again."}, http.StatusInternalServerError)
-				return
-			}
-			result = "purged"
-		} else if r.PostForm.Get("action") == "recycle" {
-			passphrase, generationErr := generatePassphrase()
-			if generationErr != nil {
-				http.Error(w, "failed to generate passphrase", http.StatusInternalServerError)
-				return
-			}
-			var recycled user
-			recycled, err = cfg.store.recycleUser(r.Context(), id, passphrase)
-			if err == nil {
-				cfg.renderAdmin(w, r, a, adminPage{CreatedUser: &createdUserCredentials{
-					Username: recycled.Username, Passphrase: passphrase, Recycled: true,
-				}}, http.StatusOK)
-				return
-			}
-		} else if r.PostForm.Get("action") == "delete" {
-			err = cfg.store.deleteUser(r.Context(), id, a.User.ID)
-			result = "deleted"
-		} else if r.PostForm.Get("action") == "quota" {
-			quota, parseErr := parseQuota(r.PostForm.Get("quota"))
-			err = parseErr
-			if err == nil {
-				err = cfg.store.setQuota(r.Context(), id, quota)
-			}
-			result = "quota"
-		} else {
-			err = cfg.store.resetPassword(r.Context(), id, r.PostForm.Get("password"))
-			result = "reset"
-			if err == nil && id == a.User.ID {
-				clearSessionCookie(w, r)
-				http.Redirect(w, r, "/login", http.StatusSeeOther)
-				return
-			}
-		}
-	default:
-		http.Error(w, "unknown action", http.StatusBadRequest)
+	command, err := parseAccountCommand(r.PostForm)
+	if err != nil {
+		cfg.renderAdmin(w, r, a, adminPage{Error: err.Error()}, http.StatusBadRequest)
+		return
+	}
+	change, err := cfg.accounts().apply(r.Context(), a.User, command)
+	if errors.Is(err, errPassphraseGeneration) {
+		http.Error(w, errPassphraseGeneration.Error(), http.StatusInternalServerError)
+		return
+	}
+	if command.action == "purge" && err != nil && !errors.Is(err, errDeletedUserNotFound) {
+		log.Printf("purge account %d: %v", command.id, err)
+		cfg.renderAdmin(w, r, a, adminPage{Error: "Unable to finish purging this account. Its username remains reserved. Some uploads may have been removed; resolve the storage problem and try again."}, http.StatusInternalServerError)
 		return
 	}
 	if err != nil {
@@ -177,5 +114,54 @@ func (cfg config) handleAdmin(w http.ResponseWriter, r *http.Request) {
 		cfg.renderAdmin(w, r, a, adminPage{Error: err.Error()}, http.StatusBadRequest)
 		return
 	}
-	http.Redirect(w, r, "/admin?result="+result, http.StatusSeeOther)
+	if change.Credentials != nil {
+		// Credentials appear only in this uncached response, never a redirect,
+		// cookie, or persistent page state.
+		cfg.renderAdmin(w, r, a, adminPage{CreatedUser: &createdUserCredentials{
+			Username: change.Credentials.User.Username, Passphrase: change.Credentials.Passphrase,
+			Recycled: command.action == "recycle",
+		}}, http.StatusOK)
+		return
+	}
+	if change.ActorPasswordChanged {
+		clearSessionCookie(w, r)
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	results := map[string]string{"delete": "deleted", "reset": "reset", "quota": "quota", "purge": "purged"}
+	http.Redirect(w, r, "/admin?result="+results[command.action], http.StatusSeeOther)
+}
+
+func parseAccountCommand(form url.Values) (accountCommand, error) {
+	command := accountCommand{action: form.Get("action")}
+	switch command.action {
+	case "create":
+		command.username = form.Get("username")
+		command.administrator = form.Get("admin") == "on"
+		command.quota = defaultUserQuota
+		if value := strings.TrimSpace(form.Get("quota")); value != "" {
+			quota, err := parseQuota(value)
+			if err != nil {
+				return command, err
+			}
+			command.quota = quota
+		}
+	case "delete", "reset", "quota", "recycle", "purge":
+		id, err := strconv.ParseInt(form.Get("user_id"), 10, 64)
+		if err != nil || id <= 0 {
+			return command, errors.New("invalid user ID")
+		}
+		command.id = id
+		command.password = form.Get("password")
+		if command.action == "quota" {
+			quota, err := parseQuota(form.Get("quota"))
+			if err != nil {
+				return command, err
+			}
+			command.quota = quota
+		}
+	default:
+		return command, errors.New("unknown action")
+	}
+	return command, nil
 }

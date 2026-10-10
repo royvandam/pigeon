@@ -88,12 +88,10 @@ WHERE s.token = ? AND u.deleted_at IS NULL`, token).
 func (cfg config) handleShares(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Referrer-Policy", "no-referrer")
-	if r.Method != http.MethodGet && r.Method != http.MethodPost {
-		w.Header().Set("Allow", "GET, POST")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !allowMethods(w, r, http.MethodGet, http.MethodPost) {
 		return
 	}
-	a, ok := cfg.requireAuth(w, r, false, false)
+	a, ok := cfg.requireAuth(w, r, authOptions{})
 	if !ok {
 		return
 	}
@@ -102,37 +100,29 @@ func (cfg config) handleShares(w http.ResponseWriter, r *http.Request) {
 		name = r.PostForm.Get("path")
 	}
 	if err := validateStoragePath(name, false); err != nil {
-		message, status := storageError(err)
-		http.Error(w, message, status)
+		writeStorageError(w, err)
 		return
 	}
-	unlock, err := cfg.store.lockUploads(r.Context(), a.User.ID)
+	access, err := cfg.accessAccount(r.Context(), a.User)
 	if err != nil {
-		http.Error(w, "operation canceled", http.StatusRequestTimeout)
+		writeStorageError(w, err)
 		return
 	}
-	defer unlock()
-	if _, err := cfg.store.userQuota(r.Context(), a.User); err != nil {
-		message, status := storageError(err)
-		http.Error(w, message, status)
-		return
-	}
+	defer access.close()
 	link := ""
 	if r.Method == http.MethodPost && r.PostForm.Get("action") == "revoke" {
 		// Revoking does not require the item to still exist on disk.
 		err = cfg.store.revokeShare(r.Context(), a.User.ID, name)
 	} else {
-		root, openErr := cfg.openUserRoot(a.User)
+		root, openErr := access.Files.open()
 		if openErr != nil {
-			message, status := storageError(openErr)
-			http.Error(w, message, status)
+			writeStorageError(w, openErr)
 			return
 		}
 		defer root.Close()
 		info, statErr := storageInfo(root, name)
 		if statErr != nil {
-			message, status := storageError(statErr)
-			http.Error(w, message, status)
+			writeStorageError(w, statErr)
 			return
 		}
 		if r.Method == http.MethodGet {
@@ -176,7 +166,7 @@ func (cfg config) openSharedDownload(ctx context.Context, token string) (*stored
 	if err := validateStoragePath(link.Path, false); err != nil {
 		return nil, errShareNotFound
 	}
-	root, err := cfg.openUserRoot(link.User)
+	root, err := cfg.filesFor(link.User).open()
 	if err != nil {
 		return nil, errShareNotFound
 	}
@@ -198,9 +188,7 @@ func (cfg config) handleSharedDownload(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("X-Robots-Tag", "noindex, nofollow, noarchive")
-	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		w.Header().Set("Allow", "GET, HEAD")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !allowMethods(w, r, http.MethodGet, http.MethodHead) {
 		return
 	}
 	download, err := cfg.openSharedDownload(r.Context(), r.PathValue("token"))

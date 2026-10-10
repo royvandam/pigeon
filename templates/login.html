@@ -13,7 +13,7 @@
       <p class="mt-2 text-sm text-zinc-400">Use your account to upload files.</p>
       {{if .Error}}<p role="alert" class="mt-4 rounded-lg border border-red-900 bg-red-950/40 p-3 text-sm text-red-200">{{.Error}}</p>{{end}}
       <form method="post" action="/login" class="mt-6 space-y-4">
-        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}" />
+        {{template "csrfField" .}}
         <div>
           <label for="username" class="block">Username</label>
           <input id="username" name="username" autocomplete="username" required autofocus maxlength="64" data-required-message="Enter your username."

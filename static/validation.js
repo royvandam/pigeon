@@ -1,0 +1,103 @@
+(function () {
+  const tooltip = document.getElementById('validationTooltip');
+  const message = document.getElementById('validationMessage');
+  const usesPopover = typeof tooltip.showPopover === 'function';
+  let activeInput = null;
+  let pendingInput = null;
+
+  function hide() {
+    if (activeInput) {
+      const descriptions = (activeInput.getAttribute('aria-describedby') || '').split(/\s+/)
+        .filter(id => id && id !== tooltip.id);
+      if (descriptions.length) activeInput.setAttribute('aria-describedby', descriptions.join(' '));
+      else activeInput.removeAttribute('aria-describedby');
+    }
+    if (usesPopover) tooltip.hidePopover();
+    tooltip.hidden = true;
+    message.textContent = '';
+    activeInput = null;
+  }
+
+  function position() {
+    if (!activeInput) return;
+    const rect = activeInput.getBoundingClientRect();
+    const viewport = window.visualViewport;
+    const viewLeft = viewport?.offsetLeft || 0;
+    const viewTop = viewport?.offsetTop || 0;
+    const viewRight = viewLeft + (viewport?.width || window.innerWidth);
+    const viewBottom = viewTop + (viewport?.height || window.innerHeight);
+    if (!activeInput.isConnected || rect.bottom <= viewTop || rect.top >= viewBottom || rect.right <= viewLeft || rect.left >= viewRight) {
+      hide();
+      return;
+    }
+    const margin = 12;
+    const gap = 8;
+    tooltip.style.maxWidth = 'min(20rem, ' + Math.max(0, viewRight - viewLeft - margin * 2) + 'px)';
+    const bounds = tooltip.getBoundingClientRect();
+    const above = rect.top - gap - bounds.height;
+    const placeAbove = rect.bottom + gap + bounds.height > viewBottom - margin && above >= viewTop + margin;
+    const left = Math.max(viewLeft + margin, Math.min(rect.left, viewRight - margin - bounds.width));
+    const top = Math.max(viewTop + margin, Math.min(placeAbove ? above : rect.bottom + gap, viewBottom - margin - bounds.height));
+    tooltip.style.left = left + 'px';
+    tooltip.style.top = top + 'px';
+    tooltip.dataset.placement = placeAbove ? 'above' : 'below';
+    tooltip.style.setProperty('--arrow-left', Math.max(12, Math.min(rect.left + rect.width / 2 - left - 4, bounds.width - 20)) + 'px');
+  }
+
+  function show(input) {
+    hide();
+    input.focus();
+    activeInput = input;
+    // Keep modal feedback inside the dialog's accessible subtree. Popovers
+    // escape clipping by the dialog or a horizontally scrolling users table.
+    (input.closest('dialog') || document.body).append(tooltip);
+    tooltip.hidden = false;
+    message.textContent = input.validity.valueMissing && input.dataset.requiredMessage
+      ? input.dataset.requiredMessage : input.validationMessage;
+    const descriptions = (input.getAttribute('aria-describedby') || '').split(/\s+/).filter(Boolean);
+    descriptions.push(tooltip.id);
+    input.setAttribute('aria-describedby', descriptions.join(' '));
+    if (usesPopover) tooltip.showPopover();
+    position();
+  }
+
+  // Keep HTML constraint validation and replace its native popup on every form.
+  // A validation pass can report several fields: focus and explain the first.
+  document.addEventListener('invalid', event => {
+    const input = event.target;
+    if (!input.matches('input, select, textarea')) return;
+    event.preventDefault();
+    input.setAttribute('aria-invalid', 'true');
+    if (pendingInput) return;
+    pendingInput = input;
+    setTimeout(() => {
+      const first = pendingInput;
+      pendingInput = null;
+      const dialog = first.closest('dialog');
+      if (first.isConnected && !first.disabled && !first.validity.valid && (!dialog || dialog.open)) show(first);
+    }, 0);
+  }, true);
+
+  document.addEventListener('input', event => {
+    const input = event.target;
+    if (!input.matches('input, select, textarea')) return;
+    if (input === activeInput) hide();
+    input.removeAttribute('aria-invalid');
+  });
+  document.addEventListener('focusout', event => {
+    if (event.target === activeInput) hide();
+  });
+  document.addEventListener('keydown', event => {
+    if (event.key !== 'Escape' || !activeInput) return;
+    event.preventDefault();
+    hide();
+  }, true);
+  document.addEventListener('close', event => {
+    if (activeInput && event.target.contains(activeInput)) hide();
+  }, true);
+  document.addEventListener('submit', hide, true);
+  window.addEventListener('scroll', position, true);
+  window.addEventListener('resize', position);
+  window.visualViewport?.addEventListener('resize', position);
+  window.visualViewport?.addEventListener('scroll', position);
+})();

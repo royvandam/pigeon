@@ -1,0 +1,8 @@
+{{define "csrfField"}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}" />{{end}}
+
+{{define "signOut"}}
+<form method="post" action="/logout">
+  {{template "csrfField" .}}
+  <button type="submit" class="nav-link"><i class="fa-solid fa-right-from-bracket mr-1" aria-hidden="true"></i>Sign out</button>
+</form>
+{{end}}

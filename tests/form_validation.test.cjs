@@ -4,8 +4,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const {test} = require('node:test');
 
-const html = fs.readFileSync(path.join(__dirname, '../templates/validation.html'), 'utf8');
-const script = html.match(/<script>\s*([\s\S]*?)<\/script>/)[1];
+const script = fs.readFileSync(path.join(__dirname, '../static/validation.js'), 'utf8');
 
 function page({popover = true} = {}) {
   const listeners = new Map();

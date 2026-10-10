@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"html"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"regexp"
 	"strings"
 	"testing"
@@ -34,11 +36,30 @@ func TestRoutesAndEmbeddedPage(t *testing.T) {
 				body := w.Body.String()
 				if w.Header().Get("Content-Type") != "text/html; charset=utf-8" ||
 					!strings.Contains(body, "Storage:") ||
-					!regexp.MustCompile(`let REMAINING_BYTES =\s*1024\s*;`).MatchString(body) {
+					!strings.Contains(body, `data-remaining-bytes="1024"`) ||
+					!strings.Contains(body, `src="/assets/upload.js" defer`) {
 					t.Fatalf("embedded page was not rendered correctly: %s", body)
 				}
 			}
 		})
+	}
+}
+
+func TestUploadSettingsAreEscapedAsHTMLData(t *testing.T) {
+	cfg := newTestConfig(t, 1024)
+	cookie, csrf := sessionFor(t, cfg, "Test User")
+	directory := `Quotes "' <tag> & spaces`
+	writeStoredFile(t, cfg, "test-user", directory+"/kept.txt", "kept")
+	r := httptest.NewRequest(http.MethodGet, "/?"+url.Values{"dir": {directory}}.Encode(), nil)
+	r.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	newServer(cfg).Handler.ServeHTTP(w, r)
+	match := regexp.MustCompile(`<div id="uploadPanel"[^>]*data-directory="([^"]*)"`).FindStringSubmatch(w.Body.String())
+	if w.Code != http.StatusOK || len(match) != 2 || html.UnescapeString(match[1]) != directory {
+		t.Fatalf("directory was not transported safely to browser code: status=%d, matches=%v", w.Code, match)
+	}
+	if !strings.Contains(w.Body.String(), `data-csrf-token="`+csrf+`"`) || strings.Contains(w.Body.String(), "(function ()") {
+		t.Fatal("browser settings must be escaped HTML data rather than interpolated JavaScript")
 	}
 }
 

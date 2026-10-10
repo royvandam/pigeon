@@ -255,6 +255,21 @@ application beyond a trusted local network.
 
 ## Development
 
+Account changes are coordinated by `accountManager` in `accounts.go`; the SQLite
+store owns persistence and transactions. `userStorage` owns account filesystem
+paths, usage checks, and removal. `accountAccess` locks an account and rechecks
+its identity before both reads and writes; download handles release that lock
+before streaming.
+
+HTTP handlers parse requests and render responses, using shared method,
+authentication, and error helpers. Explorer listing and file mutation rules live
+in `explorer.go` and `file_management.go`. Template loading is in `templates.go`;
+templates reuse CSRF and sign-out controls. Browser code and common styles live
+in `static/` and are embedded into the binary along with the templates.
+`ActionDialog` uses one definition per action and one controller for all dialogs.
+JavaScript tests run the same files served by the application. Rebuild and restart
+after changing templates or assets.
+
 ```sh
 go test ./...
 go test -race ./...
@@ -263,17 +278,14 @@ node --test --test-isolation=none tests/*.test.cjs
 go build -o uploader .
 ```
 
-Run and build the whole package (`.`). All pages in `templates/` are embedded in
-the binary. The browser loads Tailwind CSS and Font Awesome Free from a CDN via
-`templates/assets.html`.
-That shared template also sets fields, labels, buttons, and links to a consistent
-14px font size and 20px line height, including file picker buttons.
-`templates/dialog.html` supplies the common dialog markup and event handling for
-the explorer and user management pages. `templates/shares.html` supplies the
-sharing controls within that dialog. `templates/validation.html` replaces
-native validation popups across all forms with shared, styled tooltips that do
-not shift the layout, while keeping the browser's constraint validation and
-server-side checks.
+Run and build the whole package (`.`). The browser loads Tailwind CSS and Font
+Awesome Free from a CDN via `templates/assets.html`. `static/styles.css` sets
+fields, labels, buttons, and links to a consistent 14px font size and 20px line
+height, including file picker buttons. `templates/dialog.html` and
+`templates/shares.html` supply dialog markup; `static/dialog.js` and
+`static/shares.js` handle interaction. `static/validation.js` replaces native
+validation popups across all forms with shared, styled tooltips that do not shift
+the layout, while keeping browser constraints and server-side checks.
 
 `main.go` handles startup, `database.go` persists settings and the schema,
 `setup.go` handles first-run provisioning, `users.go` manages accounts, and
@@ -281,10 +293,10 @@ server-side checks.
 [`wordlists/README.md`](wordlists/README.md) for source and license).
 `session.go` and `auth.go` handle authentication. `admin.go`, `index.go`, and
 `upload.go` serve user management, the explorer page, and the upload endpoint.
-`files.go` lists and manages stored items, `storage.go` validates paths and confines
-access to user roots, and `download.go` serves files and ZIP archives.
-`upload_files.go` streams and publishes batches. `server.go` handles routing and
-shutdown; `quota.go` measures storage and enforces quotas. `upload_progress.go`
-tracks uploads and serves authenticated progress snapshots.
+`files.go` handles explorer requests, and `download.go` serves files and ZIP
+archives. `upload_files.go` streams and publishes batches. `server.go` handles
+routing and shutdown; `quota.go` enforces quotas, and `storage_usage.go` measures
+usage. `upload_progress.go` tracks uploads and serves authenticated progress
+snapshots.
 Size and filename helpers remain separate.
 SIGINT and SIGTERM allow active requests up to 10 seconds to finish.

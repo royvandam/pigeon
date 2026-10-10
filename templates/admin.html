@@ -15,10 +15,7 @@
       </div>
       <div class="flex items-center gap-4 text-sm">
         <a href="/" class="nav-link"><i class="fa-solid fa-folder-open mr-1" aria-hidden="true"></i>My files</a>
-        <form method="post" action="/logout">
-          <input type="hidden" name="csrf_token" value="{{.CSRFToken}}" />
-          <button type="submit" class="nav-link"><i class="fa-solid fa-right-from-bracket mr-1" aria-hidden="true"></i>Sign out</button>
-        </form>
+        {{template "signOut" .}}
       </div>
     </div>
     {{if .Error}}<p role="alert" class="mt-6 rounded-lg border border-red-900 bg-red-950/40 p-3 text-sm text-red-200">{{.Error}}</p>{{end}}
@@ -44,7 +41,7 @@
     <section class="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-6">
       <h2 class="font-semibold">Create a user</h2>
       <form method="post" action="/admin" class="mt-4 flex flex-wrap items-end gap-4">
-        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}" />
+        {{template "csrfField" .}}
         <input type="hidden" name="action" value="create" />
         <div class="flex-1">
           <label for="new-username" class="block">Username</label>
@@ -84,7 +81,7 @@
               <td class="py-4 pr-4">
                 <p class="mb-2 text-xs text-zinc-400">{{.UsedHuman}} used / {{.QuotaHuman}}</p>
                 <form method="post" action="/admin" class="flex gap-2">
-                  <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}" />
+                  {{template "csrfField" $}}
                   <input type="hidden" name="action" value="quota" />
                   <input type="hidden" name="user_id" value="{{.ID}}" />
                   <input name="quota" aria-label="Disk quota for {{.Username}}" value="{{.QuotaInput}}" required data-required-message="Enter a disk quota, such as 1GB."
@@ -94,7 +91,7 @@
               </td>
               <td class="py-4">
                 <form method="post" action="/admin" class="flex flex-wrap gap-2">
-                  <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}" />
+                  {{template "csrfField" $}}
                   <input type="hidden" name="action" value="reset" />
                   <input type="hidden" name="user_id" value="{{.ID}}" />
                   <input name="password" aria-label="New password for {{.Username}}" placeholder="New password" type="password" required minlength="8" autocomplete="new-password" data-required-message="Enter a new password."

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -8,20 +9,17 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
-	"path/filepath"
 )
 
 const multipartOverhead = int64(10 << 20)
 
 func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", http.MethodPost)
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !allowMethods(w, r, http.MethodPost) {
 		return
 	}
 
 	// Authenticate and check the session CSRF header before touching the body.
-	a, ok := cfg.requireAuth(w, r, false, false)
+	a, ok := cfg.requireAuth(w, r, authOptions{})
 	if !ok {
 		return
 	}
@@ -50,31 +48,33 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer progress.fail()
 
-	unlock, err := cfg.store.lockUploads(r.Context(), a.User.ID)
-	if err != nil {
-		http.Error(w, "upload canceled", http.StatusRequestTimeout)
-		return
-	}
-	defer unlock()
-	progress.setState("preparing")
-	quota, err := cfg.store.userQuota(r.Context(), a.User)
+	access, err := cfg.accessAccount(r.Context(), a.User)
 	if err != nil {
 		if errors.Is(err, errInvalidCredentials) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		} else if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			http.Error(w, "upload canceled", http.StatusRequestTimeout)
 		} else {
 			http.Error(w, "failed to load disk quota", http.StatusInternalServerError)
 		}
 		return
 	}
-	dir := filepath.Join(cfg.dir, a.User.Slug)
-	root, err := cfg.openUserRoot(a.User)
+	defer access.close()
+	progress.setState("preparing")
+	quota := access.QuotaBytes
+	files := access.Files
+	dir, err := files.path()
 	if err != nil {
-		message, status := storageError(err)
-		http.Error(w, message, status)
+		writeStorageError(w, err)
+		return
+	}
+	root, err := files.open()
+	if err != nil {
+		writeStorageError(w, err)
 		return
 	}
 	root.Close()
-	used, err := diskUsage(r.Context(), dir)
+	used, err := files.usage(r.Context())
 	if err != nil {
 		http.Error(w, "failed to check storage usage", http.StatusInternalServerError)
 		return
@@ -90,8 +90,7 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 	mr := multipart.NewReader(r.Body, boundary)
 	batch, err := newUploadBatch(dir, r.URL.Query().Get("dir"))
 	if err != nil {
-		message, status := storageError(err)
-		http.Error(w, message, status)
+		writeStorageError(w, err)
 		return
 	}
 	defer batch.close()
@@ -126,8 +125,7 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 		}
 		name := disposition["filename"]
 		if err := batch.checkPath(name); err != nil {
-			message, status := storageError(err)
-			http.Error(w, message, status)
+			writeStorageError(w, err)
 			return
 		}
 		if err := batch.add(name, part, remaining-batch.bytes); err != nil {
@@ -157,8 +155,7 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 	progress.setState("finalizing")
 	savedName, group, err := batch.publish()
 	if err != nil {
-		message, status := storageError(err)
-		http.Error(w, message, status)
+		writeStorageError(w, err)
 		return
 	}
 	progress.setState("complete")

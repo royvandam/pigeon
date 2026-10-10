@@ -51,13 +51,18 @@ func (cfg config) requestAuthentication(r *http.Request) (authentication, error)
 	return cfg.store.session(r.Context(), cookie.Value)
 }
 
-func (cfg config) requireAuth(w http.ResponseWriter, r *http.Request, admin, browser bool) (authentication, bool) {
+type authOptions struct {
+	Administrator bool
+	Browser       bool
+}
+
+func (cfg config) requireAuth(w http.ResponseWriter, r *http.Request, options authOptions) (authentication, bool) {
 	a, err := cfg.requestAuthentication(r)
 	if err != nil {
 		if !errors.Is(err, errInvalidCredentials) {
 			log.Printf("authenticate: %v", err)
 			http.Error(w, "authentication unavailable", http.StatusInternalServerError)
-		} else if browser {
+		} else if options.Browser {
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
 		} else {
 			w.Header().Set("WWW-Authenticate", `Basic realm="Upload", charset="UTF-8"`)
@@ -65,8 +70,8 @@ func (cfg config) requireAuth(w http.ResponseWriter, r *http.Request, admin, bro
 		}
 		return authentication{}, false
 	}
-	if admin && !a.User.Admin {
-		http.Error(w, "administrator access required", http.StatusForbidden)
+	if options.Administrator && !a.User.Admin {
+		http.Error(w, errAdministratorRequired.Error(), http.StatusForbidden)
 		return authentication{}, false
 	}
 	if r.Method == http.MethodPost {
@@ -106,6 +111,9 @@ func clearSessionCookie(w http.ResponseWriter, r *http.Request) {
 
 func (cfg config) handleLogin(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
+	if !allowMethods(w, r, http.MethodGet, http.MethodPost) {
+		return
+	}
 	switch r.Method {
 	case http.MethodGet:
 		if _, err := cfg.requestAuthentication(r); err == nil {
@@ -151,19 +159,14 @@ func (cfg config) handleLogin(w http.ResponseWriter, r *http.Request) {
 		http.SetCookie(w, &http.Cookie{Name: loginCookieName, Path: "/login", MaxAge: -1,
 			HttpOnly: true, Secure: r.TLS != nil, SameSite: http.SameSiteStrictMode})
 		http.Redirect(w, r, "/", http.StatusSeeOther)
-	default:
-		w.Header().Set("Allow", "GET, POST")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
 }
 
 func (cfg config) handleLogout(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", http.MethodPost)
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !allowMethods(w, r, http.MethodPost) {
 		return
 	}
-	a, ok := cfg.requireAuth(w, r, false, true)
+	a, ok := cfg.requireAuth(w, r, authOptions{Browser: true})
 	if !ok {
 		return
 	}

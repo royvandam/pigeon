@@ -2,6 +2,7 @@ package main
 
 import (
 	"archive/zip"
+	"context"
 	"fmt"
 	"io"
 	"io/fs"
@@ -16,31 +17,35 @@ import (
 
 func (cfg config) handleDownload(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		w.Header().Set("Allow", "GET, HEAD")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !allowMethods(w, r, http.MethodGet, http.MethodHead) {
 		return
 	}
-	a, ok := cfg.requireAuth(w, r, false, false)
+	a, ok := cfg.requireAuth(w, r, authOptions{})
 	if !ok {
 		return
 	}
-	root, err := cfg.openUserRoot(a.User)
+	download, err := cfg.openPrivateDownload(r.Context(), a.User, r.URL.Query().Get("path"))
 	if err != nil {
-		message, status := storageError(err)
-		http.Error(w, message, status)
-		return
-	}
-	defer root.Close()
-	name := r.URL.Query().Get("path")
-	download, err := openStoredDownload(root, name, a.User.Slug)
-	if err != nil {
-		message, status := storageError(err)
-		http.Error(w, message, status)
+		writeStorageError(w, err)
 		return
 	}
 	defer download.Close()
 	download.ServeHTTP(w, r)
+}
+
+func (cfg config) openPrivateDownload(ctx context.Context, u user, name string) (*storedDownload, error) {
+	access, err := cfg.accessAccount(ctx, u)
+	if err != nil {
+		return nil, err
+	}
+	defer access.close()
+	root, err := access.Files.open()
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	// The download retains its own handle; release account access before streaming.
+	return openStoredDownload(root, name, u.Slug)
 }
 
 type storedDownload struct {
@@ -99,7 +104,7 @@ func (d *storedDownload) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/zip")
 		w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": d.filename + ".zip"}))
 		if r.Method != http.MethodHead {
-			if err := writeFolderZip(w, r, d.folder, d.filename); err != nil {
+			if err := writeFolderZip(r.Context(), w, d.folder, d.filename); err != nil {
 				log.Printf("folder download failed: %v", err)
 			}
 		}
@@ -110,13 +115,13 @@ func (d *storedDownload) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, d.filename, d.info.ModTime(), d.file)
 }
 
-func writeFolderZip(w io.Writer, r *http.Request, root *os.Root, prefix string) error {
+func writeFolderZip(ctx context.Context, w io.Writer, root *os.Root, prefix string) error {
 	archive := zip.NewWriter(w)
 	err := fs.WalkDir(root.FS(), ".", func(name string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if err := r.Context().Err(); err != nil {
+		if err := ctx.Err(); err != nil {
 			return err
 		}
 		if strings.HasPrefix(entry.Name(), stagingPrefix) {

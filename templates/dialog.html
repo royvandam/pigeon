@@ -1,9 +1,9 @@
 {{define "actionDialog"}}
-<dialog id="actionDialog" aria-labelledby="actionDialogTitle" aria-describedby="actionDialogDescription" class="m-auto w-full max-w-md rounded-2xl border border-zinc-700 bg-zinc-900 p-6 text-zinc-100 shadow-xl backdrop:bg-black/70">
+<dialog id="actionDialog" data-csrf-token="{{.CSRFToken}}" aria-labelledby="actionDialogTitle" aria-describedby="actionDialogDescription" class="m-auto w-full max-w-md rounded-2xl border border-zinc-700 bg-zinc-900 p-6 text-zinc-100 shadow-xl backdrop:bg-black/70">
   <form id="actionDialogForm" method="post" action="">
     <h2 id="actionDialogTitle" class="text-lg font-semibold">Confirm action</h2>
     <p id="actionDialogDescription" hidden class="mt-3 text-sm text-zinc-300"></p>
-    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}" />
+    {{template "csrfField" .}}
     <div id="actionDialogFields"></div>
     <div id="actionDialogInputGroup">
       <label id="actionDialogLabel" for="actionDialogValue" class="mt-4 block text-zinc-300">New name</label>
@@ -18,93 +18,6 @@
   </form>
 </dialog>
 
-<script>
-(function () {
-  const dialog = document.getElementById('actionDialog');
-  const form = document.getElementById('actionDialogForm');
-  const fields = document.getElementById('actionDialogFields');
-  const input = document.getElementById('actionDialogValue');
-  const cancel = document.getElementById('actionDialogCancel');
-  const confirmButton = document.getElementById('actionDialogConfirm');
-  const sharePanel = document.getElementById('shareControls');
-
-  // Delegate to the document so refreshed file lists use the same dialog.
-  document.addEventListener('click', event => {
-    const button = event.target.closest('button[data-dialog-action]');
-    if (!button) return;
-    const action = button.dataset.dialogAction;
-    if (!['rename', 'move', 'delete-file', 'delete-user', 'recycle-user', 'purge-user', 'share'].includes(action)) return;
-    event.preventDefault();
-
-    const renaming = action === 'rename';
-    const sharing = action === 'share';
-    const deletingUser = action === 'delete-user';
-    const recyclingUser = action === 'recycle-user';
-    const purgingUser = action === 'purge-user';
-    const managingUser = deletingUser || recyclingUser || purgingUser;
-    const deleting = action === 'delete-file' || deletingUser || purgingUser;
-    const confirming = deleting || recyclingUser;
-    const name = button.dataset.name;
-    const verb = sharing ? 'Share' : (purgingUser ? 'Purge account' : (recyclingUser ? 'Recycle account' : (deletingUser ? 'Delete user' : (deleting ? 'Delete' : (renaming ? 'Rename' : 'Move')))));
-    document.getElementById('actionDialogTitle').textContent = verb + ' "' + name + '"' + (confirming ? '?' : '');
-    const description = document.getElementById('actionDialogDescription');
-    description.hidden = !confirming && !sharing;
-    description.textContent = sharing
-      ? 'Anyone with the link can download ' + (button.dataset.directory === 'true' ? 'this folder as a ZIP, including files added later.' : 'this file.') + ' Links stay active until revoked or the item is renamed, moved, or deleted.'
-      : recyclingUser
-      ? 'A new passphrase will be generated. This account will regain access to its preserved uploads with its existing role (' + button.dataset.role + ') and quota (' + button.dataset.quota + '). Previous passwords, sessions, and share links will remain revoked.'
-      : purgingUser
-      ? 'This permanently deletes the account and all its uploaded files and folders. The username and upload folder will become available for a new account. This cannot be undone.'
-      : !deleting ? '' : deletingUser
-      ? 'The user will lose access. Their uploads will be preserved and their username and folder will remain reserved.'
-      : (button.dataset.directory === 'true' ? 'This permanently deletes the folder and everything inside it.' : 'This permanently deletes the file.');
-
-    // Set attributes directly: the hidden input named "action" can shadow
-    // the form's action property in the DOM.
-    form.setAttribute('action', sharing ? '/shares' : (managingUser ? '/admin' : '/files'));
-    fields.replaceChildren();
-    const values = sharing ? {} : managingUser
-      ? {action: recyclingUser ? 'recycle' : (purgingUser ? 'purge' : 'delete'), user_id: button.dataset.userId}
-      : {action: deleting ? 'delete' : action, path: button.dataset.path, dir: button.dataset.dir || ''};
-    for (const [name, value] of Object.entries(values)) {
-      const field = document.createElement('input');
-      field.type = 'hidden';
-      field.name = name;
-      field.value = value;
-      fields.append(field);
-    }
-
-    document.getElementById('actionDialogInputGroup').hidden = confirming || sharing;
-    document.getElementById('actionDialogLabel').textContent = renaming ? 'New name' : 'Destination folder';
-    document.getElementById('actionDialogHelp').hidden = action !== 'move';
-    if (action === 'move') input.setAttribute('aria-describedby', 'actionDialogHelp');
-    else input.removeAttribute('aria-describedby');
-    input.disabled = confirming || sharing;
-    input.required = renaming;
-    input.name = renaming ? 'name' : 'destination';
-    input.maxLength = renaming ? 255 : 4095;
-    input.value = confirming || sharing ? '' : (renaming ? name : button.dataset.dir || '');
-    input.dispatchEvent(new Event('input', {bubbles: true}));
-    document.getElementById('actionDialogConfirmLabel').textContent = purgingUser ? 'Purge account' : (recyclingUser ? 'Recycle account' : (deleting ? 'Delete' : 'Save'));
-    document.getElementById('actionDialogConfirmIcon').className = 'fa-solid ' + (recyclingUser ? 'fa-recycle' : (deleting ? 'fa-trash-can' : 'fa-check')) + ' mr-1';
-    confirmButton.dataset.danger = String(deleting);
-    confirmButton.hidden = confirmButton.disabled = sharing;
-    sharePanel.hidden = !sharing;
-    document.getElementById('actionDialogCancelLabel').textContent = sharing ? 'Close' : 'Cancel';
-    dialog.showModal();
-    if (sharing) dialog.dispatchEvent(new CustomEvent('share', {detail: {path: button.dataset.path}}));
-    if (confirming || sharing) {
-      cancel.focus();
-    } else {
-      input.focus();
-      input.select();
-    }
-  });
-  form.addEventListener('submit', event => {
-    if (!sharePanel.hidden) event.preventDefault();
-  });
-  cancel.addEventListener('click', () => dialog.close());
-})();
-</script>
+<script src="/assets/dialog.js" defer></script>
 {{template "shareScript" .}}
 {{end}}
