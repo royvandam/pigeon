@@ -145,6 +145,34 @@ test('unsupported actions are ignored without opening or submitting the dialog',
   assert.deepEqual(p.fields(), {});
 });
 
+test('account recycling explicitly confirms preserved uploads and resets other dialog modes', () => {
+  const p = page();
+  p.open('move');
+  p.cancel();
+  assert.equal(p.open('recycle-user', {name: 'Alice', userId: '42', role: 'User', quota: '2.00 GB'}).prevented, true);
+  assert.equal(p.dialog.open, true);
+  assert.equal(p.form.attributes.action, '/admin');
+  assert.deepEqual(p.fields(), {action: 'recycle', user_id: '42'});
+  assert.equal(p.elements.get('actionDialogTitle').textContent, 'Recycle account "Alice"?');
+  assert.match(p.elements.get('actionDialogDescription').textContent, /preserved uploads/);
+  assert.match(p.elements.get('actionDialogDescription').textContent, /role \(User\) and quota \(2.00 GB\)/);
+  assert.match(p.elements.get('actionDialogDescription').textContent, /sessions, and share links will remain revoked/);
+  assert.equal(p.input.disabled, true);
+  assert.equal(p.input.required, false);
+  assert.equal(p.elements.get('actionDialogInputGroup').hidden, true);
+  assert.equal(p.elements.get('actionDialogConfirmLabel').textContent, 'Recycle account');
+  assert.equal(p.elements.get('actionDialogConfirm').dataset.danger, 'false');
+  assert.equal(p.focused(), 'actionDialogCancel');
+  assert.equal(p.requests.length, 0);
+  p.cancel();
+  assert.equal(p.dialog.open, false);
+  p.open('rename');
+  assert.equal(p.form.attributes.action, '/files');
+  assert.equal(p.input.disabled, false);
+  assert.equal(p.input.required, true);
+  assert.equal(p.elements.get('actionDialogConfirmLabel').textContent, 'Save');
+});
+
 test('sharing explicitly creates, copies and revokes a link in the existing dialog', async () => {
   const p = page();
   assert.equal(p.open('share').prevented, true);

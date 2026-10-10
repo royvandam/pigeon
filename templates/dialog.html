@@ -33,30 +33,35 @@
     const button = event.target.closest('button[data-dialog-action]');
     if (!button) return;
     const action = button.dataset.dialogAction;
-    if (!['rename', 'move', 'delete-file', 'delete-user', 'share'].includes(action)) return;
+    if (!['rename', 'move', 'delete-file', 'delete-user', 'recycle-user', 'share'].includes(action)) return;
     event.preventDefault();
 
     const renaming = action === 'rename';
     const sharing = action === 'share';
     const deletingUser = action === 'delete-user';
+    const recyclingUser = action === 'recycle-user';
+    const managingUser = deletingUser || recyclingUser;
     const deleting = action === 'delete-file' || deletingUser;
+    const confirming = deleting || recyclingUser;
     const name = button.dataset.name;
-    const verb = sharing ? 'Share' : (deletingUser ? 'Delete user' : (deleting ? 'Delete' : (renaming ? 'Rename' : 'Move')));
-    document.getElementById('actionDialogTitle').textContent = verb + ' "' + name + '"' + (deleting ? '?' : '');
+    const verb = sharing ? 'Share' : (recyclingUser ? 'Recycle account' : (deletingUser ? 'Delete user' : (deleting ? 'Delete' : (renaming ? 'Rename' : 'Move'))));
+    document.getElementById('actionDialogTitle').textContent = verb + ' "' + name + '"' + (confirming ? '?' : '');
     const description = document.getElementById('actionDialogDescription');
-    description.hidden = !deleting && !sharing;
+    description.hidden = !confirming && !sharing;
     description.textContent = sharing
       ? 'Anyone with the link can download ' + (button.dataset.directory === 'true' ? 'this folder as a ZIP, including files added later.' : 'this file.') + ' Links stay active until revoked or the item is renamed, moved, or deleted.'
+      : recyclingUser
+      ? 'A new passphrase will be generated. This account will regain access to its preserved uploads with its existing role (' + button.dataset.role + ') and quota (' + button.dataset.quota + '). Previous passwords, sessions, and share links will remain revoked.'
       : !deleting ? '' : deletingUser
       ? 'The user will lose access. Their uploads will be preserved and their username and folder will remain reserved.'
       : (button.dataset.directory === 'true' ? 'This permanently deletes the folder and everything inside it.' : 'This permanently deletes the file.');
 
     // Set attributes directly: the hidden input named "action" can shadow
     // the form's action property in the DOM.
-    form.setAttribute('action', sharing ? '/shares' : (deletingUser ? '/admin' : '/files'));
+    form.setAttribute('action', sharing ? '/shares' : (managingUser ? '/admin' : '/files'));
     fields.replaceChildren();
-    const values = sharing ? {} : deletingUser
-      ? {action: 'delete', user_id: button.dataset.userId}
+    const values = sharing ? {} : managingUser
+      ? {action: recyclingUser ? 'recycle' : 'delete', user_id: button.dataset.userId}
       : {action: deleting ? 'delete' : action, path: button.dataset.path, dir: button.dataset.dir || ''};
     for (const [name, value] of Object.entries(values)) {
       const field = document.createElement('input');
@@ -66,26 +71,26 @@
       fields.append(field);
     }
 
-    document.getElementById('actionDialogInputGroup').hidden = deleting || sharing;
+    document.getElementById('actionDialogInputGroup').hidden = confirming || sharing;
     document.getElementById('actionDialogLabel').textContent = renaming ? 'New name' : 'Destination folder';
     document.getElementById('actionDialogHelp').hidden = action !== 'move';
     if (action === 'move') input.setAttribute('aria-describedby', 'actionDialogHelp');
     else input.removeAttribute('aria-describedby');
-    input.disabled = deleting || sharing;
+    input.disabled = confirming || sharing;
     input.required = renaming;
     input.name = renaming ? 'name' : 'destination';
     input.maxLength = renaming ? 255 : 4095;
-    input.value = deleting || sharing ? '' : (renaming ? name : button.dataset.dir || '');
+    input.value = confirming || sharing ? '' : (renaming ? name : button.dataset.dir || '');
     input.dispatchEvent(new Event('input', {bubbles: true}));
-    document.getElementById('actionDialogConfirmLabel').textContent = deleting ? 'Delete' : 'Save';
-    document.getElementById('actionDialogConfirmIcon').className = 'fa-solid ' + (deleting ? 'fa-trash-can' : 'fa-check') + ' mr-1';
+    document.getElementById('actionDialogConfirmLabel').textContent = recyclingUser ? 'Recycle account' : (deleting ? 'Delete' : 'Save');
+    document.getElementById('actionDialogConfirmIcon').className = 'fa-solid ' + (recyclingUser ? 'fa-recycle' : (deleting ? 'fa-trash-can' : 'fa-check')) + ' mr-1';
     confirmButton.dataset.danger = String(deleting);
     confirmButton.hidden = confirmButton.disabled = sharing;
     sharePanel.hidden = !sharing;
     document.getElementById('actionDialogCancelLabel').textContent = sharing ? 'Close' : 'Cancel';
     dialog.showModal();
     if (sharing) dialog.dispatchEvent(new CustomEvent('share', {detail: {path: button.dataset.path}}));
-    if (deleting || sharing) {
+    if (confirming || sharing) {
       cancel.focus();
     } else {
       input.focus();

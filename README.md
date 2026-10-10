@@ -25,6 +25,11 @@ passphrase, separated by hyphens, and shows it to the administrator on the
 creation result page. Copy it before leaving that page; it cannot be retrieved
 later. Only its bcrypt hash is stored. User deletion uses the same confirmation
 dialog as file deletion and preserves the user's uploaded files.
+Deleted accounts appear under **Deleted users**. **Recycle account** asks for
+confirmation, restores the account's role, quota, and uploaded files, and
+displays a fresh four-word passphrase. Old passwords, sessions, and share links
+remain invalid. Creating a user with a deleted account's username or normalized
+folder name offers this recycling action instead of just reporting a conflict.
 Regular users can manage their own files but cannot access user management. An administrator
 cannot delete their own account or the last administrator. Resetting a password
 signs that user out on every device; resetting your own password returns you to
@@ -141,7 +146,9 @@ username or normalized folder name is already reserved.
 Deleting an account disables access immediately and invalidates its sessions and
 share links.
 Its files remain on disk, and a small deleted account record reserves its
-username and folder so a future account cannot inherit those uploads. Files
+username and folder until an administrator explicitly recycles that account.
+Recycling preserves the account's identity and files while issuing a new
+passphrase; it does not reactivate previous sessions or public links. Files
 uploaded by the previous shared-password implementation remain in the upload
 root; they are not automatically assigned to an account.
 

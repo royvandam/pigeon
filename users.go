@@ -18,11 +18,12 @@ import (
 )
 
 var (
-	errInvalidCredentials = errors.New("invalid username or password")
-	errUserConflict       = errors.New("username or upload folder is already reserved")
-	errUserNotFound       = errors.New("user not found")
-	errDeleteSelf         = errors.New("you cannot delete your own account")
-	errLastAdmin          = errors.New("the last administrator cannot be deleted")
+	errInvalidCredentials  = errors.New("invalid username or password")
+	errUserConflict        = errors.New("username or upload folder is already reserved")
+	errUserNotFound        = errors.New("user not found")
+	errDeleteSelf          = errors.New("you cannot delete your own account")
+	errLastAdmin           = errors.New("the last administrator cannot be deleted")
+	errDeletedUserNotFound = errors.New("deleted account not found; it may already have been recycled")
 )
 
 type user struct {
@@ -32,6 +33,7 @@ type user struct {
 	Admin      bool
 	Version    int64
 	QuotaBytes int64
+	Deleted    bool
 }
 
 // Username keys are case-insensitive; slugs also remove accents and separators.
@@ -145,7 +147,15 @@ func (s *store) authenticate(ctx context.Context, username, password string) (us
 }
 
 func (s *store) listUsers(ctx context.Context) ([]user, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, username, slug, is_admin, quota_bytes FROM users WHERE deleted_at IS NULL ORDER BY username_key`)
+	return s.readUsers(ctx, false)
+}
+
+func (s *store) listAdminUsers(ctx context.Context) ([]user, error) {
+	return s.readUsers(ctx, true)
+}
+
+func (s *store) readUsers(ctx context.Context, includeDeleted bool) ([]user, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, username, slug, is_admin, auth_version, quota_bytes, deleted_at IS NOT NULL FROM users WHERE deleted_at IS NULL OR ? ORDER BY username_key`, includeDeleted)
 	if err != nil {
 		return nil, err
 	}
@@ -153,12 +163,61 @@ func (s *store) listUsers(ctx context.Context) ([]user, error) {
 	var users []user
 	for rows.Next() {
 		var u user
-		if err := rows.Scan(&u.ID, &u.Username, &u.Slug, &u.Admin, &u.QuotaBytes); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.Slug, &u.Admin, &u.Version, &u.QuotaBytes, &u.Deleted); err != nil {
 			return nil, err
 		}
 		users = append(users, u)
 	}
 	return users, rows.Err()
+}
+
+func (s *store) deletedUserIDForUsername(ctx context.Context, username string) (int64, error) {
+	_, _, slug, err := normalizeUsername(username)
+	if err != nil {
+		return 0, err
+	}
+	var id int64
+	err = s.db.QueryRowContext(ctx, `SELECT id FROM users WHERE slug = ? AND deleted_at IS NOT NULL`, slug).Scan(&id)
+	return id, err
+}
+
+func (s *store) recycleUser(ctx context.Context, id int64, password string) (user, error) {
+	hash, err := hashPassword(password)
+	if err != nil {
+		return user{}, err
+	}
+	// Finish any work started before deletion before restoring this account.
+	unlock, err := s.lockUploads(ctx, id)
+	if err != nil {
+		return user{}, err
+	}
+	defer unlock()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return user{}, err
+	}
+	defer tx.Rollback()
+	var u user
+	err = tx.QueryRowContext(ctx, `
+UPDATE users SET password_hash = ?, auth_version = auth_version + 1, deleted_at = NULL
+WHERE id = ? AND deleted_at IS NOT NULL
+RETURNING id, username, slug, is_admin, auth_version, quota_bytes`, hash, id).
+		Scan(&u.ID, &u.Username, &u.Slug, &u.Admin, &u.Version, &u.QuotaBytes)
+	if errors.Is(err, sql.ErrNoRows) {
+		return user{}, errDeletedUserNotFound
+	}
+	if err != nil {
+		return user{}, err
+	}
+	for _, query := range []string{`DELETE FROM sessions WHERE user_id = ?`, `DELETE FROM shares WHERE user_id = ?`} {
+		if _, err := tx.ExecContext(ctx, query, id); err != nil {
+			return user{}, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return user{}, err
+	}
+	return u, nil
 }
 
 func (s *store) resetPassword(ctx context.Context, id int64, password string) error {
