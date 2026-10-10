@@ -39,6 +39,16 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing multipart boundary", http.StatusBadRequest)
 		return
 	}
+	progress, err := cfg.store.beginUploadProgress(a.User.ID, r.Header.Get("X-Upload-ID"))
+	if err != nil {
+		status := http.StatusConflict
+		if !uploadIDPattern.MatchString(r.Header.Get("X-Upload-ID")) {
+			status = http.StatusBadRequest
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+	defer progress.fail()
 
 	unlock, err := cfg.store.lockUploads(r.Context(), a.User.ID)
 	if err != nil {
@@ -46,6 +56,7 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer unlock()
+	progress.setState("preparing")
 	quota, err := cfg.store.userQuota(r.Context(), a.User)
 	if err != nil {
 		if errors.Is(err, errInvalidCredentials) {
@@ -81,6 +92,8 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer batch.close()
+	batch.progress = progress
+	progress.setState("uploading")
 
 	for {
 		part, err := mr.NextPart()
@@ -137,11 +150,13 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "upload canceled", http.StatusRequestTimeout)
 		return
 	}
+	progress.setState("finalizing")
 	savedName, group, err := batch.publish()
 	if err != nil {
 		http.Error(w, "failed to save upload", http.StatusInternalServerError)
 		return
 	}
+	progress.setState("complete")
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	setQuotaHeaders(w, quota, used+batch.bytes)

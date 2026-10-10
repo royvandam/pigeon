@@ -6,5 +6,6 @@ pkgs.mkShell {
     gopls
     gotools
     sqlite
+    nodejs
   ];
 }

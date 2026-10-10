@@ -22,6 +22,7 @@ type uploadBatch struct {
 	firstPath string
 	files     int
 	bytes     int64
+	progress  *uploadProgress
 }
 
 func newUploadBatch(dir string) (*uploadBatch, error) {
@@ -76,7 +77,7 @@ func (b *uploadBatch) add(name string, contents io.Reader, remaining int64) erro
 	// Never write the byte used to detect an overflow, even when earlier files
 	// in this batch have consumed all of the remaining quota.
 	limited := &io.LimitedReader{R: contents, N: remaining}
-	n, copyErr := io.Copy(out, limited)
+	n, copyErr := io.Copy(uploadProgressWriter{Writer: out, progress: b.progress}, limited)
 	if copyErr == nil && limited.N == 0 {
 		var extra [1]byte
 		_, probeErr := io.ReadFull(contents, extra[:])

@@ -17,6 +17,7 @@ import (
 type store struct {
 	db          *sql.DB
 	uploadLocks sync.Map
+	progress    sync.Map
 }
 
 type settings struct {

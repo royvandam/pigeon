@@ -4,7 +4,8 @@ A Go HTTP server with individual user accounts, an administrator management page
 and streaming uploads stored in a separate folder for each user.
 
 Enter the development environment with `nix-shell`. It provides Go 1.26, `gopls`,
-`goimports`, and the SQLite CLI. Go 1.26 or newer also works without Nix.
+`goimports`, the SQLite CLI, and Node.js for upload-page tests. Go 1.26 or newer
+also works without Nix.
 
 ```sh
 go run . -listen 127.0.0.1:8080
@@ -44,6 +45,13 @@ The combined file size must fit the user's remaining quota. Each batch is
 streamed to a temporary directory and published only after the entire request
 succeeds. Invalid paths, duplicate paths, interrupted requests, or quota failures
 remove the whole temporary batch and preserve earlier uploads.
+
+Upload progress follows file bytes processed by the server, including when a
+proxy buffers the browser's request. The bar reaches 100% only after the server
+confirms a successful upload. Speed and the approximate time remaining use a
+rolling five-second window of server progress, excluding multipart overhead.
+Queued uploads and storage checks show their current phase; final saving shows
+**Finishing…** until confirmed. A stalled transfer stops reporting a countdown.
 
 ## Configuration
 
@@ -124,6 +132,16 @@ saved. Paths must be relative, use `/` separators, and contain no empty, `.` or
 `..` components, backslashes, Windows drive prefixes, or control characters. File and directory
 components may contain at most 255 bytes; full paths at most 4095 bytes. Duplicate
 paths and file/directory conflicts return HTTP 400 without saving any of the batch.
+
+To track progress, send a unique `X-Upload-ID` header (16–64 ASCII letters, digits,
+underscores, or hyphens) with the upload, then poll
+`GET /upload-progress?id=<upload-id>` with the same account's authentication.
+The JSON response has `bytes_received` (file bytes written so far) and `state`
+(`queued`, `preparing`, `uploading`, `finalizing`, `complete`, or `failed`).
+Progress records are held in memory and expire five minutes after completion or
+failure; other users cannot read them. Reusing an existing ID returns HTTP 409.
+The header is optional for clients that do not need progress.
+
 The shared `-password` flag and `X-Upload-Password` header have been removed.
 
 The browser uses an HttpOnly session cookie valid for 12 hours. Forms require
@@ -137,6 +155,7 @@ application beyond a trusted local network.
 go test ./...
 go test -race ./...
 go vet ./...
+node --test --test-isolation=none tests/*.test.cjs
 go build -o uploader .
 ```
 
@@ -148,6 +167,7 @@ the binary. The browser loads Tailwind CSS from a CDN.
 `session.go` and `auth.go` handle authentication. `admin.go`, `index.go`, and
 `upload.go` serve the management, upload page, and upload endpoint.
 `upload_files.go` streams and publishes batches. `server.go` handles routing and
-shutdown; `quota.go` measures storage and enforces quotas.
+shutdown; `quota.go` measures storage and enforces quotas. `upload_progress.go`
+tracks uploads and serves authenticated progress snapshots.
 Size and filename helpers remain separate.
 SIGINT and SIGTERM allow active requests up to 10 seconds to finish.

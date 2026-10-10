@@ -86,12 +86,12 @@
           </div>
 
           <div class="mt-2">
-            <div class="h-2 w-full overflow-hidden rounded-full bg-zinc-800">
+            <div id="progress" role="progressbar" aria-label="Upload progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" class="h-2 w-full overflow-hidden rounded-full bg-zinc-800">
               <div id="bar" class="h-2 w-0 rounded-full bg-zinc-200 transition-[width]"></div>
             </div>
           </div>
 
-          <div class="mt-3 grid grid-cols-3 gap-3 text-xs">
+          <div class="mt-3 grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
             <div class="rounded-lg border border-zinc-800 bg-zinc-950/30 p-2">
               <div class="text-zinc-500">Speed</div>
               <div class="mt-1 font-mono text-zinc-200" id="spd">0 B/s</div>
@@ -103,6 +103,10 @@
             <div class="rounded-lg border border-zinc-800 bg-zinc-950/30 p-2">
               <div class="text-zinc-500">Total</div>
               <div class="mt-1 font-mono text-zinc-200"><span id="tot">0 B</span></div>
+            </div>
+            <div class="rounded-lg border border-zinc-800 bg-zinc-950/30 p-2">
+              <div class="text-zinc-500">Time remaining</div>
+              <div class="mt-1 font-mono text-zinc-200" id="eta">—</div>
             </div>
           </div>
         </div>
@@ -130,6 +134,7 @@
   const spd = document.getElementById('spd');
   const up = document.getElementById('up');
   const tot = document.getElementById('tot');
+  const eta = document.getElementById('eta');
 
   const bar = document.getElementById('bar');
   const phase = document.getElementById('phase');
@@ -173,6 +178,14 @@
     const p = Math.max(0, Math.min(100, percent));
     pct.textContent = p + "%";
     bar.style.width = p + "%";
+    document.getElementById('progress').setAttribute('aria-valuenow', String(p));
+  }
+
+  function humanDuration(seconds) {
+    const value = Math.max(1, Math.ceil(seconds));
+    if (value < 60) return value + 's';
+    if (value < 3600) return Math.floor(value / 60) + 'm ' + (value % 60) + 's';
+    return Math.floor(value / 3600) + 'h ' + Math.floor((value % 3600) / 60) + 'm';
   }
 
   setDisabled(false);
@@ -207,6 +220,7 @@
     tot.textContent = humanBytes(size);
     setProgress(0);
     spd.textContent = '0 B/s';
+    eta.textContent = '—';
     up.textContent = '0 B';
     phase.textContent = 'Idle';
     setDisabled(false);
@@ -244,10 +258,11 @@
 
     setProgress(0);
     spd.textContent = "0 B/s";
+    eta.textContent = "Calculating…";
     up.textContent = "0 B";
     tot.textContent = humanBytes(totalSize);
 
-    phase.textContent = "Sending";
+    phase.textContent = "Connecting to server";
 
     const form = new FormData();
     for (const file of files) {
@@ -258,56 +273,106 @@
     xhr.open("POST", "/upload", true);
 
     xhr.setRequestHeader("X-CSRF-Token", CSRF_TOKEN);
+    // getRandomValues also works on local HTTP; randomUUID requires HTTPS.
+    const uploadID = Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
+    xhr.setRequestHeader("X-Upload-ID", uploadID);
 
     const tStart = performance.now();
-    let tLast = tStart;
-    let lastLoaded = 0;
+    const samples = [{time: tStart, bytes: 0}];
+    let stopped = false;
+    let progressSeen = false;
+    let pollTimer = null;
+    let progressRequest = null;
 
-    let waitTimer = null;
-    let waiting = false;
-
-    function startWaiting() {
-      if (waiting) return;
-      waiting = true;
-      phase.textContent = "Waiting for server";
-      waitTimer = setInterval(() => {
-        const now = performance.now();
-        const secs = (now - tStart) / 1000;
-        const avgBps = totalSize / Math.max(secs, 0.001);
-        spd.textContent = humanBytes(avgBps) + "/s avg";
-      }, 200);
+    function stopProgress() {
+      stopped = true;
+      if (pollTimer !== null) clearTimeout(pollTimer);
+      if (progressRequest) progressRequest.abort();
     }
 
-    xhr.upload.onprogress = (e) => {
-      if (!e.lengthComputable) return;
+    function progressUnavailable() {
+      phase.textContent = "Uploading (progress unavailable)";
+      spd.textContent = "—";
+      eta.textContent = "Unavailable";
+    }
 
+    function showProgress(snapshot) {
       const now = performance.now();
-      const dt = (now - tLast) / 1000;
-      const dBytes = e.loaded - lastLoaded;
+      const received = Math.min(totalSize, Math.max(0, Number(snapshot.bytes_received)));
+      samples.push({time: now, bytes: received});
+      // A short rolling window smooths the estimate and also lets it fall to
+      // zero when the server stops receiving data, instead of counting down.
+      while (samples.length > 2 && samples[1].time < now - 5000) samples.shift();
+      const first = samples[0];
+      const bps = (received - first.bytes) / Math.max((now - first.time) / 1000, 0.001);
 
-      if (dt > 0.2) {
-        const bps = dBytes / dt;
-        spd.textContent = humanBytes(bps) + "/s";
-        tLast = now;
-        lastLoaded = e.loaded;
+      up.textContent = humanBytes(received);
+      setProgress(totalSize > 0 ? Math.min(99, Math.floor(received / totalSize * 100)) : 0);
+      spd.textContent = humanBytes(Math.max(0, bps)) + "/s";
+
+      if (snapshot.state === 'queued') {
+        phase.textContent = "Waiting for another upload";
+        eta.textContent = "Waiting";
+      } else if (snapshot.state === 'preparing') {
+        phase.textContent = "Checking storage";
+        eta.textContent = "Calculating…";
+      } else if (snapshot.state === 'failed') {
+        phase.textContent = "Upload failed";
+        eta.textContent = "—";
+        spd.textContent = "—";
+      } else if (snapshot.state === 'finalizing' || snapshot.state === 'complete' || (totalSize > 0 && received === totalSize)) {
+        phase.textContent = "Finishing upload";
+        eta.textContent = "Finishing…";
+        spd.textContent = "—";
+      } else {
+        phase.textContent = "Uploading";
+        eta.textContent = bps > 0 ? '≈ ' + humanDuration((totalSize - received) / bps) : (received > 0 ? 'Waiting for data' : 'Calculating…');
       }
+    }
 
-      const percent = Math.floor((e.loaded / e.total) * 100);
-      setProgress(percent);
-      up.textContent = humanBytes(e.loaded);
-      tot.textContent = humanBytes(e.total);
+    async function pollProgress() {
+      if (stopped || progressRequest) return;
+      if (pollTimer !== null) {
+        clearTimeout(pollTimer);
+        pollTimer = null;
+      }
+      const controller = new AbortController();
+      progressRequest = controller;
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      let terminal = false;
+      try {
+        const response = await fetch('/upload-progress?id=' + encodeURIComponent(uploadID), {
+          credentials: 'same-origin', cache: 'no-store', signal: controller.signal
+        });
+        if (stopped) return;
+        if (response.ok) {
+          const snapshot = await response.json();
+          if (stopped) return;
+          progressSeen = true;
+          showProgress(snapshot);
+          terminal = snapshot.state === 'complete' || snapshot.state === 'failed';
+        } else if (response.status === 404 && !progressSeen) {
+          // A buffering proxy may not have forwarded the upload request yet.
+          phase.textContent = "Connecting to server";
+          eta.textContent = "Calculating…";
+        } else {
+          progressUnavailable();
+        }
+      } catch (error) {
+        if (!stopped) progressUnavailable();
+      } finally {
+        clearTimeout(timeout);
+        progressRequest = null;
+        if (!stopped && !terminal) pollTimer = setTimeout(pollProgress, 750);
+      }
+    }
 
-      if (percent >= 100) startWaiting();
-    };
-
-    xhr.upload.onload = () => {
-      setProgress(100);
-      up.textContent = humanBytes(totalSize);
-      startWaiting();
-    };
+    // Browser send completion does not mean the server has received or saved
+    // the files. It only prompts another server progress check.
+    xhr.upload.onload = pollProgress;
 
     xhr.onload = () => {
-      if (waitTimer) clearInterval(waitTimer);
+      stopProgress();
 
       updateStorage(xhr);
 
@@ -316,6 +381,10 @@
       const avgBps = totalSize / Math.max(secs, 0.001);
 
       if (xhr.status >= 200 && xhr.status < 300) {
+        setProgress(100);
+        up.textContent = humanBytes(totalSize);
+        eta.textContent = "0s";
+        spd.textContent = humanBytes(avgBps) + "/s avg";
         phase.textContent = "Done";
         setStatus(
           xhr.responseText.trim() +
@@ -323,6 +392,8 @@
           "\navg_speed=" + humanBytes(avgBps) + "/s"
         );
       } else {
+        eta.textContent = "—";
+        spd.textContent = "—";
         phase.textContent = "Error";
         setStatus(
           "error " + xhr.status + "\n" + (xhr.responseText || "") +
@@ -334,20 +405,25 @@
     };
 
     xhr.onerror = () => {
-      if (waitTimer) clearInterval(waitTimer);
+      stopProgress();
+      eta.textContent = "—";
+      spd.textContent = "—";
       phase.textContent = "Error";
       setStatus("network error");
       setDisabled(false);
     };
 
     xhr.onabort = () => {
-      if (waitTimer) clearInterval(waitTimer);
+      stopProgress();
+      eta.textContent = "—";
+      spd.textContent = "—";
       phase.textContent = "Canceled";
       setStatus("Upload canceled.");
       setDisabled(false);
     };
 
     xhr.send(form);
+    pollProgress();
   });
 })();
 </script>
