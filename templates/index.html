@@ -17,23 +17,19 @@
           <h1 class="text-xl font-semibold">Upload a file</h1>
           <p class="mt-1 text-sm text-zinc-400">Max upload: {{.MaxHuman}}</p>
         </div>
-        <div class="text-xs text-zinc-500">
-          Single file
+        <div class="text-right text-xs text-zinc-400">
+          <p>Signed in as <strong class="text-zinc-200">{{.Username}}</strong></p>
+          <div class="mt-2 flex items-center justify-end gap-3">
+            {{if .Admin}}<a href="/admin" class="text-zinc-200 underline">Manage users</a>{{end}}
+            <form method="post" action="/logout">
+              <input type="hidden" name="csrf_token" value="{{.CSRFToken}}" />
+              <button type="submit" class="underline">Sign out</button>
+            </form>
+          </div>
         </div>
       </div>
 
       <div class="mt-6 space-y-4">
-        <div>
-          <label for="password" class="block text-sm font-medium text-zinc-200">Password</label>
-          <input
-            id="password"
-            type="password"
-            autocomplete="off"
-            placeholder="Shared password"
-            class="mt-2 w-full rounded-xl border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-600 focus:outline-none focus:ring-2 focus:ring-zinc-600/30"
-          />
-        </div>
-
         <div>
           <label for="file" class="block text-sm font-medium text-zinc-200">File</label>
           <div class="mt-2 rounded-xl border border-dashed border-zinc-800 bg-zinc-950/20 p-4">
@@ -102,10 +98,10 @@
 <script>
 (function () {
   const MAX_BYTES = {{.MaxBytes}};
+  const CSRF_TOKEN = {{.CSRFToken}};
 
   const btn = document.getElementById('btn');
   const fileInput = document.getElementById('file');
-  const passInput = document.getElementById('password');
 
   const pct = document.getElementById('pct');
   const spd = document.getElementById('spd');
@@ -132,7 +128,6 @@
   function setDisabled(disabled) {
     btn.disabled = disabled;
     fileInput.disabled = disabled;
-    passInput.disabled = disabled;
   }
 
   function setStatus(text) {
@@ -187,10 +182,8 @@
     clearStatus();
 
     const f = fileInput.files && fileInput.files[0];
-    const p = passInput.value || "";
 
     if (!f) { setStatus("Pick a file."); return; }
-    if (!p) { setStatus("Enter the password."); return; }
 
     if (f.size > MAX_BYTES) {
       setStatus(
@@ -216,8 +209,7 @@
     const xhr = new XMLHttpRequest();
     xhr.open("POST", "/upload", true);
 
-    // Password in header so server can reject early without reading the body.
-    xhr.setRequestHeader("X-Upload-Password", p);
+    xhr.setRequestHeader("X-CSRF-Token", CSRF_TOKEN);
 
     const tStart = performance.now();
     let tLast = tStart;

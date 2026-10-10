@@ -12,14 +12,17 @@ import (
 type config struct {
 	dir      string
 	maxBytes int64
-	password string
 	listen   string
+	store    *store
 }
 
 func newServer(cfg config) *http.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", cfg.handleIndex)
 	mux.HandleFunc("/upload", cfg.handleUpload)
+	mux.HandleFunc("/login", cfg.handleLogin)
+	mux.HandleFunc("/logout", cfg.handleLogout)
+	mux.HandleFunc("/admin", cfg.handleAdmin)
 
 	return &http.Server{
 		Addr:              cfg.listen,

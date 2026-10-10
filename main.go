@@ -4,48 +4,67 @@ import (
 	"context"
 	"flag"
 	"log"
-	"math"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
+
+	"golang.org/x/term"
 )
 
 func main() {
 	var (
-		dir      = flag.String("dir", "./uploads", "Directory where uploaded files are written")
-		maxSize  = flag.String("max", "200MB", "Maximum upload size (e.g. 10MB, 1GB, 500K)")
-		password = flag.String("password", "", "Shared password required to upload")
-		listen   = flag.String("listen", "0.0.0.0:8080", "Listen address")
+		database = flag.String("db", "./uploader.db", "SQLite database for users and server settings")
+		dir      = flag.String("dir", "", "Set and persist the upload directory (initial default: ./uploads)")
+		maxSize  = flag.String("max", "", "Set and persist the upload limit (initial default: 200MB)")
+		listen   = flag.String("listen", "", "Set and persist the listen address (initial default: 0.0.0.0:8080)")
 	)
 	flag.Parse()
 
-	if *password == "" {
-		log.Fatal("missing required flag: -password")
-	}
-
-	maxBytes, err := parseSize(*maxSize)
+	ctx := context.Background()
+	s, err := openStore(ctx, *database)
 	if err != nil {
-		log.Fatalf("invalid -max: %v", err)
+		log.Fatalf("open database: %v", err)
 	}
-	if maxBytes <= 0 {
-		log.Fatal("-max must be > 0")
+	defer s.db.Close()
+	settings, err := s.loadSettings(ctx)
+	if err != nil {
+		log.Fatalf("load settings: %v", err)
 	}
-	if maxBytes > math.MaxInt64-multipartOverhead {
-		log.Fatal("-max is too large to allow for multipart overhead")
+	if *dir != "" {
+		settings.dir, err = filepath.Abs(*dir)
+		if err != nil {
+			log.Fatalf("invalid -dir: %v", err)
+		}
+	}
+	if *maxSize != "" {
+		settings.maxBytes, err = parseSize(*maxSize)
+		if err != nil {
+			log.Fatalf("invalid -max: %v", err)
+		}
+	}
+	if *listen != "" {
+		settings.listen = *listen
+	}
+	if err := s.saveSettings(ctx, settings); err != nil {
+		log.Fatalf("save settings: %v", err)
+	}
+	var readSecret func() (string, error)
+	if term.IsTerminal(int(os.Stdin.Fd())) {
+		readSecret = func() (string, error) {
+			password, err := term.ReadPassword(int(os.Stdin.Fd()))
+			return string(password), err
+		}
+	}
+	if err := promptInitialAdmin(ctx, s, os.Stdin, os.Stdout, readSecret); err != nil {
+		log.Fatalf("admin setup: %v", err)
+	}
+	if err := os.MkdirAll(settings.dir, 0o750); err != nil {
+		log.Fatalf("create upload directory: %v", err)
 	}
 
-	if err := os.MkdirAll(*dir, 0o755); err != nil {
-		log.Fatalf("failed to create dir %q: %v", *dir, err)
-	}
-
-	cfg := config{
-		dir:      *dir,
-		maxBytes: maxBytes,
-		password: *password,
-		listen:   *listen,
-	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	cfg := config{dir: settings.dir, maxBytes: settings.maxBytes, listen: settings.listen, store: s}
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	log.Printf("listening on http://%s", cfg.listen)

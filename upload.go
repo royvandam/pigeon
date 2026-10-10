@@ -21,9 +21,9 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1) Check password FIRST. Do not touch the body.
-	if r.Header.Get("X-Upload-Password") != cfg.password {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	// Authenticate and check the session CSRF header before touching the body.
+	a, ok := cfg.requireAuth(w, r, false, false)
+	if !ok {
 		return
 	}
 
@@ -46,6 +46,11 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	mr := multipart.NewReader(r.Body, boundary)
+	dir := filepath.Join(cfg.dir, a.User.Slug)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		http.Error(w, "failed to create user directory", http.StatusInternalServerError)
+		return
+	}
 
 	var (
 		savedName string
@@ -81,10 +86,9 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 			safe,
 		)
 
-		path := filepath.Join(cfg.dir, name)
-		out, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o644)
+		path := filepath.Join(dir, name)
+		out, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o640)
 		if err != nil {
-			part.Close()
 			http.Error(w, "failed to create file", http.StatusInternalServerError)
 			return
 		}

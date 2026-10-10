@@ -10,7 +10,7 @@ import (
 )
 
 func TestRoutesAndEmbeddedPage(t *testing.T) {
-	handler := newServer(config{maxBytes: 1024}).Handler
+	handler := newServer(newTestConfig(t, 1024)).Handler
 	for _, tt := range []struct {
 		method string
 		path   string
@@ -24,7 +24,9 @@ func TestRoutesAndEmbeddedPage(t *testing.T) {
 	} {
 		t.Run(tt.method+" "+tt.path, func(t *testing.T) {
 			w := httptest.NewRecorder()
-			handler.ServeHTTP(w, httptest.NewRequest(tt.method, tt.path, nil))
+			r := httptest.NewRequest(tt.method, tt.path, nil)
+			r.SetBasicAuth("Test User", testPassword)
+			handler.ServeHTTP(w, r)
 			if w.Code != tt.status || w.Header().Get("Allow") != tt.allow {
 				t.Fatalf("status = %d, Allow = %q; want %d, %q", w.Code, w.Header().Get("Allow"), tt.status, tt.allow)
 			}
