@@ -75,7 +75,7 @@
           </button>
 
           <div class="text-xs text-zinc-500">
-            <span id="phase">Idle</span>
+            <span id="phase" role="status" aria-live="polite">Idle</span>
           </div>
         </div>
 
@@ -111,10 +111,6 @@
           </div>
         </div>
 
-        <div id="statusWrap" class="hidden rounded-xl border border-zinc-800 bg-zinc-950/30 p-4">
-          <div class="text-xs font-medium text-zinc-400">Status</div>
-          <pre id="status" class="mt-2 whitespace-pre-wrap break-words text-xs font-mono text-zinc-200"></pre>
-        </div>
       </div>
     </div>
   </div>
@@ -139,9 +135,6 @@
   const bar = document.getElementById('bar');
   const phase = document.getElementById('phase');
 
-  const statusWrap = document.getElementById('statusWrap');
-  const status = document.getElementById('status');
-
   const fileName = document.getElementById('fileName');
   const fileCount = document.getElementById('fileCount');
   const fileSize = document.getElementById('fileSize');
@@ -164,14 +157,8 @@
     return selectedFiles.reduce((total, file) => total + file.size, 0);
   }
 
-  function setStatus(text) {
-    statusWrap.classList.remove('hidden');
-    status.textContent = text;
-  }
-
-  function clearStatus() {
-    statusWrap.classList.add('hidden');
-    status.textContent = "";
+  function showQuotaError(size) {
+    phase.textContent = 'Not enough storage: ' + humanBytes(size) + ' selected, ' + humanBytes(REMAINING_BYTES) + ' available.';
   }
 
   function setProgress(percent) {
@@ -203,7 +190,6 @@
   }
 
   function selectFiles(input, otherInput) {
-    clearStatus();
     otherInput.value = '';
     selectedFiles = Array.from(input.files || []);
     const size = selectedSize();
@@ -226,11 +212,7 @@
     setDisabled(false);
 
     if (size > REMAINING_BYTES) {
-      setStatus(
-        "Not enough storage available.\n" +
-        "Available: " + humanBytes(REMAINING_BYTES) + "\n" +
-        "Selected: " + humanBytes(size)
-      );
+      showQuotaError(size);
     }
   }
 
@@ -238,19 +220,13 @@
   directoryInput.addEventListener('change', () => selectFiles(directoryInput, fileInput));
 
   btn.addEventListener('click', () => {
-    clearStatus();
-
     const files = selectedFiles.slice();
     const totalSize = selectedSize();
 
-    if (files.length === 0) { setStatus("Choose files or a directory containing files."); return; }
+    if (files.length === 0) { phase.textContent = "Choose files or a directory containing files."; return; }
 
     if (totalSize > REMAINING_BYTES) {
-      setStatus(
-        "Not enough storage available.\n" +
-        "Available: " + humanBytes(REMAINING_BYTES) + "\n" +
-        "Selected: " + humanBytes(totalSize)
-      );
+      showQuotaError(totalSize);
       return;
     }
 
@@ -386,19 +362,10 @@
         eta.textContent = "0s";
         spd.textContent = humanBytes(avgBps) + "/s avg";
         phase.textContent = "Done";
-        setStatus(
-          xhr.responseText.trim() +
-          "\nend_to_end=" + secs.toFixed(2) + "s" +
-          "\navg_speed=" + humanBytes(avgBps) + "/s"
-        );
       } else {
         eta.textContent = "—";
         spd.textContent = "—";
-        phase.textContent = "Error";
-        setStatus(
-          "error " + xhr.status + "\n" + (xhr.responseText || "") +
-          "\nend_to_end=" + secs.toFixed(2) + "s"
-        );
+        phase.textContent = 'Upload failed: ' + (xhr.responseText.trim() || 'Please try again.');
       }
 
       setDisabled(false);
@@ -408,8 +375,7 @@
       stopProgress();
       eta.textContent = "—";
       spd.textContent = "—";
-      phase.textContent = "Error";
-      setStatus("network error");
+      phase.textContent = "Network error. Please try again.";
       setDisabled(false);
     };
 
@@ -418,7 +384,6 @@
       eta.textContent = "—";
       spd.textContent = "—";
       phase.textContent = "Canceled";
-      setStatus("Upload canceled.");
       setDisabled(false);
     };
 

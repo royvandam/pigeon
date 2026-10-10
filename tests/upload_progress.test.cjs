@@ -176,13 +176,13 @@ test('a rejected upload never shows 100% even after the server receives all byte
   assert.equal(p.text('pct'), '99%');
   p.finish(413);
   assert.equal(p.text('pct'), '99%');
-  assert.equal(p.text('phase'), 'Error');
+  assert.equal(p.text('phase'), 'Upload failed: disk quota exceeded');
   assert.equal(p.text('eta'), '—');
   assert.equal(p.elements.get('btn').disabled, false);
   assert.equal(p.timers.size, 0);
 });
 
-for (const [event, phase] of [['onabort', 'Canceled'], ['onerror', 'Error']]) {
+for (const [event, phase] of [['onabort', 'Canceled'], ['onerror', 'Network error. Please try again.']]) {
   test(`${event} stops polling and clears the estimate`, async () => {
     const p = page();
     const pending = p.requests[0];
