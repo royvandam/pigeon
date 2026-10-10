@@ -20,6 +20,7 @@ function page() {
       dispatch(name) { events.get(name)(); },
       replaceChildren() { this.children = []; },
       append(child) { this.children.push(child); },
+      dispatchEvent() {},
       focus() { focused = id; },
       select() { this.selected = true; },
       showModal() { this.open = true; },
@@ -33,7 +34,7 @@ function page() {
     addEventListener(name, callback) { documentEvents.set(name, callback); }
   };
   function blocked() { throw new Error('Native browser dialogs must not be used'); }
-  vm.runInNewContext(script, {document, window: {alert: blocked, confirm: blocked, prompt: blocked}});
+  vm.runInNewContext(script, {document, Event, window: {alert: blocked, confirm: blocked, prompt: blocked}});
   function open(action, data = {}) {
     const button = {dataset: {dialogAction: action, name: 'report.txt', path: 'docs/report.txt', dir: 'docs', ...data}};
     const event = {target: {closest() { return button; }}, prevented: false, preventDefault() { this.prevented = true; }};
@@ -74,7 +75,7 @@ test('rename and move share the edit dialog and preserve the destination folder'
   assert.equal(p.input.required, false);
   assert.equal(p.input.maxLength, 4095);
   assert.equal(p.elements.get('actionDialogHelp').hidden, false);
-  assert.equal(p.elements.get('actionDialogConfirm').textContent, 'Save');
+  assert.equal(p.elements.get('actionDialogConfirmLabel').textContent, 'Save');
   p.cancel();
   p.open('move', {dir: ''});
   assert.equal(p.input.value, '');
@@ -89,7 +90,7 @@ for (const directory of [false, true]) {
     assert.equal(p.input.disabled, true);
     assert.equal(p.input.required, false);
     assert.equal(p.elements.get('actionDialogInputGroup').hidden, true);
-    assert.equal(p.elements.get('actionDialogConfirm').textContent, 'Delete');
+    assert.equal(p.elements.get('actionDialogConfirmLabel').textContent, 'Delete');
     assert.equal(p.elements.get('actionDialogConfirm').dataset.danger, 'true');
     assert.equal(p.focused(), 'actionDialogCancel');
     assert.match(p.elements.get('actionDialogDescription').textContent, directory ? /everything inside it/ : /deletes the file/);

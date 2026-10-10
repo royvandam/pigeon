@@ -122,7 +122,7 @@ func TestExplorerActionsRequireDialogConfirmation(t *testing.T) {
 			if strings.Count(body, `<dialog id="actionDialog"`) != 1 {
 				t.Error("explorer must render exactly one shared dialog")
 			}
-			for _, markup := range []string{`<dialog id="actionDialog"`, `<form id="actionDialogForm" method="post"`, `id="actionDialogCancel" type="button"`, `id="actionDialogValue"`, `>Save</button>`} {
+			for _, markup := range []string{`<dialog id="actionDialog"`, `<form id="actionDialogForm" method="post"`, `id="actionDialogCancel" type="button"`, `id="actionDialogValue"`, `id="actionDialogConfirmLabel">Save</span>`} {
 				if !strings.Contains(body, markup) {
 					t.Errorf("explorer is missing shared dialog control %s", markup)
 				}

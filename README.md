@@ -35,7 +35,8 @@ Create folders, rename items, move them to another existing folder, or delete
 them. Rename, move, and delete use a shared in-page dialog. **Save** applies an
 edit, **Delete** confirms deletion, and **Cancel** or Escape closes any dialog
 without making changes. Moving asks for a path relative to **My files**, with an
-empty path meaning the root. Deleting a folder removes its contents too.
+empty path meaning the root. Deleting a folder removes its contents too. Empty
+folder names and rename fields show styled inline errors beneath the input.
 Files download as attachments, and folders download as ZIP archives, including
 empty subfolders.
 
@@ -207,9 +208,12 @@ go build -o uploader .
 ```
 
 Run and build the whole package (`.`). All pages in `templates/` are embedded in
-the binary. The browser loads Tailwind CSS from a CDN.
+the binary. The browser loads Tailwind CSS and Font Awesome Free from a CDN via
+`templates/assets.html`.
 `templates/dialog.html` supplies the common dialog markup and event handling for
-the explorer and user management pages.
+the explorer and user management pages. `templates/validation.html` replaces
+native validation popups for folder creation and renaming with inline errors,
+while keeping the browser's constraint validation and server-side checks.
 
 `main.go` handles startup, `database.go` persists settings and the schema,
 `setup.go` handles first-run provisioning, `users.go` manages accounts, and

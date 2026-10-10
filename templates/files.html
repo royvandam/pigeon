@@ -8,17 +8,17 @@
       {{range .Entries}}
       <tr class="hover:bg-zinc-800/30">
         <td class="px-3 py-3">
-          {{if .Directory}}<a href="{{.BrowseURL}}" class="flex items-center gap-2 text-zinc-100 hover:underline"><span aria-hidden="true">📁</span><span class="break-all">{{.Name}}</span></a>
-          {{else}}<a href="{{.DownloadURL}}" class="flex items-center gap-2 text-zinc-200 hover:underline"><span aria-hidden="true">📄</span><span class="break-all">{{.Name}}</span></a>{{end}}
+          {{if .Directory}}<a href="{{.BrowseURL}}" class="flex items-center gap-2 text-zinc-100 hover:underline"><i class="fa-solid fa-folder text-zinc-400" aria-hidden="true"></i><span class="break-all">{{.Name}}</span></a>
+          {{else}}<a href="{{.DownloadURL}}" class="flex items-center gap-2 text-zinc-200 hover:underline"><i class="fa-solid fa-file text-zinc-500" aria-hidden="true"></i><span class="break-all">{{.Name}}</span></a>{{end}}
         </td>
         <td class="whitespace-nowrap px-3 py-3 text-xs text-zinc-400">{{.Size}}</td>
         <td class="hidden whitespace-nowrap px-3 py-3 text-xs text-zinc-500 lg:table-cell">{{.Modified}}</td>
         <td class="px-3 py-3">
           <div class="flex flex-wrap items-center justify-end gap-x-3 gap-y-2 text-xs">
-            <a href="{{.DownloadURL}}" class="text-zinc-300 hover:underline">{{if .Directory}}Download ZIP{{else}}Download{{end}}</a>
-            <button type="button" data-dialog-action="rename" data-name="{{.Name}}" data-path="{{.Path}}" data-dir="{{$.Directory}}" class="text-zinc-300 hover:underline">Rename</button>
-            <button type="button" data-dialog-action="move" data-name="{{.Name}}" data-path="{{.Path}}" data-dir="{{$.Directory}}" class="text-zinc-300 hover:underline">Move</button>
-            <button type="button" data-dialog-action="delete-file" data-name="{{.Name}}" data-path="{{.Path}}" data-dir="{{$.Directory}}" data-directory="{{.Directory}}" class="text-red-300 hover:underline">Delete</button>
+            <a href="{{.DownloadURL}}" class="text-zinc-300 hover:underline"><i class="fa-solid fa-download mr-1" aria-hidden="true"></i>{{if .Directory}}Download ZIP{{else}}Download{{end}}</a>
+            <button type="button" data-dialog-action="rename" data-name="{{.Name}}" data-path="{{.Path}}" data-dir="{{$.Directory}}" class="text-zinc-300 hover:underline"><i class="fa-solid fa-pen mr-1" aria-hidden="true"></i>Rename</button>
+            <button type="button" data-dialog-action="move" data-name="{{.Name}}" data-path="{{.Path}}" data-dir="{{$.Directory}}" class="text-zinc-300 hover:underline"><i class="fa-solid fa-folder-tree mr-1" aria-hidden="true"></i>Move</button>
+            <button type="button" data-dialog-action="delete-file" data-name="{{.Name}}" data-path="{{.Path}}" data-dir="{{$.Directory}}" data-directory="{{.Directory}}" class="text-red-300 hover:underline"><i class="fa-solid fa-trash-can mr-1" aria-hidden="true"></i>Delete</button>
           </div>
         </td>
       </tr>

@@ -1,0 +1,26 @@
+{{define "formValidation"}}
+<script>
+(function () {
+  // Keep native constraint validation, but render its errors in the page.
+  document.addEventListener('invalid', event => {
+    const input = event.target;
+    const error = document.getElementById(input.dataset.validationError);
+    if (!error) return;
+    event.preventDefault();
+    error.textContent = input.validity.valueMissing ? input.dataset.requiredMessage : input.validationMessage;
+    error.hidden = false;
+    input.setAttribute('aria-invalid', 'true');
+    input.focus();
+  }, true);
+
+  document.addEventListener('input', event => {
+    const input = event.target;
+    const error = document.getElementById(input.dataset.validationError);
+    if (!error) return;
+    error.hidden = true;
+    error.textContent = '';
+    input.removeAttribute('aria-invalid');
+  });
+})();
+</script>
+{{end}}

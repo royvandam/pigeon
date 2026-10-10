@@ -7,12 +7,13 @@
     <div id="actionDialogFields"></div>
     <div id="actionDialogInputGroup">
       <label id="actionDialogLabel" for="actionDialogValue" class="mt-4 block text-sm text-zinc-300">New name</label>
-      <input id="actionDialogValue" name="name" type="text" required maxlength="255" autocomplete="off" autofocus aria-describedby="actionDialogHelp" class="mt-2 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100" />
+      <input id="actionDialogValue" name="name" type="text" required maxlength="255" autocomplete="off" autofocus aria-describedby="actionDialogError" data-validation-error="actionDialogError" data-required-message="Enter a new name." class="mt-2 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 aria-invalid:border-red-500" />
+      <p id="actionDialogError" hidden role="alert" class="mt-2 text-xs text-red-300"></p>
       <p id="actionDialogHelp" hidden class="mt-2 text-xs text-zinc-400">Enter an existing folder path relative to My files. Leave empty to move to My files.</p>
     </div>
     <div class="mt-6 flex justify-end gap-3">
-      <button id="actionDialogCancel" type="button" class="rounded-lg bg-zinc-800 px-4 py-2 text-sm hover:bg-zinc-700">Cancel</button>
-      <button id="actionDialogConfirm" type="submit" class="rounded-lg bg-zinc-100 px-4 py-2 text-sm font-semibold text-zinc-900 hover:bg-white data-[danger=true]:bg-red-600 data-[danger=true]:text-white data-[danger=true]:hover:bg-red-500">Save</button>
+      <button id="actionDialogCancel" type="button" class="rounded-lg bg-zinc-800 px-4 py-2 text-sm hover:bg-zinc-700"><i class="fa-solid fa-xmark mr-1" aria-hidden="true"></i>Cancel</button>
+      <button id="actionDialogConfirm" type="submit" class="rounded-lg bg-zinc-100 px-4 py-2 text-sm font-semibold text-zinc-900 hover:bg-white data-[danger=true]:bg-red-600 data-[danger=true]:text-white data-[danger=true]:hover:bg-red-500"><i id="actionDialogConfirmIcon" class="fa-solid fa-check mr-1" aria-hidden="true"></i><span id="actionDialogConfirmLabel">Save</span></button>
     </div>
   </form>
 </dialog>
@@ -64,13 +65,15 @@
     document.getElementById('actionDialogInputGroup').hidden = deleting;
     document.getElementById('actionDialogLabel').textContent = renaming ? 'New name' : 'Destination folder';
     document.getElementById('actionDialogHelp').hidden = action !== 'move';
-    input.setAttribute('aria-describedby', action === 'move' ? 'actionDialogHelp' : '');
+    input.setAttribute('aria-describedby', action === 'move' ? 'actionDialogHelp actionDialogError' : 'actionDialogError');
     input.disabled = deleting;
     input.required = renaming;
     input.name = renaming ? 'name' : 'destination';
     input.maxLength = renaming ? 255 : 4095;
     input.value = deleting ? '' : (renaming ? name : button.dataset.dir || '');
-    confirmButton.textContent = deleting ? 'Delete' : 'Save';
+    input.dispatchEvent(new Event('input', {bubbles: true}));
+    document.getElementById('actionDialogConfirmLabel').textContent = deleting ? 'Delete' : 'Save';
+    document.getElementById('actionDialogConfirmIcon').className = 'fa-solid ' + (deleting ? 'fa-trash-can' : 'fa-check') + ' mr-1';
     confirmButton.dataset.danger = String(deleting);
     dialog.showModal();
     if (deleting) {
