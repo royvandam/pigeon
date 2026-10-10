@@ -14,10 +14,10 @@
         <p class="mt-1 text-sm text-zinc-400">Signed in as {{.Username}}</p>
       </div>
       <div class="flex items-center gap-4 text-sm">
-        <a href="/" class="underline"><i class="fa-solid fa-folder-open mr-1" aria-hidden="true"></i>My files</a>
+        <a href="/" class="nav-link"><i class="fa-solid fa-folder-open mr-1" aria-hidden="true"></i>My files</a>
         <form method="post" action="/logout">
           <input type="hidden" name="csrf_token" value="{{.CSRFToken}}" />
-          <button type="submit" class="underline"><i class="fa-solid fa-right-from-bracket mr-1" aria-hidden="true"></i>Sign out</button>
+          <button type="submit" class="nav-link"><i class="fa-solid fa-right-from-bracket mr-1" aria-hidden="true"></i>Sign out</button>
         </form>
       </div>
     </div>
@@ -30,18 +30,18 @@
         <input type="hidden" name="action" value="create" />
         <div class="flex-1">
           <label for="new-username" class="block">Username</label>
-          <input id="new-username" name="username" required maxlength="64" autocomplete="off"
+          <input id="new-username" name="username" required maxlength="64" autocomplete="off" data-required-message="Enter a username."
             class="mt-2 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2" />
         </div>
         <div class="flex-1">
           <label for="new-password" class="block">Password</label>
-          <input id="new-password" name="password" type="password" required minlength="8" autocomplete="new-password"
+          <input id="new-password" name="password" type="password" required minlength="8" autocomplete="new-password" data-required-message="Enter a password."
             class="mt-2 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2" />
         </div>
         <label class="pb-2"><input type="checkbox" name="admin" class="mr-2" />Administrator</label>
         <div>
           <label for="new-quota" class="block">Disk quota</label>
-          <input id="new-quota" name="quota" value="1GB" required
+          <input id="new-quota" name="quota" value="1GB" required data-required-message="Enter a disk quota, such as 1GB."
             class="mt-2 w-28 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2" />
         </div>
         <button type="submit" class="rounded-lg bg-zinc-100 px-4 py-2 font-semibold text-zinc-900"><i class="fa-solid fa-user-plus mr-1" aria-hidden="true"></i>Create user</button>
@@ -73,7 +73,7 @@
                   <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}" />
                   <input type="hidden" name="action" value="quota" />
                   <input type="hidden" name="user_id" value="{{.ID}}" />
-                  <input name="quota" aria-label="Disk quota for {{.Username}}" value="{{.QuotaInput}}" required
+                  <input name="quota" aria-label="Disk quota for {{.Username}}" value="{{.QuotaInput}}" required data-required-message="Enter a disk quota, such as 1GB."
                     class="w-24 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2" />
                   <button type="submit" class="rounded-lg border border-zinc-600 px-3 py-2"><i class="fa-solid fa-check mr-1" aria-hidden="true"></i>Save</button>
                 </form>
@@ -83,7 +83,7 @@
                   <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}" />
                   <input type="hidden" name="action" value="reset" />
                   <input type="hidden" name="user_id" value="{{.ID}}" />
-                  <input name="password" aria-label="New password for {{.Username}}" placeholder="New password" type="password" required minlength="8" autocomplete="new-password"
+                  <input name="password" aria-label="New password for {{.Username}}" placeholder="New password" type="password" required minlength="8" autocomplete="new-password" data-required-message="Enter a new password."
                     class="w-40 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2" />
                   <button type="submit" class="rounded-lg border border-zinc-600 px-3 py-2"><i class="fa-solid fa-key mr-1" aria-hidden="true"></i>Reset password</button>
                 </form>

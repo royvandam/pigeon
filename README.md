@@ -33,10 +33,11 @@ The home page lists your files and folders with sizes and modification times.
 Open a folder to browse its contents; the breadcrumb links return to its parents.
 Create folders, rename items, move them to another existing folder, or delete
 them. Rename, move, and delete use a shared in-page dialog. **Save** applies an
-edit, **Delete** confirms deletion, and **Cancel** or Escape closes any dialog
-without making changes. Moving asks for a path relative to **My files**, with an
+edit, **Delete** confirms deletion, and **Cancel** closes any dialog without
+making changes. Escape dismisses a visible validation tooltip first; otherwise
+it closes the dialog. Moving asks for a path relative to **My files**, with an
 empty path meaning the root. Deleting a folder removes its contents too. Empty
-folder names and rename fields show styled inline errors beneath the input.
+folder names and rename fields show styled tooltips without shifting the layout.
 Files download as attachments, and folders download as ZIP archives, including
 empty subfolders.
 
@@ -250,8 +251,9 @@ That shared template also sets fields, labels, buttons, and links to a consisten
 `templates/dialog.html` supplies the common dialog markup and event handling for
 the explorer and user management pages. `templates/shares.html` supplies the
 sharing controls within that dialog. `templates/validation.html` replaces
-native validation popups for folder creation and renaming with inline errors,
-while keeping the browser's constraint validation and server-side checks.
+native validation popups across all forms with shared, styled tooltips that do
+not shift the layout, while keeping the browser's constraint validation and
+server-side checks.
 
 `main.go` handles startup, `database.go` persists settings and the schema,
 `setup.go` handles first-run provisioning, `users.go` manages accounts, and

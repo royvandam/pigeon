@@ -20,6 +20,7 @@ function page(options = {}) {
     return {
       id, value: '', textContent: '', attributes: {}, dataset: {}, children: [],
       setAttribute(name, value) { this.attributes[name] = value; },
+      removeAttribute(name) { delete this.attributes[name]; },
       addEventListener(name, callback) { events.set(name, callback); },
       dispatch(name, event) { return events.get(name)?.(event); },
       replaceChildren() { this.children = []; },
@@ -81,6 +82,7 @@ test('rename and move share the edit dialog and preserve the destination folder'
   assert.equal(p.input.maxLength, 255);
   assert.equal(p.focused(), 'actionDialogValue');
   assert.equal(p.input.selected, true);
+  assert.equal(p.input.attributes['aria-describedby'], undefined);
   assert.equal(p.elements.get('actionDialogDescription').textContent, '');
   p.cancel();
   assert.equal(p.dialog.open, false);
@@ -91,6 +93,7 @@ test('rename and move share the edit dialog and preserve the destination folder'
   assert.equal(p.input.required, false);
   assert.equal(p.input.maxLength, 4095);
   assert.equal(p.elements.get('actionDialogHelp').hidden, false);
+  assert.equal(p.input.attributes['aria-describedby'], 'actionDialogHelp');
   assert.equal(p.elements.get('actionDialogConfirmLabel').textContent, 'Save');
   p.cancel();
   p.open('move', {dir: ''});

@@ -7,8 +7,7 @@
     <div id="actionDialogFields"></div>
     <div id="actionDialogInputGroup">
       <label id="actionDialogLabel" for="actionDialogValue" class="mt-4 block text-zinc-300">New name</label>
-      <input id="actionDialogValue" name="name" type="text" required maxlength="255" autocomplete="off" autofocus aria-describedby="actionDialogError" data-validation-error="actionDialogError" data-required-message="Enter a new name." class="mt-2 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-zinc-100 aria-invalid:border-red-500" />
-      <p id="actionDialogError" hidden role="alert" class="mt-2 text-xs text-red-300"></p>
+      <input id="actionDialogValue" name="name" type="text" required maxlength="255" autocomplete="off" autofocus data-required-message="Enter a new name." class="mt-2 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-zinc-100" />
       <p id="actionDialogHelp" hidden class="mt-2 text-xs text-zinc-400">Enter an existing folder path relative to My files. Leave empty to move to My files.</p>
     </div>
     {{template "shareControls" .}}
@@ -70,7 +69,8 @@
     document.getElementById('actionDialogInputGroup').hidden = deleting || sharing;
     document.getElementById('actionDialogLabel').textContent = renaming ? 'New name' : 'Destination folder';
     document.getElementById('actionDialogHelp').hidden = action !== 'move';
-    input.setAttribute('aria-describedby', action === 'move' ? 'actionDialogHelp actionDialogError' : 'actionDialogError');
+    if (action === 'move') input.setAttribute('aria-describedby', 'actionDialogHelp');
+    else input.removeAttribute('aria-describedby');
     input.disabled = deleting || sharing;
     input.required = renaming;
     input.name = renaming ? 'name' : 'destination';

@@ -36,7 +36,7 @@ var loginHTML string
 var adminHTML string
 
 var (
-	loginTmpl = template.Must(template.New("login").Parse(loginHTML + assetsHTML))
+	loginTmpl = template.Must(template.New("login").Parse(loginHTML + assetsHTML + validationHTML))
 	adminTmpl = template.Must(template.New("admin").Parse(adminHTML + dialogHTML + assetsHTML + validationHTML + sharesHTML))
 )
 
