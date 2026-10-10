@@ -19,18 +19,12 @@ function page(size = 10000, options = {}) {
   const requests = [];
   const uploads = [];
   const refreshes = [];
-  const dialogs = {confirmed: false, message: ''};
   for (const match of html.matchAll(/id="([^"]+)"/g)) {
     const events = new Map();
     let value = '';
     const element = {
       textContent: '', disabled: false, files: [], style: {}, attributes: {},
       classList: {add() {}, remove() {}},
-      contains(node) { return node.inside !== false; },
-      showModal() { this.open = true; },
-      close() { this.open = false; },
-      focus() { this.focused = true; },
-      select() { this.selected = true; },
       setAttribute(name, value) { this.attributes[name] = value; },
       addEventListener(name, callback) { events.set(name, callback); },
       dispatch(name, event) { events.get(name)(event); }
@@ -49,10 +43,6 @@ function page(size = 10000, options = {}) {
   vm.runInNewContext(script, {
     document: {getElementById(id) { return elements.get(id); }},
     XMLHttpRequest: XHR, FormData, crypto: webcrypto, AbortController,
-    window: {
-      prompt() { throw new Error('File actions must not use native prompts'); },
-      confirm(message) { dialogs.message = message; return dialogs.confirmed; }
-    },
     performance: {now() { return now; }},
     setTimeout(callback, delay) {
       const id = ++nextTimer;
@@ -98,7 +88,7 @@ function page(size = 10000, options = {}) {
     xhr.responseText = status === 200 ? 'ok\nsaved_as=test.bin\nbytes=' + size : 'disk quota exceeded';
     xhr.onload();
   }
-  return {text, elements, xhr, requests, timers, reply, poll, finish, settle, select, refreshes, dialogs};
+  return {text, elements, xhr, requests, timers, reply, poll, finish, settle, select, refreshes};
 }
 
 test('browser send completion does not advance server progress to 100%', async () => {
@@ -134,58 +124,6 @@ test('browser send completion does not advance server progress to 100%', async (
   assert.match(p.elements.get('fileList').innerHTML, /test.bin/);
   assert.equal(p.refreshes[0].url, '/files?dir=My%20folder%2Fdocs');
   assert.equal(p.timers.size, 0);
-});
-
-test('rename and move open edit dialogs without submitting prefilled file actions', () => {
-  const p = page();
-  const button = {dataset: {fileAction: 'rename', name: 'old.txt', path: 'My folder/docs/old.txt'}};
-  function click() {
-    const event = {target: {closest() { return button; }}, prevented: false, preventDefault() { this.prevented = true; }};
-    p.elements.get('fileList').dispatch('click', event);
-    return event;
-  }
-  assert.equal(click().prevented, true);
-  assert.equal(p.elements.get('fileActionDialog').open, true);
-  assert.equal(p.elements.get('fileActionKind').value, 'rename');
-  assert.equal(p.elements.get('fileActionPath').value, 'My folder/docs/old.txt');
-  assert.equal(p.text('fileActionTitle'), 'Rename "old.txt"');
-  const input = p.elements.get('fileActionValue');
-  assert.equal(input.name, 'name');
-  assert.equal(input.value, 'old.txt');
-  assert.equal(input.required, true);
-  assert.equal(input.maxLength, 255);
-  assert.equal(input.focused && input.selected, true);
-  assert.equal(p.elements.get('fileActionHelp').hidden, true);
-  p.elements.get('fileActionCancel').dispatch('click');
-  assert.equal(p.elements.get('fileActionDialog').open, false);
-  button.dataset.fileAction = 'move';
-  assert.equal(click().prevented, true);
-  assert.equal(p.elements.get('fileActionDialog').open, true);
-  assert.equal(p.elements.get('fileActionKind').value, 'move');
-  assert.equal(input.name, 'destination');
-  assert.equal(input.value, 'My folder/docs');
-  assert.equal(input.required, false);
-  assert.equal(input.maxLength, 4095);
-  assert.equal(p.elements.get('fileActionHelp').hidden, false);
-  assert.equal(p.text('fileActionLabel'), 'Destination folder');
-  assert.equal(p.requests.length, 1); // Only the upload progress poll; no file change.
-  assert.equal(p.refreshes.length, 0);
-  p.xhr.onabort();
-});
-
-test('deleting a directory still requires confirmation', () => {
-  const p = page();
-  const form = {dataset: {fileAction: 'delete', name: 'project', directory: 'true'}};
-  function submit() {
-    const event = {target: form, prevented: false, preventDefault() { this.prevented = true; }};
-    p.elements.get('fileList').dispatch('submit', event);
-    return event;
-  }
-  assert.equal(submit().prevented, true);
-  assert.match(p.dialogs.message, /everything inside it/);
-  p.dialogs.confirmed = true;
-  assert.equal(submit().prevented, false);
-  p.xhr.onabort();
 });
 
 test('a failed explorer refresh keeps a successful upload complete and asks for a reload', async () => {

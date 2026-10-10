@@ -134,22 +134,7 @@
     </div>
   </div>
 
-<dialog id="fileActionDialog" aria-labelledby="fileActionTitle" class="m-auto w-full max-w-md rounded-2xl border border-zinc-700 bg-zinc-900 p-6 text-zinc-100 shadow-xl backdrop:bg-black/70">
-  <form id="fileActionForm" method="post" action="/files">
-    <h2 id="fileActionTitle" class="text-lg font-semibold">Edit item</h2>
-    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}" />
-    <input type="hidden" name="dir" value="{{.Directory}}" />
-    <input id="fileActionKind" type="hidden" name="action" value="" />
-    <input id="fileActionPath" type="hidden" name="path" value="" />
-    <label id="fileActionLabel" for="fileActionValue" class="mt-4 block text-sm text-zinc-300">New name</label>
-    <input id="fileActionValue" name="name" type="text" required maxlength="255" autocomplete="off" autofocus aria-describedby="fileActionHelp" class="mt-2 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100" />
-    <p id="fileActionHelp" hidden class="mt-2 text-xs text-zinc-400">Enter an existing folder path relative to My files. Leave empty to move to My files.</p>
-    <div class="mt-6 flex justify-end gap-3">
-      <button id="fileActionCancel" type="button" class="rounded-lg bg-zinc-800 px-4 py-2 text-sm hover:bg-zinc-700">Cancel</button>
-      <button type="submit" class="rounded-lg bg-zinc-100 px-4 py-2 text-sm font-semibold text-zinc-900 hover:bg-white">Save</button>
-    </div>
-  </form>
-</dialog>
+{{template "actionDialog" .}}
 
 <script>
 (function () {
@@ -159,40 +144,6 @@
 
   const fileList = document.getElementById('fileList');
   const explorerMessage = document.getElementById('explorerMessage');
-  const fileActionDialog = document.getElementById('fileActionDialog');
-  const fileActionValue = document.getElementById('fileActionValue');
-  fileList.addEventListener('click', event => {
-    const button = event.target.closest('button[data-file-action]');
-    if (!button || !fileList.contains(button)) return;
-    const action = button.dataset.fileAction;
-    if (action !== 'rename' && action !== 'move') return;
-    event.preventDefault();
-
-    const renaming = action === 'rename';
-    document.getElementById('fileActionTitle').textContent = (renaming ? 'Rename "' : 'Move "') + button.dataset.name + '"';
-    document.getElementById('fileActionKind').value = action;
-    document.getElementById('fileActionPath').value = button.dataset.path;
-    document.getElementById('fileActionLabel').textContent = renaming ? 'New name' : 'Destination folder';
-    document.getElementById('fileActionHelp').hidden = renaming;
-    fileActionValue.name = renaming ? 'name' : 'destination';
-    fileActionValue.required = renaming;
-    fileActionValue.maxLength = renaming ? 255 : 4095;
-    fileActionValue.value = renaming ? button.dataset.name : CURRENT_DIRECTORY;
-    fileActionDialog.showModal();
-    fileActionValue.focus();
-    fileActionValue.select();
-  });
-  document.getElementById('fileActionCancel').addEventListener('click', () => fileActionDialog.close());
-
-  fileList.addEventListener('submit', event => {
-    const form = event.target;
-    if (form.dataset.fileAction === 'delete') {
-      const name = form.dataset.name;
-      const message = form.dataset.directory === 'true' ? 'Delete "' + name + '" and everything inside it?' : 'Delete "' + name + '"?';
-      if (!window.confirm(message)) event.preventDefault();
-    }
-  });
-
   async function refreshFiles() {
     try {
       const response = await fetch('/files?dir=' + encodeURIComponent(CURRENT_DIRECTORY), {credentials: 'same-origin', cache: 'no-store'});

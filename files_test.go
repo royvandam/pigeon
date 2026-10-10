@@ -99,7 +99,7 @@ func TestExplorerFileAndFolderLifecycle(t *testing.T) {
 	}
 }
 
-func TestExplorerEditButtonsRequireDialogConfirmation(t *testing.T) {
+func TestExplorerActionsRequireDialogConfirmation(t *testing.T) {
 	cfg := newTestConfig(t, 100)
 	cookie, _ := sessionFor(t, cfg, "Test User")
 	writeStoredFile(t, cfg, "test-user", "original.txt", "keep")
@@ -112,21 +112,23 @@ func TestExplorerEditButtonsRequireDialogConfirmation(t *testing.T) {
 			t.Fatalf("GET %s: %d, %s", location, w.Code, w.Body)
 		}
 		body := w.Body.String()
-		for _, action := range []string{"rename", "move"} {
-			button := regexp.MustCompile(`<button\b[^>]*data-file-action="` + action + `"[^>]*>`).FindString(body)
+		for _, action := range []string{"rename", "move", "delete-file"} {
+			button := regexp.MustCompile(`<button\b[^>]*data-dialog-action="` + action + `"[^>]*>`).FindString(body)
 			if button == "" || !strings.Contains(button, `type="button"`) || !strings.Contains(button, `data-path="original.txt"`) {
 				t.Errorf("%s %s must open a dialog without submitting: %q", location, action, button)
 			}
-			if strings.Contains(body, `<form method="post" action="/files" data-file-action="`+action+`"`) {
-				t.Errorf("%s still includes a prefilled %s form", location, action)
-			}
 		}
 		if location == "/" {
-			for _, markup := range []string{`<dialog id="fileActionDialog"`, `<form id="fileActionForm" method="post" action="/files"`, `id="fileActionCancel" type="button"`, `id="fileActionValue"`, `>Save</button>`} {
+			if strings.Count(body, `<dialog id="actionDialog"`) != 1 {
+				t.Error("explorer must render exactly one shared dialog")
+			}
+			for _, markup := range []string{`<dialog id="actionDialog"`, `<form id="actionDialogForm" method="post"`, `id="actionDialogCancel" type="button"`, `id="actionDialogValue"`, `>Save</button>`} {
 				if !strings.Contains(body, markup) {
-					t.Errorf("explorer is missing edit dialog control %s", markup)
+					t.Errorf("explorer is missing shared dialog control %s", markup)
 				}
 			}
+		} else if strings.Contains(body, `<dialog`) {
+			t.Error("file list refresh must reuse the page's shared dialog")
 		}
 	}
 }

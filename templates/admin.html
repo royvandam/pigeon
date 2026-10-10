@@ -88,12 +88,7 @@
                   <button type="submit" class="rounded-lg border border-zinc-600 px-3 py-2">Reset password</button>
                 </form>
                 {{if ne .ID $.CurrentID}}
-                <form method="post" action="/admin" class="mt-2">
-                  <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}" />
-                  <input type="hidden" name="action" value="delete" />
-                  <input type="hidden" name="user_id" value="{{.ID}}" />
-                  <button type="submit" class="rounded-lg border border-red-900 px-3 py-2 text-red-300">Delete user</button>
-                </form>
+                <button type="button" data-dialog-action="delete-user" data-name="{{.Username}}" data-user-id="{{.ID}}" class="mt-2 rounded-lg border border-red-900 px-3 py-2 text-red-300">Delete user</button>
                 {{end}}
               </td>
             </tr>
@@ -103,5 +98,6 @@
       </div>
     </section>
   </main>
+  {{template "actionDialog" .}}
 </body>
 </html>

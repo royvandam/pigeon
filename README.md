@@ -20,7 +20,8 @@ as three lines for automated provisioning.
 
 Open http://127.0.0.1:8080 and sign in. Administrators can open `/admin` to create
 regular users or additional administrators, assign and change disk quotas, delete
-users, and reset passwords.
+users, and reset passwords. User deletion uses the same confirmation dialog as
+file deletion and preserves the user's uploaded files.
 Regular users can manage their own files but cannot access user management. An administrator
 cannot delete their own account or the last administrator. Resetting a password
 signs that user out on every device; resetting your own password returns you to
@@ -31,10 +32,10 @@ the login page.
 The home page lists your files and folders with sizes and modification times.
 Open a folder to browse its contents; the breadcrumb links return to its parents.
 Create folders, rename items, move them to another existing folder, or delete
-them. Rename and move open an edit dialog; changes are submitted only when you
-choose **Save**, and **Cancel** or Escape closes it. Moving asks for a path
-relative to **My files**, with an empty path meaning the root. Deleting a folder
-removes its contents too and asks for confirmation.
+them. Rename, move, and delete use a shared in-page dialog. **Save** applies an
+edit, **Delete** confirms deletion, and **Cancel** or Escape closes any dialog
+without making changes. Moving asks for a path relative to **My files**, with an
+empty path meaning the root. Deleting a folder removes its contents too.
 Files download as attachments, and folders download as ZIP archives, including
 empty subfolders.
 
@@ -207,6 +208,8 @@ go build -o uploader .
 
 Run and build the whole package (`.`). All pages in `templates/` are embedded in
 the binary. The browser loads Tailwind CSS from a CDN.
+`templates/dialog.html` supplies the common dialog markup and event handling for
+the explorer and user management pages.
 
 `main.go` handles startup, `database.go` persists settings and the schema,
 `setup.go` handles first-run provisioning, `users.go` manages accounts, and

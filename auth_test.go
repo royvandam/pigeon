@@ -38,6 +38,30 @@ func formRequest(path string, form url.Values, cookie *http.Cookie) *http.Reques
 	return r
 }
 
+func TestAdminUsesSharedDeletionDialog(t *testing.T) {
+	cfg := newTestConfig(t, 100)
+	admin, err := cfg.store.createUser(context.Background(), "Admin", testPassword, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookie, _ := sessionFor(t, cfg, "Admin")
+	r := httptest.NewRequest(http.MethodGet, "/admin", nil)
+	r.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	cfg.handleAdmin(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("admin page: %d, %s", w.Code, w.Body)
+	}
+	body := w.Body.String()
+	buttons := regexp.MustCompile(`<button\b[^>]*data-dialog-action="delete-user"[^>]*>`).FindAllString(body, -1)
+	if len(buttons) != 1 || !strings.Contains(buttons[0], `type="button"`) || !strings.Contains(buttons[0], `data-name="Test User"`) || strings.Contains(buttons[0], `data-user-id="`+strconv.FormatInt(admin.ID, 10)+`"`) {
+		t.Fatalf("user deletion must confirm the selected account and exclude self: %v", buttons)
+	}
+	if strings.Count(body, `<dialog id="actionDialog"`) != 1 || !strings.Contains(body, `<form id="actionDialogForm" method="post"`) {
+		t.Fatal("admin page did not render exactly one shared dialog")
+	}
+}
+
 func TestBrowserLoginLogout(t *testing.T) {
 	cfg := newTestConfig(t, 100)
 	w := httptest.NewRecorder()

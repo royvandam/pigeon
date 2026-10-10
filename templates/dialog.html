@@ -1,0 +1,86 @@
+{{define "actionDialog"}}
+<dialog id="actionDialog" aria-labelledby="actionDialogTitle" aria-describedby="actionDialogDescription" class="m-auto w-full max-w-md rounded-2xl border border-zinc-700 bg-zinc-900 p-6 text-zinc-100 shadow-xl backdrop:bg-black/70">
+  <form id="actionDialogForm" method="post" action="">
+    <h2 id="actionDialogTitle" class="text-lg font-semibold">Confirm action</h2>
+    <p id="actionDialogDescription" hidden class="mt-3 text-sm text-zinc-300"></p>
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}" />
+    <div id="actionDialogFields"></div>
+    <div id="actionDialogInputGroup">
+      <label id="actionDialogLabel" for="actionDialogValue" class="mt-4 block text-sm text-zinc-300">New name</label>
+      <input id="actionDialogValue" name="name" type="text" required maxlength="255" autocomplete="off" autofocus aria-describedby="actionDialogHelp" class="mt-2 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100" />
+      <p id="actionDialogHelp" hidden class="mt-2 text-xs text-zinc-400">Enter an existing folder path relative to My files. Leave empty to move to My files.</p>
+    </div>
+    <div class="mt-6 flex justify-end gap-3">
+      <button id="actionDialogCancel" type="button" class="rounded-lg bg-zinc-800 px-4 py-2 text-sm hover:bg-zinc-700">Cancel</button>
+      <button id="actionDialogConfirm" type="submit" class="rounded-lg bg-zinc-100 px-4 py-2 text-sm font-semibold text-zinc-900 hover:bg-white data-[danger=true]:bg-red-600 data-[danger=true]:text-white data-[danger=true]:hover:bg-red-500">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+(function () {
+  const dialog = document.getElementById('actionDialog');
+  const form = document.getElementById('actionDialogForm');
+  const fields = document.getElementById('actionDialogFields');
+  const input = document.getElementById('actionDialogValue');
+  const cancel = document.getElementById('actionDialogCancel');
+  const confirmButton = document.getElementById('actionDialogConfirm');
+
+  // Delegate to the document so refreshed file lists use the same dialog.
+  document.addEventListener('click', event => {
+    const button = event.target.closest('button[data-dialog-action]');
+    if (!button) return;
+    const action = button.dataset.dialogAction;
+    if (!['rename', 'move', 'delete-file', 'delete-user'].includes(action)) return;
+    event.preventDefault();
+
+    const renaming = action === 'rename';
+    const deletingUser = action === 'delete-user';
+    const deleting = action === 'delete-file' || deletingUser;
+    const name = button.dataset.name;
+    const verb = deletingUser ? 'Delete user' : (deleting ? 'Delete' : (renaming ? 'Rename' : 'Move'));
+    document.getElementById('actionDialogTitle').textContent = verb + ' "' + name + '"' + (deleting ? '?' : '');
+    const description = document.getElementById('actionDialogDescription');
+    description.hidden = !deleting;
+    description.textContent = !deleting ? '' : deletingUser
+      ? 'The user will lose access. Their uploads will be preserved and their username and folder will remain reserved.'
+      : (button.dataset.directory === 'true' ? 'This permanently deletes the folder and everything inside it.' : 'This permanently deletes the file.');
+
+    // Set attributes directly: the hidden input named "action" can shadow
+    // the form's action property in the DOM.
+    form.setAttribute('action', deletingUser ? '/admin' : '/files');
+    fields.replaceChildren();
+    const values = deletingUser
+      ? {action: 'delete', user_id: button.dataset.userId}
+      : {action: deleting ? 'delete' : action, path: button.dataset.path, dir: button.dataset.dir || ''};
+    for (const [name, value] of Object.entries(values)) {
+      const field = document.createElement('input');
+      field.type = 'hidden';
+      field.name = name;
+      field.value = value;
+      fields.append(field);
+    }
+
+    document.getElementById('actionDialogInputGroup').hidden = deleting;
+    document.getElementById('actionDialogLabel').textContent = renaming ? 'New name' : 'Destination folder';
+    document.getElementById('actionDialogHelp').hidden = action !== 'move';
+    input.setAttribute('aria-describedby', action === 'move' ? 'actionDialogHelp' : '');
+    input.disabled = deleting;
+    input.required = renaming;
+    input.name = renaming ? 'name' : 'destination';
+    input.maxLength = renaming ? 255 : 4095;
+    input.value = deleting ? '' : (renaming ? name : button.dataset.dir || '');
+    confirmButton.textContent = deleting ? 'Delete' : 'Save';
+    confirmButton.dataset.danger = String(deleting);
+    dialog.showModal();
+    if (deleting) {
+      cancel.focus();
+    } else {
+      input.focus();
+      input.select();
+    }
+  });
+  cancel.addEventListener('click', () => dialog.close());
+})();
+</script>
+{{end}}

@@ -14,7 +14,10 @@ var indexHTML string
 //go:embed templates/files.html
 var filesHTML string
 
-var indexTmpl = template.Must(template.New("index").Parse(indexHTML + filesHTML))
+//go:embed templates/dialog.html
+var dialogHTML string
+
+var indexTmpl = template.Must(template.New("index").Parse(indexHTML + filesHTML + dialogHTML))
 var filesTmpl = indexTmpl.Lookup("fileList")
 
 //go:embed templates/login.html
@@ -25,7 +28,7 @@ var adminHTML string
 
 var (
 	loginTmpl = template.Must(template.New("login").Parse(loginHTML))
-	adminTmpl = template.Must(template.New("admin").Parse(adminHTML))
+	adminTmpl = template.Must(template.New("admin").Parse(adminHTML + dialogHTML))
 )
 
 type loginPage struct {
