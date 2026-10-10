@@ -4,32 +4,29 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"math"
 	"net"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 
 	_ "modernc.org/sqlite"
 )
 
 type store struct {
-	db *sql.DB
+	db          *sql.DB
+	uploadLocks sync.Map
 }
 
 type settings struct {
-	dir      string
-	maxBytes int64
-	listen   string
+	dir    string
+	listen string
 }
 
 func (s settings) validate() error {
 	if s.dir == "" {
 		return fmt.Errorf("upload directory cannot be empty")
-	}
-	if s.maxBytes <= 0 || s.maxBytes > math.MaxInt64-multipartOverhead {
-		return fmt.Errorf("upload limit must be positive and allow for multipart overhead")
 	}
 	_, port, err := net.SplitHostPort(s.listen)
 	if err != nil {
@@ -73,11 +70,15 @@ func openStore(ctx context.Context, path string) (*store, error) {
 }
 
 func (s *store) initialize(ctx context.Context) error {
-	_, err := s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	_, err = tx.ExecContext(ctx, fmt.Sprintf(`
 CREATE TABLE IF NOT EXISTS settings (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   uploads_dir TEXT NOT NULL,
-  max_bytes INTEGER NOT NULL CHECK (max_bytes > 0),
   listen TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS users (
@@ -88,6 +89,7 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash BLOB NOT NULL,
   is_admin INTEGER NOT NULL CHECK (is_admin IN (0, 1)),
   auth_version INTEGER NOT NULL DEFAULT 0,
+  quota_bytes INTEGER NOT NULL DEFAULT %d CHECK (quota_bytes > 0),
   deleted_at INTEGER
 );
 CREATE TABLE IF NOT EXISTS sessions (
@@ -99,24 +101,43 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 CREATE INDEX IF NOT EXISTS sessions_user_id ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS sessions_expires_at ON sessions(expires_at);
-`)
+`, defaultUserQuota))
 	if err != nil {
 		return err
+	}
+	var hasQuota, hasUploadLimit bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pragma_table_info('users') WHERE name = 'quota_bytes')`).Scan(&hasQuota); err != nil {
+		return err
+	}
+	if !hasQuota {
+		if _, err := tx.ExecContext(ctx, fmt.Sprintf(`ALTER TABLE users ADD COLUMN quota_bytes INTEGER NOT NULL DEFAULT %d CHECK (quota_bytes > 0)`, defaultUserQuota)); err != nil {
+			return err
+		}
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pragma_table_info('settings') WHERE name = 'max_bytes')`).Scan(&hasUploadLimit); err != nil {
+		return err
+	}
+	if hasUploadLimit {
+		if _, err := tx.ExecContext(ctx, `ALTER TABLE settings DROP COLUMN max_bytes`); err != nil {
+			return err
+		}
 	}
 	dir, err := filepath.Abs("./uploads")
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx,
-		`INSERT OR IGNORE INTO settings (id, uploads_dir, max_bytes, listen) VALUES (1, ?, ?, ?)`,
-		dir, int64(200<<20), "0.0.0.0:8080")
-	return err
+	if _, err := tx.ExecContext(ctx,
+		`INSERT OR IGNORE INTO settings (id, uploads_dir, listen) VALUES (1, ?, ?)`,
+		dir, "0.0.0.0:8080"); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *store) loadSettings(ctx context.Context) (settings, error) {
 	var cfg settings
-	err := s.db.QueryRowContext(ctx, `SELECT uploads_dir, max_bytes, listen FROM settings WHERE id = 1`).
-		Scan(&cfg.dir, &cfg.maxBytes, &cfg.listen)
+	err := s.db.QueryRowContext(ctx, `SELECT uploads_dir, listen FROM settings WHERE id = 1`).
+		Scan(&cfg.dir, &cfg.listen)
 	if err != nil {
 		return cfg, err
 	}
@@ -127,7 +148,7 @@ func (s *store) saveSettings(ctx context.Context, cfg settings) error {
 	if err := cfg.validate(); err != nil {
 		return err
 	}
-	_, err := s.db.ExecContext(ctx, `UPDATE settings SET uploads_dir = ?, max_bytes = ?, listen = ? WHERE id = 1`,
-		cfg.dir, cfg.maxBytes, cfg.listen)
+	_, err := s.db.ExecContext(ctx, `UPDATE settings SET uploads_dir = ?, listen = ? WHERE id = 1`,
+		cfg.dir, cfg.listen)
 	return err
 }

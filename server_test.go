@@ -33,8 +33,8 @@ func TestRoutesAndEmbeddedPage(t *testing.T) {
 			if tt.status == http.StatusOK {
 				body := w.Body.String()
 				if w.Header().Get("Content-Type") != "text/html; charset=utf-8" ||
-					!strings.Contains(body, "Max upload: 1.00 KB") ||
-					!regexp.MustCompile(`const MAX_BYTES =\s*1024\s*;`).MatchString(body) {
+					!strings.Contains(body, "Storage:") ||
+					!regexp.MustCompile(`let REMAINING_BYTES =\s*1024\s*;`).MatchString(body) {
 					t.Fatalf("embedded page was not rendered correctly: %s", body)
 				}
 			}

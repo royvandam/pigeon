@@ -10,10 +10,9 @@ import (
 )
 
 type config struct {
-	dir      string
-	maxBytes int64
-	listen   string
-	store    *store
+	dir    string
+	listen string
+	store  *store
 }
 
 func newServer(cfg config) *http.Server {

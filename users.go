@@ -26,11 +26,12 @@ var (
 )
 
 type user struct {
-	ID       int64
-	Username string
-	Slug     string
-	Admin    bool
-	Version  int64
+	ID         int64
+	Username   string
+	Slug       string
+	Admin      bool
+	Version    int64
+	QuotaBytes int64
 }
 
 // Username keys are case-insensitive; slugs also remove accents and separators.
@@ -92,6 +93,13 @@ func (s *store) hasUsers(ctx context.Context) (bool, error) {
 }
 
 func (s *store) createUser(ctx context.Context, username, password string, admin bool) (user, error) {
+	return s.createUserWithQuota(ctx, username, password, admin, defaultUserQuota)
+}
+
+func (s *store) createUserWithQuota(ctx context.Context, username, password string, admin bool, quota int64) (user, error) {
+	if err := validateQuota(quota); err != nil {
+		return user{}, err
+	}
 	display, key, slug, err := normalizeUsername(username)
 	if err != nil {
 		return user{}, err
@@ -101,8 +109,8 @@ func (s *store) createUser(ctx context.Context, username, password string, admin
 		return user{}, err
 	}
 	result, err := s.db.ExecContext(ctx,
-		`INSERT INTO users (username, username_key, slug, password_hash, is_admin) VALUES (?, ?, ?, ?, ?)`,
-		display, key, slug, hash, admin)
+		`INSERT INTO users (username, username_key, slug, password_hash, is_admin, quota_bytes) VALUES (?, ?, ?, ?, ?, ?)`,
+		display, key, slug, hash, admin, quota)
 	if err != nil {
 		var sqliteErr *sqlite.Error
 		if errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
@@ -111,7 +119,7 @@ func (s *store) createUser(ctx context.Context, username, password string, admin
 		return user{}, err
 	}
 	id, err := result.LastInsertId()
-	return user{ID: id, Username: display, Slug: slug, Admin: admin}, err
+	return user{ID: id, Username: display, Slug: slug, Admin: admin, QuotaBytes: quota}, err
 }
 
 func (s *store) authenticate(ctx context.Context, username, password string) (user, error) {
@@ -122,8 +130,8 @@ func (s *store) authenticate(ctx context.Context, username, password string) (us
 	var u user
 	var hash []byte
 	err = s.db.QueryRowContext(ctx,
-		`SELECT id, username, slug, is_admin, auth_version, password_hash FROM users WHERE username_key = ? AND deleted_at IS NULL`, key).
-		Scan(&u.ID, &u.Username, &u.Slug, &u.Admin, &u.Version, &hash)
+		`SELECT id, username, slug, is_admin, auth_version, quota_bytes, password_hash FROM users WHERE username_key = ? AND deleted_at IS NULL`, key).
+		Scan(&u.ID, &u.Username, &u.Slug, &u.Admin, &u.Version, &u.QuotaBytes, &hash)
 	if errors.Is(err, sql.ErrNoRows) {
 		// Match the work performed for an existing user's incorrect password.
 		hash = []byte("$2a$10$7EqJtq98hPqEX7fNZaFWoO5uZRxBxgGhK8DckbuZuODGVdLmRMaeW")
@@ -137,7 +145,7 @@ func (s *store) authenticate(ctx context.Context, username, password string) (us
 }
 
 func (s *store) listUsers(ctx context.Context) ([]user, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, username, slug, is_admin FROM users WHERE deleted_at IS NULL ORDER BY username_key`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, username, slug, is_admin, quota_bytes FROM users WHERE deleted_at IS NULL ORDER BY username_key`)
 	if err != nil {
 		return nil, err
 	}
@@ -145,7 +153,7 @@ func (s *store) listUsers(ctx context.Context) ([]user, error) {
 	var users []user
 	for rows.Next() {
 		var u user
-		if err := rows.Scan(&u.ID, &u.Username, &u.Slug, &u.Admin); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.Slug, &u.Admin, &u.QuotaBytes); err != nil {
 			return nil, err
 		}
 		users = append(users, u)

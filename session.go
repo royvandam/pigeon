@@ -66,11 +66,11 @@ func (s *store) session(ctx context.Context, token string) (authentication, erro
 	var a authentication
 	a.TokenHash = tokenHash(token)
 	err := s.db.QueryRowContext(ctx, `
-SELECT u.id, u.username, u.slug, u.is_admin, u.auth_version, s.csrf_token
+SELECT u.id, u.username, u.slug, u.is_admin, u.auth_version, u.quota_bytes, s.csrf_token
 FROM sessions s JOIN users u ON u.id = s.user_id
 WHERE s.token_hash = ? AND s.expires_at > ? AND u.deleted_at IS NULL AND s.user_version = u.auth_version`,
 		a.TokenHash, time.Now().Unix()).
-		Scan(&a.User.ID, &a.User.Username, &a.User.Slug, &a.User.Admin, &a.User.Version, &a.CSRFToken)
+		Scan(&a.User.ID, &a.User.Username, &a.User.Slug, &a.User.Admin, &a.User.Version, &a.User.QuotaBytes, &a.CSRFToken)
 	if errors.Is(err, sql.ErrNoRows) {
 		return authentication{}, errInvalidCredentials
 	}

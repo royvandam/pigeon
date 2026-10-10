@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"html/template"
 	"net/http"
+	"path/filepath"
 )
 
 //go:embed templates/index.html
@@ -54,18 +55,27 @@ func (cfg config) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
+	used, err := diskUsage(r.Context(), filepath.Join(cfg.dir, a.User.Slug))
+	if err != nil {
+		http.Error(w, "failed to check storage usage", http.StatusInternalServerError)
+		return
+	}
 	data := struct {
-		MaxHuman  string
-		MaxBytes  int64
-		Username  string
-		Admin     bool
-		CSRFToken string
+		QuotaHuman     string
+		UsedHuman      string
+		RemainingHuman string
+		RemainingBytes int64
+		Username       string
+		Admin          bool
+		CSRFToken      string
 	}{
-		MaxHuman:  humanBytes(cfg.maxBytes),
-		MaxBytes:  cfg.maxBytes,
-		Username:  a.User.Username,
-		Admin:     a.User.Admin,
-		CSRFToken: a.CSRFToken,
+		QuotaHuman:     humanBytes(a.User.QuotaBytes),
+		UsedHuman:      humanBytes(used),
+		RemainingHuman: humanBytes(remainingQuota(a.User.QuotaBytes, used)),
+		RemainingBytes: remainingQuota(a.User.QuotaBytes, used),
+		Username:       a.User.Username,
+		Admin:          a.User.Admin,
+		CSRFToken:      a.CSRFToken,
 	}
 	renderTemplate(w, indexTmpl, data, http.StatusOK)
 }

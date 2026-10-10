@@ -18,7 +18,8 @@ accounts and do not prompt again. First-run input can also be supplied on stdin
 as three lines for automated provisioning.
 
 Open http://127.0.0.1:8080 and sign in. Administrators can open `/admin` to create
-regular users or additional administrators, delete users, and reset passwords.
+regular users or additional administrators, assign and change disk quotas, delete
+users, and reset passwords.
 Regular users can upload files but cannot access user management. An administrator
 cannot delete their own account or the last administrator. Resetting a password
 signs that user out on every device; resetting your own password returns you to
@@ -28,17 +29,39 @@ the login page.
 
 The SQLite database defaults to `./uploader.db`. Select another location with
 `-db /path/to/uploader.db`. The database stores usernames, password hashes,
-administrator roles, login sessions, and server settings.
+administrator roles, per-user disk quotas, login sessions, and server settings.
 
-On a new database, settings default to `./uploads`, a 200 MiB file limit, and
-`0.0.0.0:8080`. Use `-dir`, `-max`, or `-listen` to change them. Overrides are saved
-in SQLite and reused on later starts without those flags. The upload directory
-is stored as an absolute path. Size suffixes such as `K`, `MB`, and `GB` use powers
-of 1024. Another 10 MiB is allowed for multipart overhead.
+On a new database, server settings default to `./uploads` and `0.0.0.0:8080`.
+Use `-dir` or `-listen` to change them. Overrides are saved in SQLite and reused
+on later starts without those flags. The upload directory is stored as an absolute path.
 
 ```sh
-go run . -db ./uploader.db -dir ./uploads -max 500MB -listen 127.0.0.1:8080
+go run . -db ./uploader.db -dir ./uploads -listen 127.0.0.1:8080
 ```
+
+## Disk quotas
+
+Every account, including the initial administrator, defaults to `1GB` of total
+stored files (1 GiB, or 1,073,741,824 bytes). Admins can supply another quota when
+creating a user and edit existing users' quotas on `/admin`. Quotas must be
+positive; values such as `500MB`, `2GB`, or `100B` use powers of 1024.
+
+The upload page shows used, total, and remaining storage and updates these values
+after an upload. The server measures all regular file sizes inside each user's
+folder, including files already on disk and files in subfolders. Removing files
+from the folder frees quota. Multipart overhead is excluded from disk usage;
+requests allow up to another 10 MiB for multipart data.
+
+Uploads exceeding the remaining quota receive HTTP 413, and partial files are
+removed. Uploads for the same user and quota edits are serialized in the running
+server; different users can upload simultaneously. Run one server process per
+upload root. A quota may be reduced below current usage: existing files are
+preserved and new uploads are blocked until usage falls below the quota or an
+admin raises it.
+
+Existing databases are migrated automatically: all existing users receive `1GB`,
+and the old global upload limit and `-max` flag are removed. Accounts, sessions,
+uploads, and the other server settings are preserved.
 
 ## Upload folders and account deletion
 
@@ -64,7 +87,8 @@ curl --user 'Roy Van Dijk' --form 'file=@document.pdf' http://127.0.0.1:8080/upl
 ```
 
 Curl prompts for the password. Successful responses include `saved_as` and
-`bytes`. The first part named `file` is saved; subsequent parts are ignored.
+`bytes`. Responses also include `X-Quota-Limit`, `X-Quota-Used`, and
+`X-Quota-Remaining` headers (bytes). The first part named `file` is saved; subsequent parts are ignored.
 The shared `-password` flag and `X-Upload-Password` header have been removed.
 
 The browser uses an HttpOnly session cookie valid for 12 hours. Forms require
@@ -88,5 +112,6 @@ the binary. The browser loads Tailwind CSS from a CDN.
 `setup.go` handles first-run provisioning, `users.go` manages accounts, and
 `session.go` and `auth.go` handle authentication. `admin.go`, `index.go`, and
 `upload.go` serve the management, upload page, and upload endpoint. `server.go`
-handles routing and shutdown; size and filename helpers remain separate.
+handles routing and shutdown; `quota.go` measures storage and enforces quotas.
+Size and filename helpers remain separate.
 SIGINT and SIGTERM allow active requests up to 10 seconds to finish.

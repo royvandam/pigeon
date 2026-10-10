@@ -12,7 +12,7 @@ import (
 
 const testPassword = "test-password"
 
-func newTestConfig(t *testing.T, maxBytes int64) config {
+func newTestConfig(t *testing.T, quota int64) config {
 	t.Helper()
 	root := t.TempDir()
 	s, err := openStore(context.Background(), filepath.Join(root, "app.db"))
@@ -20,10 +20,10 @@ func newTestConfig(t *testing.T, maxBytes int64) config {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { s.db.Close() })
-	if _, err := s.createUser(context.Background(), "Test User", testPassword, false); err != nil {
+	if _, err := s.createUserWithQuota(context.Background(), "Test User", testPassword, false, quota); err != nil {
 		t.Fatal(err)
 	}
-	return config{dir: filepath.Join(root, "uploads"), maxBytes: maxBytes, store: s}
+	return config{dir: filepath.Join(root, "uploads"), store: s}
 }
 
 func readUploadDir(root, slug string) ([]os.DirEntry, error) {
@@ -41,7 +41,7 @@ func TestSettingsAndUsersSurviveRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := settings{dir: "/tmp/saved-uploads", maxBytes: 12345, listen: "127.0.0.1:9000"}
+	want := settings{dir: "/tmp/saved-uploads", listen: "127.0.0.1:9000"}
 	if err := s.saveSettings(ctx, want); err != nil {
 		t.Fatal(err)
 	}

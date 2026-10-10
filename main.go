@@ -16,7 +16,6 @@ func main() {
 	var (
 		database = flag.String("db", "./uploader.db", "SQLite database for users and server settings")
 		dir      = flag.String("dir", "", "Set and persist the upload directory (initial default: ./uploads)")
-		maxSize  = flag.String("max", "", "Set and persist the upload limit (initial default: 200MB)")
 		listen   = flag.String("listen", "", "Set and persist the listen address (initial default: 0.0.0.0:8080)")
 	)
 	flag.Parse()
@@ -35,12 +34,6 @@ func main() {
 		settings.dir, err = filepath.Abs(*dir)
 		if err != nil {
 			log.Fatalf("invalid -dir: %v", err)
-		}
-	}
-	if *maxSize != "" {
-		settings.maxBytes, err = parseSize(*maxSize)
-		if err != nil {
-			log.Fatalf("invalid -max: %v", err)
 		}
 	}
 	if *listen != "" {
@@ -63,13 +56,13 @@ func main() {
 		log.Fatalf("create upload directory: %v", err)
 	}
 
-	cfg := config{dir: settings.dir, maxBytes: settings.maxBytes, listen: settings.listen, store: s}
+	cfg := config{dir: settings.dir, listen: settings.listen, store: s}
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	log.Printf("listening on http://%s", cfg.listen)
 	log.Printf("upload dir: %s", cfg.dir)
-	log.Printf("max upload: %d bytes", cfg.maxBytes)
+	log.Printf("default user quota: %s", humanBytes(defaultUserQuota))
 
 	if err := runServer(ctx, newServer(cfg)); err != nil {
 		log.Fatalf("server error: %v", err)

@@ -27,11 +27,7 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 2) Cap total body size (file + multipart overhead)
-	r.Body = http.MaxBytesReader(w, r.Body, cfg.maxBytes+multipartOverhead)
-	defer r.Body.Close()
-
-	// 3) Parse multipart manually so we can stream
+	// Parse multipart manually so we can stream.
 	ct := r.Header.Get("Content-Type")
 	mediaType, params, err := mime.ParseMediaType(ct)
 	if err != nil || mediaType != "multipart/form-data" {
@@ -45,8 +41,36 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mr := multipart.NewReader(r.Body, boundary)
+	unlock, err := cfg.store.lockUploads(r.Context(), a.User.ID)
+	if err != nil {
+		http.Error(w, "upload canceled", http.StatusRequestTimeout)
+		return
+	}
+	defer unlock()
+	quota, err := cfg.store.userQuota(r.Context(), a.User)
+	if err != nil {
+		if errors.Is(err, errInvalidCredentials) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		} else {
+			http.Error(w, "failed to load disk quota", http.StatusInternalServerError)
+		}
+		return
+	}
 	dir := filepath.Join(cfg.dir, a.User.Slug)
+	used, err := diskUsage(r.Context(), dir)
+	if err != nil {
+		http.Error(w, "failed to check storage usage", http.StatusInternalServerError)
+		return
+	}
+	remaining := remainingQuota(quota, used)
+	setQuotaHeaders(w, quota, used)
+	if remaining == 0 {
+		http.Error(w, "disk quota exhausted", http.StatusRequestEntityTooLarge)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, remaining+multipartOverhead)
+	defer r.Body.Close()
+	mr := multipart.NewReader(r.Body, boundary)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		http.Error(w, "failed to create user directory", http.StatusInternalServerError)
 		return
@@ -72,7 +96,7 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		// 4) Prepare output file
+		// Prepare output file.
 		orig := part.FileName()
 		safe := sanitizeFilename(orig)
 		if safe == "" {
@@ -93,13 +117,24 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// 5) Stream with hard size cap
+		// Write at most the remaining quota, then probe for an extra byte without
+		// writing it to disk. An oversized upload is removed in full.
 		limited := &io.LimitedReader{
 			R: part,
-			N: cfg.maxBytes + 1,
+			N: remaining,
 		}
 
 		n, copyErr := io.Copy(out, limited)
+		tooLarge := false
+		if copyErr == nil && limited.N == 0 {
+			var extra [1]byte
+			_, probeErr := io.ReadFull(part, extra[:])
+			if probeErr == nil {
+				tooLarge = true
+			} else if probeErr != io.EOF {
+				copyErr = probeErr
+			}
+		}
 
 		closeErr := out.Close()
 
@@ -109,12 +144,11 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// If we consumed maxBytes+1, the file is too big
-		if limited.N == 0 {
+		if tooLarge {
 			os.Remove(path)
 			http.Error(
 				w,
-				fmt.Sprintf("file too large (limit %s)", humanBytes(cfg.maxBytes)),
+				fmt.Sprintf("disk quota exceeded (%s available)", humanBytes(remaining)),
 				http.StatusRequestEntityTooLarge,
 			)
 			return
@@ -138,6 +172,7 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	setQuotaHeaders(w, quota, used+written)
 	fmt.Fprintf(w, "ok\nsaved_as=%s\nbytes=%d\n", savedName, written)
 }
 
