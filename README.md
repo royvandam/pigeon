@@ -30,6 +30,10 @@ confirmation, restores the account's role, quota, and uploaded files, and
 displays a fresh four-word passphrase. Old passwords, sessions, and share links
 remain invalid. Creating a user with a deleted account's username or normalized
 folder name offers this recycling action instead of just reporting a conflict.
+**Purge account** permanently removes a deleted account and all its uploaded
+files and folders after confirmation. Its username and normalized folder name
+can then be used for a new account with empty storage. Purging is available only
+for deleted accounts; active users must be deleted first.
 Regular users can manage their own files but cannot access user management. An administrator
 cannot delete their own account or the last administrator. Resetting a password
 signs that user out on every device; resetting your own password returns you to
@@ -146,11 +150,17 @@ username or normalized folder name is already reserved.
 Deleting an account disables access immediately and invalidates its sessions and
 share links.
 Its files remain on disk, and a small deleted account record reserves its
-username and folder until an administrator explicitly recycles that account.
+username and folder until an administrator explicitly recycles or purges that
+account.
 Recycling preserves the account's identity and files while issuing a new
-passphrase; it does not reactivate previous sessions or public links. Files
-uploaded by the previous shared-password implementation remain in the upload
-root; they are not automatically assigned to an account.
+passphrase; it does not reactivate previous sessions or public links. Purging
+permanently deletes the account and its uploads, including empty folders and
+unfinished upload files, and releases its username and normalized folder name.
+If file removal fails, the account stays deleted and its name stays reserved;
+some files may already have been removed. Correct the storage problem and retry
+the purge to finish it. Files uploaded by the previous shared-password
+implementation remain in the upload root; they are not automatically assigned
+to an account.
 
 ## API
 

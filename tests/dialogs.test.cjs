@@ -173,6 +173,31 @@ test('account recycling explicitly confirms preserved uploads and resets other d
   assert.equal(p.elements.get('actionDialogConfirmLabel').textContent, 'Save');
 });
 
+test('purging an account confirms permanent upload deletion and resets recycled dialog state', () => {
+  const p = page();
+  p.open('recycle-user', {name: 'Alice', userId: '42', role: 'User', quota: '1.00 GB'});
+  p.cancel();
+  assert.equal(p.open('purge-user', {name: 'Alice', userId: '42'}).prevented, true);
+  assert.equal(p.dialog.open, true);
+  assert.equal(p.form.attributes.action, '/admin');
+  assert.deepEqual(p.fields(), {action: 'purge', user_id: '42'});
+  assert.equal(p.elements.get('actionDialogTitle').textContent, 'Purge account "Alice"?');
+  assert.match(p.elements.get('actionDialogDescription').textContent, /permanently deletes the account and all its uploaded files and folders/);
+  assert.match(p.elements.get('actionDialogDescription').textContent, /cannot be undone/);
+  assert.equal(p.elements.get('actionDialogConfirmLabel').textContent, 'Purge account');
+  assert.equal(p.elements.get('actionDialogConfirm').dataset.danger, 'true');
+  assert.equal(p.input.disabled, true);
+  assert.equal(p.input.required, false);
+  assert.equal(p.elements.get('actionDialogInputGroup').hidden, true);
+  assert.equal(p.focused(), 'actionDialogCancel');
+  assert.equal(p.requests.length, 0);
+  p.cancel();
+  assert.equal(p.dialog.open, false);
+  p.open('rename');
+  assert.equal(p.input.disabled, false);
+  assert.equal(p.elements.get('actionDialogConfirm').dataset.danger, 'false');
+});
+
 test('sharing explicitly creates, copies and revokes a link in the existing dialog', async () => {
   const p = page();
   assert.equal(p.open('share').prevented, true);

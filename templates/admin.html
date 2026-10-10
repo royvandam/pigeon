@@ -37,7 +37,8 @@
     <section aria-labelledby="recycleCandidateTitle" class="mt-6 rounded-2xl border border-zinc-700 bg-zinc-900/40 p-6">
       <h2 id="recycleCandidateTitle" class="font-semibold">This username or upload folder belongs to a deleted account</h2>
       <p class="mt-3 text-sm text-zinc-300">Recycle {{.RecycleCandidate.Username}} to restore the account with a new passphrase and access to its preserved uploads. Its existing role ({{if .RecycleCandidate.Admin}}Administrator{{else}}User{{end}}) and quota ({{.RecycleCandidate.QuotaHuman}}) will be kept.</p>
-      <button type="button" data-dialog-action="recycle-user" data-name="{{.RecycleCandidate.Username}}" data-user-id="{{.RecycleCandidate.ID}}" data-role="{{if .RecycleCandidate.Admin}}Administrator{{else}}User{{end}}" data-quota="{{.RecycleCandidate.QuotaHuman}}" class="mt-4 rounded-lg bg-zinc-100 px-4 py-2 font-semibold text-zinc-900 hover:bg-white"><i class="fa-solid fa-recycle mr-1" aria-hidden="true"></i>Recycle account</button>
+      <p class="mt-2 text-sm text-zinc-400">To create a new account using this username or folder, purge the deleted account and its uploads first.</p>
+      <div class="mt-4">{{template "deletedUserActions" .RecycleCandidate}}</div>
     </section>
     {{end}}
     <section class="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-6">
@@ -114,6 +115,7 @@
     <section id="deletedUsers" aria-labelledby="deletedUsersTitle" class="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-6">
       <h2 id="deletedUsersTitle" class="font-semibold">Deleted users</h2>
       <p class="mt-2 text-sm text-zinc-400">Recycle an account to restore its username, role, quota, and preserved uploads with a new passphrase.</p>
+      <p class="mt-2 text-sm text-zinc-400">Purging permanently removes the account and all its uploads, freeing its username and folder for reuse.</p>
       <div class="mt-4 overflow-x-auto">
         <table class="w-full text-left text-sm">
           <thead class="text-zinc-400"><tr class="border-b border-zinc-800">
@@ -130,7 +132,7 @@
               <td class="py-4 pr-4">{{if .Admin}}Administrator{{else}}User{{end}}</td>
               <td class="py-4 pr-4"><code>{{.Slug}}/</code></td>
               <td class="py-4 pr-4 text-zinc-400">{{.UsedHuman}} used / {{.QuotaHuman}}</td>
-              <td class="py-4"><button type="button" data-dialog-action="recycle-user" data-name="{{.Username}}" data-user-id="{{.ID}}" data-role="{{if .Admin}}Administrator{{else}}User{{end}}" data-quota="{{.QuotaHuman}}" class="whitespace-nowrap rounded-lg border border-zinc-600 px-3 py-2 hover:bg-zinc-800"><i class="fa-solid fa-recycle mr-1" aria-hidden="true"></i>Recycle account</button></td>
+              <td class="py-4">{{template "deletedUserActions" .}}</td>
             </tr>
             {{end}}
           </tbody>
@@ -143,3 +145,10 @@
   {{template "formValidation" .}}
 </body>
 </html>
+
+{{define "deletedUserActions"}}
+<div class="flex flex-wrap gap-2">
+  <button type="button" data-dialog-action="recycle-user" data-name="{{.Username}}" data-user-id="{{.ID}}" data-role="{{if .Admin}}Administrator{{else}}User{{end}}" data-quota="{{.QuotaHuman}}" class="whitespace-nowrap rounded-lg border border-zinc-600 px-3 py-2 hover:bg-zinc-800"><i class="fa-solid fa-recycle mr-1" aria-hidden="true"></i>Recycle account</button>
+  <button type="button" data-dialog-action="purge-user" data-name="{{.Username}}" data-user-id="{{.ID}}" class="whitespace-nowrap rounded-lg border border-red-900 px-3 py-2 text-red-300 hover:bg-red-950/40"><i class="fa-solid fa-trash-can mr-1" aria-hidden="true"></i>Purge account</button>
+</div>
+{{end}}

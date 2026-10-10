@@ -23,7 +23,7 @@ var (
 	errUserNotFound        = errors.New("user not found")
 	errDeleteSelf          = errors.New("you cannot delete your own account")
 	errLastAdmin           = errors.New("the last administrator cannot be deleted")
-	errDeletedUserNotFound = errors.New("deleted account not found; it may already have been recycled")
+	errDeletedUserNotFound = errors.New("deleted account not found; it may already have been recycled or purged")
 )
 
 type user struct {

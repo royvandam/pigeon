@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"errors"
+	"log"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -63,7 +64,7 @@ func (cfg config) renderAdmin(w http.ResponseWriter, r *http.Request, a authenti
 	data.Users = rows
 	data.DeletedUsers = deletedRows
 	if data.RecycleCandidateID != 0 && data.RecycleCandidate == nil {
-		data.Error = "That account has already been recycled. Choose a different username."
+		data.Error = "That account has already been recycled or purged. Refresh the page and try again."
 		status = http.StatusConflict
 	}
 	renderTemplate(w, adminTmpl, data, status)
@@ -80,7 +81,7 @@ func (cfg config) handleAdmin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodGet {
-		messages := map[string]string{"created": "User created.", "deleted": "User deleted. Their uploads have been preserved.", "reset": "Password reset. The user must sign in again.", "quota": "Disk quota updated."}
+		messages := map[string]string{"created": "User created.", "deleted": "User deleted. Their uploads have been preserved.", "purged": "Account and uploads permanently deleted. The username and folder are available for reuse.", "reset": "Password reset. The user must sign in again.", "quota": "Disk quota updated."}
 		cfg.renderAdmin(w, r, a, adminPage{Message: messages[r.URL.Query().Get("result")]}, http.StatusOK)
 		return
 	}
@@ -110,13 +111,21 @@ func (cfg config) handleAdmin(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-	case "delete", "reset", "quota", "recycle":
+	case "delete", "reset", "quota", "recycle", "purge":
 		id, parseErr := strconv.ParseInt(r.PostForm.Get("user_id"), 10, 64)
 		if parseErr != nil || id <= 0 {
 			http.Error(w, "invalid user ID", http.StatusBadRequest)
 			return
 		}
-		if r.PostForm.Get("action") == "recycle" {
+		if r.PostForm.Get("action") == "purge" {
+			err = cfg.purgeUser(r.Context(), id)
+			if err != nil && !errors.Is(err, errDeletedUserNotFound) {
+				log.Printf("purge account %d: %v", id, err)
+				cfg.renderAdmin(w, r, a, adminPage{Error: "Unable to finish purging this account. Its username remains reserved. Some uploads may have been removed; resolve the storage problem and try again."}, http.StatusInternalServerError)
+				return
+			}
+			result = "purged"
+		} else if r.PostForm.Get("action") == "recycle" {
 			passphrase, generationErr := generatePassphrase()
 			if generationErr != nil {
 				http.Error(w, "failed to generate passphrase", http.StatusInternalServerError)

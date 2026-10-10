@@ -33,18 +33,19 @@
     const button = event.target.closest('button[data-dialog-action]');
     if (!button) return;
     const action = button.dataset.dialogAction;
-    if (!['rename', 'move', 'delete-file', 'delete-user', 'recycle-user', 'share'].includes(action)) return;
+    if (!['rename', 'move', 'delete-file', 'delete-user', 'recycle-user', 'purge-user', 'share'].includes(action)) return;
     event.preventDefault();
 
     const renaming = action === 'rename';
     const sharing = action === 'share';
     const deletingUser = action === 'delete-user';
     const recyclingUser = action === 'recycle-user';
-    const managingUser = deletingUser || recyclingUser;
-    const deleting = action === 'delete-file' || deletingUser;
+    const purgingUser = action === 'purge-user';
+    const managingUser = deletingUser || recyclingUser || purgingUser;
+    const deleting = action === 'delete-file' || deletingUser || purgingUser;
     const confirming = deleting || recyclingUser;
     const name = button.dataset.name;
-    const verb = sharing ? 'Share' : (recyclingUser ? 'Recycle account' : (deletingUser ? 'Delete user' : (deleting ? 'Delete' : (renaming ? 'Rename' : 'Move'))));
+    const verb = sharing ? 'Share' : (purgingUser ? 'Purge account' : (recyclingUser ? 'Recycle account' : (deletingUser ? 'Delete user' : (deleting ? 'Delete' : (renaming ? 'Rename' : 'Move')))));
     document.getElementById('actionDialogTitle').textContent = verb + ' "' + name + '"' + (confirming ? '?' : '');
     const description = document.getElementById('actionDialogDescription');
     description.hidden = !confirming && !sharing;
@@ -52,6 +53,8 @@
       ? 'Anyone with the link can download ' + (button.dataset.directory === 'true' ? 'this folder as a ZIP, including files added later.' : 'this file.') + ' Links stay active until revoked or the item is renamed, moved, or deleted.'
       : recyclingUser
       ? 'A new passphrase will be generated. This account will regain access to its preserved uploads with its existing role (' + button.dataset.role + ') and quota (' + button.dataset.quota + '). Previous passwords, sessions, and share links will remain revoked.'
+      : purgingUser
+      ? 'This permanently deletes the account and all its uploaded files and folders. The username and upload folder will become available for a new account. This cannot be undone.'
       : !deleting ? '' : deletingUser
       ? 'The user will lose access. Their uploads will be preserved and their username and folder will remain reserved.'
       : (button.dataset.directory === 'true' ? 'This permanently deletes the folder and everything inside it.' : 'This permanently deletes the file.');
@@ -61,7 +64,7 @@
     form.setAttribute('action', sharing ? '/shares' : (managingUser ? '/admin' : '/files'));
     fields.replaceChildren();
     const values = sharing ? {} : managingUser
-      ? {action: recyclingUser ? 'recycle' : 'delete', user_id: button.dataset.userId}
+      ? {action: recyclingUser ? 'recycle' : (purgingUser ? 'purge' : 'delete'), user_id: button.dataset.userId}
       : {action: deleting ? 'delete' : action, path: button.dataset.path, dir: button.dataset.dir || ''};
     for (const [name, value] of Object.entries(values)) {
       const field = document.createElement('input');
@@ -82,7 +85,7 @@
     input.maxLength = renaming ? 255 : 4095;
     input.value = confirming || sharing ? '' : (renaming ? name : button.dataset.dir || '');
     input.dispatchEvent(new Event('input', {bubbles: true}));
-    document.getElementById('actionDialogConfirmLabel').textContent = recyclingUser ? 'Recycle account' : (deleting ? 'Delete' : 'Save');
+    document.getElementById('actionDialogConfirmLabel').textContent = purgingUser ? 'Purge account' : (recyclingUser ? 'Recycle account' : (deleting ? 'Delete' : 'Save'));
     document.getElementById('actionDialogConfirmIcon').className = 'fa-solid ' + (recyclingUser ? 'fa-recycle' : (deleting ? 'fa-trash-can' : 'fa-check')) + ' mr-1';
     confirmButton.dataset.danger = String(deleting);
     confirmButton.hidden = confirmButton.disabled = sharing;
