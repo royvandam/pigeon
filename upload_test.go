@@ -52,7 +52,7 @@ func TestUploadSizeBoundaryAndCleanup(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := newTestConfig(t, 4)
 			w := httptest.NewRecorder()
-			cfg.handleUpload(w, uploadRequest(t, "../../report?.txt", tt.contents))
+			cfg.handleUpload(w, uploadRequest(t, "report?.txt", tt.contents))
 			if w.Code != tt.wantStatus {
 				t.Fatalf("status = %d, want %d: %s", w.Code, tt.wantStatus, w.Body)
 			}

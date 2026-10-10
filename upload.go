@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"time"
 )
 
 const multipartOverhead = int64(10 << 20)
@@ -76,10 +75,12 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var (
-		savedName string
-		written   int64
-	)
+	batch, err := newUploadBatch(dir)
+	if err != nil {
+		http.Error(w, "failed to prepare upload", http.StatusInternalServerError)
+		return
+	}
+	defer batch.close()
 
 	for {
 		part, err := mr.NextPart()
@@ -92,88 +93,62 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if part.FormName() != "file" {
+			if _, err := io.Copy(io.Discard, part); err != nil {
+				http.Error(w, "multipart read error", uploadReadErrorStatus(err))
+				return
+			}
 			part.Close()
 			continue
 		}
 
-		// Prepare output file.
-		orig := part.FileName()
-		safe := sanitizeFilename(orig)
-		if safe == "" {
-			safe = "upload.bin"
-		}
-
-		name := fmt.Sprintf(
-			"%s_%s_%s",
-			time.Now().UTC().Format("20060102T150405Z"),
-			shortRandHex(6),
-			safe,
-		)
-
-		path := filepath.Join(dir, name)
-		out, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o640)
+		// Part.FileName strips directories; read the original filename parameter
+		// so browser webkitRelativePath values retain their hierarchy.
+		_, disposition, err := mime.ParseMediaType(part.Header.Get("Content-Disposition"))
 		if err != nil {
-			http.Error(w, "failed to create file", http.StatusInternalServerError)
+			http.Error(w, "invalid file disposition", http.StatusBadRequest)
 			return
 		}
-
-		// Write at most the remaining quota, then probe for an extra byte without
-		// writing it to disk. An oversized upload is removed in full.
-		limited := &io.LimitedReader{
-			R: part,
-			N: remaining,
+		name := disposition["filename"]
+		if err := batch.checkPath(name); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
 		}
-
-		n, copyErr := io.Copy(out, limited)
-		tooLarge := false
-		if copyErr == nil && limited.N == 0 {
-			var extra [1]byte
-			_, probeErr := io.ReadFull(part, extra[:])
-			if probeErr == nil {
-				tooLarge = true
-			} else if probeErr != io.EOF {
-				copyErr = probeErr
+		if err := batch.add(name, part, remaining-batch.bytes); err != nil {
+			if errors.Is(err, errDiskQuotaExceeded) {
+				http.Error(w, fmt.Sprintf("disk quota exceeded (%s available)", humanBytes(remaining)), http.StatusRequestEntityTooLarge)
+			} else {
+				var fileErr *os.PathError
+				status := uploadReadErrorStatus(err)
+				if errors.As(err, &fileErr) {
+					status = http.StatusInternalServerError
+				}
+				http.Error(w, "upload failed", status)
 			}
-		}
-
-		closeErr := out.Close()
-
-		if copyErr != nil {
-			os.Remove(path)
-			http.Error(w, "upload failed", uploadReadErrorStatus(copyErr))
 			return
 		}
-
-		if tooLarge {
-			os.Remove(path)
-			http.Error(
-				w,
-				fmt.Sprintf("disk quota exceeded (%s available)", humanBytes(remaining)),
-				http.StatusRequestEntityTooLarge,
-			)
-			return
-		}
-
-		if closeErr != nil {
-			os.Remove(path)
-			http.Error(w, "failed to save file", http.StatusInternalServerError)
-			return
-		}
-
 		part.Close()
-		savedName = name
-		written = n
-		break
 	}
 
-	if savedName == "" {
+	if batch.files == 0 {
 		http.Error(w, "missing file", http.StatusBadRequest)
+		return
+	}
+	if r.Context().Err() != nil {
+		http.Error(w, "upload canceled", http.StatusRequestTimeout)
+		return
+	}
+	savedName, group, err := batch.publish()
+	if err != nil {
+		http.Error(w, "failed to save upload", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	setQuotaHeaders(w, quota, used+written)
-	fmt.Fprintf(w, "ok\nsaved_as=%s\nbytes=%d\n", savedName, written)
+	setQuotaHeaders(w, quota, used+batch.bytes)
+	fmt.Fprintf(w, "ok\nsaved_as=%s\nbytes=%d\n", savedName, batch.bytes)
+	if group {
+		fmt.Fprintf(w, "files=%d\n", batch.files)
+	}
 }
 
 func uploadReadErrorStatus(err error) int {

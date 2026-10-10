@@ -25,6 +25,26 @@ cannot delete their own account or the last administrator. Resetting a password
 signs that user out on every device; resetting your own password returns you to
 the login page.
 
+## Uploading directories
+
+Use **Choose files** to select one or several files, or **Or choose a directory**
+to upload a directory and all files in its subfolders. The page shows the number
+of selected files, their combined size, and progress for the whole upload.
+
+Directory uploads preserve filenames (including spaces, Unicode, and dotfiles)
+and the folder hierarchy inside a unique upload folder. For example,
+`project/docs/readme.txt` is stored as
+`uploads/roy-van-dijk/<timestamp>_<random>/project/docs/readme.txt`.
+Selecting several individual files also saves them together in a unique folder.
+A single individual file keeps the existing timestamped, sanitized filename.
+Repeated uploads create separate destinations and do not overwrite earlier files.
+The directory picker includes files; empty directories are not created.
+
+The combined file size must fit the user's remaining quota. Each batch is
+streamed to a temporary directory and published only after the entire request
+succeeds. Invalid paths, duplicate paths, interrupted requests, or quota failures
+remove the whole temporary batch and preserve earlier uploads.
+
 ## Configuration
 
 The SQLite database defaults to `./uploader.db`. Select another location with
@@ -52,9 +72,9 @@ folder, including files already on disk and files in subfolders. Removing files
 from the folder frees quota. Multipart overhead is excluded from disk usage;
 requests allow up to another 10 MiB for multipart data.
 
-Uploads exceeding the remaining quota receive HTTP 413, and partial files are
-removed. Uploads for the same user and quota edits are serialized in the running
-server; different users can upload simultaneously. Run one server process per
+Uploads exceeding the remaining quota receive HTTP 413, and the entire failed
+batch is removed. Uploads for the same user and quota edits are serialized in the
+running server; different users can upload simultaneously. Run one server process per
 upload root. A quota may be reduced below current usage: existing files are
 preserved and new uploads are blocked until usage falls below the quota or an
 admin raises it.
@@ -79,16 +99,31 @@ root; they are not automatically assigned to an account.
 
 ## API
 
-`POST /upload` accepts `multipart/form-data` with a part named `file`. Authenticate
-using HTTP Basic authentication with a username and password:
+`POST /upload` accepts `multipart/form-data` with one or more parts named `file`.
+Authenticate using HTTP Basic authentication with a username and password:
 
 ```sh
 curl --user 'Roy Van Dijk' --form 'file=@document.pdf' http://127.0.0.1:8080/upload
 ```
 
-Curl prompts for the password. Successful responses include `saved_as` and
-`bytes`. Responses also include `X-Quota-Limit`, `X-Quota-Used`, and
-`X-Quota-Remaining` headers (bytes). The first part named `file` is saved; subsequent parts are ignored.
+Curl prompts for the password. To preserve a directory hierarchy, set each part's
+filename to its slash-separated relative path:
+
+```sh
+curl --user 'Roy Van Dijk' \
+  --form 'file=@project/readme.txt;filename=project/readme.txt' \
+  --form 'file=@project/docs/guide.pdf;filename=project/docs/guide.pdf' \
+  http://127.0.0.1:8080/upload
+```
+
+Successful responses include `saved_as` (the saved filename or batch folder) and
+`bytes` (the sum of all file sizes). Directory and multiple-file responses also
+include `files` (the number of saved files). Responses include `X-Quota-Limit`,
+`X-Quota-Used`, and `X-Quota-Remaining` headers (bytes). All parts named `file` are
+saved. Paths must be relative, use `/` separators, and contain no empty, `.` or
+`..` components, backslashes, Windows drive prefixes, or control characters. File and directory
+components may contain at most 255 bytes; full paths at most 4095 bytes. Duplicate
+paths and file/directory conflicts return HTTP 400 without saving any of the batch.
 The shared `-password` flag and `X-Upload-Password` header have been removed.
 
 The browser uses an HttpOnly session cookie valid for 12 hours. Forms require
@@ -111,7 +146,8 @@ the binary. The browser loads Tailwind CSS from a CDN.
 `main.go` handles startup, `database.go` persists settings and the schema,
 `setup.go` handles first-run provisioning, `users.go` manages accounts, and
 `session.go` and `auth.go` handle authentication. `admin.go`, `index.go`, and
-`upload.go` serve the management, upload page, and upload endpoint. `server.go`
-handles routing and shutdown; `quota.go` measures storage and enforces quotas.
+`upload.go` serve the management, upload page, and upload endpoint.
+`upload_files.go` streams and publishes batches. `server.go` handles routing and
+shutdown; `quota.go` measures storage and enforces quotas.
 Size and filename helpers remain separate.
 SIGINT and SIGTERM allow active requests up to 10 seconds to finish.

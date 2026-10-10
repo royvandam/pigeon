@@ -14,7 +14,7 @@
     <div class="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-6 shadow-sm">
       <div class="flex items-start justify-between gap-4">
         <div>
-          <h1 class="text-xl font-semibold">Upload a file</h1>
+          <h1 class="text-xl font-semibold">Upload files or a directory</h1>
           <p class="mt-1 text-sm text-zinc-400">Storage: <span id="storageUsed">{{.UsedHuman}}</span> / <span id="storageQuota">{{.QuotaHuman}}</span></p>
           <p class="mt-1 text-sm text-zinc-400">Available: <span id="storageRemaining">{{.RemainingHuman}}</span></p>
         </div>
@@ -32,19 +32,38 @@
 
       <div class="mt-6 space-y-4">
         <div>
-          <label for="file" class="block text-sm font-medium text-zinc-200">File</label>
+          <label for="file" class="block text-sm font-medium text-zinc-200">Choose files</label>
           <div class="mt-2 rounded-xl border border-dashed border-zinc-800 bg-zinc-950/20 p-4">
             <input
               id="file"
               type="file"
+              multiple
               class="block w-full text-sm text-zinc-200 file:mr-4 file:rounded-lg file:border-0 file:bg-zinc-800 file:px-3 file:py-2 file:text-sm file:font-medium file:text-zinc-100 hover:file:bg-zinc-700"
             />
-            <div class="mt-3 text-xs text-zinc-500">
-              Selected: <span id="fileName" class="text-zinc-300">none</span>
-              <span class="mx-2 text-zinc-700">|</span>
-              Size: <span id="fileSize" class="text-zinc-300">0 B</span>
-            </div>
           </div>
+        </div>
+
+        <div>
+          <label for="directory" class="block text-sm font-medium text-zinc-200">Or choose a directory</label>
+          <div class="mt-2 rounded-xl border border-dashed border-zinc-800 bg-zinc-950/20 p-4">
+            <input
+              id="directory"
+              type="file"
+              webkitdirectory
+              multiple
+              aria-describedby="directoryHelp"
+              class="block w-full text-sm text-zinc-200 file:mr-4 file:rounded-lg file:border-0 file:bg-zinc-800 file:px-3 file:py-2 file:text-sm file:font-medium file:text-zinc-100 hover:file:bg-zinc-700"
+            />
+            <p id="directoryHelp" class="mt-3 text-xs text-zinc-500">Includes files in all subfolders and preserves their names and folder structure.</p>
+          </div>
+        </div>
+
+        <div class="text-xs text-zinc-500" aria-live="polite">
+          Selected: <span id="fileName" class="text-zinc-300">none</span>
+          <span class="mx-2 text-zinc-700">|</span>
+          <span id="fileCount" class="text-zinc-300">0 files</span>
+          <span class="mx-2 text-zinc-700">|</span>
+          Size: <span id="fileSize" class="text-zinc-300">0 B</span>
         </div>
 
         <div class="flex items-center gap-3">
@@ -103,6 +122,9 @@
 
   const btn = document.getElementById('btn');
   const fileInput = document.getElementById('file');
+  const directoryInput = document.getElementById('directory');
+  const supportsDirectories = 'webkitdirectory' in directoryInput;
+  let selectedFiles = [];
 
   const pct = document.getElementById('pct');
   const spd = document.getElementById('spd');
@@ -116,6 +138,7 @@
   const status = document.getElementById('status');
 
   const fileName = document.getElementById('fileName');
+  const fileCount = document.getElementById('fileCount');
   const fileSize = document.getElementById('fileSize');
 
   function humanBytes(n) {
@@ -127,8 +150,13 @@
   }
 
   function setDisabled(disabled) {
-    btn.disabled = disabled || REMAINING_BYTES === 0;
+    btn.disabled = disabled || selectedFiles.length === 0 || REMAINING_BYTES === 0 || selectedSize() > REMAINING_BYTES;
     fileInput.disabled = disabled;
+    directoryInput.disabled = disabled || !supportsDirectories;
+  }
+
+  function selectedSize() {
+    return selectedFiles.reduce((total, file) => total + file.size, 0);
   }
 
   function setStatus(text) {
@@ -148,6 +176,9 @@
   }
 
   setDisabled(false);
+  if (!supportsDirectories) {
+    document.getElementById('directoryHelp').textContent = 'Directory selection is unavailable in this browser. Use Choose files instead.';
+  }
 
   function updateStorage(xhr) {
     const remaining = xhr.getResponseHeader('X-Quota-Remaining');
@@ -158,50 +189,53 @@
     document.getElementById('storageQuota').textContent = humanBytes(Number(xhr.getResponseHeader('X-Quota-Limit')));
   }
 
-  fileInput.addEventListener('change', () => {
+  function selectFiles(input, otherInput) {
     clearStatus();
+    otherInput.value = '';
+    selectedFiles = Array.from(input.files || []);
+    const size = selectedSize();
 
-    const f = fileInput.files && fileInput.files[0];
-    if (!f) {
-      fileName.textContent = "none";
-      fileSize.textContent = "0 B";
-      tot.textContent = "0 B";
-      setProgress(0);
-      spd.textContent = "0 B/s";
-      up.textContent = "0 B";
-      phase.textContent = "Idle";
-      return;
+    if (selectedFiles.length === 0) {
+      fileName.textContent = 'none';
+    } else if (input === directoryInput) {
+      fileName.textContent = selectedFiles[0].webkitRelativePath.split('/')[0];
+    } else {
+      fileName.textContent = selectedFiles.length === 1 ? selectedFiles[0].name : selectedFiles[0].name + ' and ' + (selectedFiles.length - 1) + ' more';
     }
+    fileCount.textContent = selectedFiles.length + (selectedFiles.length === 1 ? ' file' : ' files');
+    fileSize.textContent = humanBytes(size);
+    tot.textContent = humanBytes(size);
+    setProgress(0);
+    spd.textContent = '0 B/s';
+    up.textContent = '0 B';
+    phase.textContent = 'Idle';
+    setDisabled(false);
 
-    fileName.textContent = f.name;
-    fileSize.textContent = humanBytes(f.size);
-    tot.textContent = humanBytes(f.size);
-
-    if (f.size > REMAINING_BYTES) {
+    if (size > REMAINING_BYTES) {
       setStatus(
         "Not enough storage available.\n" +
         "Available: " + humanBytes(REMAINING_BYTES) + "\n" +
-        "Selected: " + humanBytes(f.size)
+        "Selected: " + humanBytes(size)
       );
-      setProgress(0);
-      spd.textContent = "0 B/s";
-      up.textContent = "0 B";
-      phase.textContent = "Idle";
     }
-  });
+  }
+
+  fileInput.addEventListener('change', () => selectFiles(fileInput, directoryInput));
+  directoryInput.addEventListener('change', () => selectFiles(directoryInput, fileInput));
 
   btn.addEventListener('click', () => {
     clearStatus();
 
-    const f = fileInput.files && fileInput.files[0];
+    const files = selectedFiles.slice();
+    const totalSize = selectedSize();
 
-    if (!f) { setStatus("Pick a file."); return; }
+    if (files.length === 0) { setStatus("Choose files or a directory containing files."); return; }
 
-    if (f.size > REMAINING_BYTES) {
+    if (totalSize > REMAINING_BYTES) {
       setStatus(
         "Not enough storage available.\n" +
         "Available: " + humanBytes(REMAINING_BYTES) + "\n" +
-        "Selected: " + humanBytes(f.size)
+        "Selected: " + humanBytes(totalSize)
       );
       return;
     }
@@ -211,12 +245,14 @@
     setProgress(0);
     spd.textContent = "0 B/s";
     up.textContent = "0 B";
-    tot.textContent = humanBytes(f.size);
+    tot.textContent = humanBytes(totalSize);
 
     phase.textContent = "Sending";
 
     const form = new FormData();
-    form.append("file", f, f.name);
+    for (const file of files) {
+      form.append("file", file, file.webkitRelativePath || file.name);
+    }
 
     const xhr = new XMLHttpRequest();
     xhr.open("POST", "/upload", true);
@@ -237,7 +273,7 @@
       waitTimer = setInterval(() => {
         const now = performance.now();
         const secs = (now - tStart) / 1000;
-        const avgBps = f.size / Math.max(secs, 0.001);
+        const avgBps = totalSize / Math.max(secs, 0.001);
         spd.textContent = humanBytes(avgBps) + "/s avg";
       }, 200);
     }
@@ -266,7 +302,7 @@
 
     xhr.upload.onload = () => {
       setProgress(100);
-      up.textContent = humanBytes(f.size);
+      up.textContent = humanBytes(totalSize);
       startWaiting();
     };
 
@@ -277,7 +313,7 @@
 
       const tEnd = performance.now();
       const secs = (tEnd - tStart) / 1000;
-      const avgBps = f.size / Math.max(secs, 0.001);
+      const avgBps = totalSize / Math.max(secs, 0.001);
 
       if (xhr.status >= 200 && xhr.status < 300) {
         phase.textContent = "Done";
@@ -301,6 +337,13 @@
       if (waitTimer) clearInterval(waitTimer);
       phase.textContent = "Error";
       setStatus("network error");
+      setDisabled(false);
+    };
+
+    xhr.onabort = () => {
+      if (waitTimer) clearInterval(waitTimer);
+      phase.textContent = "Canceled";
+      setStatus("Upload canceled.");
       setDisabled(false);
     };
 
