@@ -68,19 +68,26 @@ func TestDirectoryUploadPreservesHierarchyAndNames(t *testing.T) {
 	}
 	cfg := newTestConfig(t, int64(total*2))
 	cookie, csrf := sessionFor(t, cfg, "Test User")
-	var saved []string
-	for range 2 {
+	for attempt := range 2 {
 		r := uploadFilesRequest(t, files...)
 		r.Header.Del("Authorization")
 		r.AddCookie(cookie)
 		r.Header.Set("X-CSRF-Token", csrf)
 		w := httptest.NewRecorder()
 		cfg.handleUpload(w, r)
+		if attempt == 1 {
+			if w.Code != http.StatusConflict {
+				t.Fatalf("repeat upload should preserve existing files: %d, %s", w.Code, w.Body)
+			}
+			continue
+		}
 		if w.Code != http.StatusOK || uploadResult(t, w, "files") != strconv.Itoa(len(files)) || uploadResult(t, w, "bytes") != strconv.Itoa(total) {
 			t.Fatalf("directory upload: %d, %s", w.Code, w.Body)
 		}
 		name := uploadResult(t, w, "saved_as")
-		saved = append(saved, name)
+		if name != "." {
+			t.Fatalf("upload added a wrapper folder: %q", name)
+		}
 		for _, file := range files {
 			data, err := os.ReadFile(filepath.Join(cfg.dir, "test-user", name, filepath.FromSlash(file.name)))
 			if err != nil || string(data) != file.contents {
@@ -88,12 +95,9 @@ func TestDirectoryUploadPreservesHierarchyAndNames(t *testing.T) {
 			}
 		}
 	}
-	if saved[0] == saved[1] {
-		t.Fatal("repeated directory upload reused the destination")
-	}
 	entries, err := readUploadDir(cfg.dir, "test-user")
 	used, usageErr := diskUsage(context.Background(), filepath.Join(cfg.dir, "test-user"))
-	if err != nil || usageErr != nil || len(entries) != 2 || used != int64(total*2) {
+	if err != nil || usageErr != nil || len(entries) != 1 || entries[0].Name() != "My project" || used != int64(total) {
 		t.Fatalf("completed batches: entries=%v, used=%d, errors=%v/%v", entries, used, err, usageErr)
 	}
 }
@@ -254,8 +258,9 @@ func TestConcurrentDirectoryUploadsShareQuota(t *testing.T) {
 	start := make(chan struct{})
 	results := make(chan int, count)
 	var workers sync.WaitGroup
-	for range count {
-		r := uploadFilesRequest(t, uploadFile{"folder/a.txt", "123"}, uploadFile{"folder/b.txt", "456"})
+	for i := range count {
+		folder := "folder-" + strconv.Itoa(i)
+		r := uploadFilesRequest(t, uploadFile{folder + "/a.txt", "123"}, uploadFile{folder + "/b.txt", "456"})
 		r.Header.Del("Authorization")
 		r.AddCookie(cookie)
 		r.Header.Set("X-CSRF-Token", csrf)

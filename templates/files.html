@@ -1,0 +1,38 @@
+{{define "fileList"}}
+<div class="overflow-x-auto">
+  <table class="w-full text-left text-sm">
+    <thead class="border-b border-zinc-800 text-xs text-zinc-500">
+      <tr><th class="px-3 py-3 font-medium">Name</th><th class="px-3 py-3 font-medium">Size</th><th class="hidden px-3 py-3 font-medium lg:table-cell">Modified</th><th class="px-3 py-3 text-right font-medium">Actions</th></tr>
+    </thead>
+    <tbody class="divide-y divide-zinc-800/60">
+      {{range .Entries}}
+      <tr class="hover:bg-zinc-800/30">
+        <td class="px-3 py-3">
+          {{if .Directory}}<a href="{{.BrowseURL}}" class="flex items-center gap-2 text-zinc-100 hover:underline"><span aria-hidden="true">📁</span><span class="break-all">{{.Name}}</span></a>
+          {{else}}<a href="{{.DownloadURL}}" class="flex items-center gap-2 text-zinc-200 hover:underline"><span aria-hidden="true">📄</span><span class="break-all">{{.Name}}</span></a>{{end}}
+        </td>
+        <td class="whitespace-nowrap px-3 py-3 text-xs text-zinc-400">{{.Size}}</td>
+        <td class="hidden whitespace-nowrap px-3 py-3 text-xs text-zinc-500 lg:table-cell">{{.Modified}}</td>
+        <td class="px-3 py-3">
+          <div class="flex flex-wrap items-center justify-end gap-x-3 gap-y-2 text-xs">
+            <a href="{{.DownloadURL}}" class="text-zinc-300 hover:underline">{{if .Directory}}Download ZIP{{else}}Download{{end}}</a>
+            <form method="post" action="/files" data-file-action="rename" data-name="{{.Name}}">
+              <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}" /><input type="hidden" name="dir" value="{{$.Directory}}" /><input type="hidden" name="action" value="rename" /><input type="hidden" name="path" value="{{.Path}}" /><input type="hidden" name="name" value="{{.Name}}" />
+              <button type="submit" class="text-zinc-300 hover:underline">Rename</button>
+            </form>
+            <form method="post" action="/files" data-file-action="move" data-name="{{.Name}}">
+              <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}" /><input type="hidden" name="dir" value="{{$.Directory}}" /><input type="hidden" name="action" value="move" /><input type="hidden" name="path" value="{{.Path}}" /><input type="hidden" name="destination" value="" />
+              <button type="submit" class="text-zinc-300 hover:underline">Move</button>
+            </form>
+            <form method="post" action="/files" data-file-action="delete" data-name="{{.Name}}" data-directory="{{.Directory}}">
+              <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}" /><input type="hidden" name="dir" value="{{$.Directory}}" /><input type="hidden" name="action" value="delete" /><input type="hidden" name="path" value="{{.Path}}" />
+              <button type="submit" class="text-red-300 hover:underline">Delete</button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      {{else}}<tr><td colspan="4" class="px-3 py-10 text-center text-sm text-zinc-500">This folder is empty. Upload files here or create a folder.</td></tr>{{end}}
+    </tbody>
+  </table>
+</div>
+{{end}}

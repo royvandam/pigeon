@@ -20,6 +20,8 @@ func newServer(cfg config) *http.Server {
 	mux.HandleFunc("/", cfg.handleIndex)
 	mux.HandleFunc("/upload", cfg.handleUpload)
 	mux.HandleFunc("/upload-progress", cfg.handleUploadProgress)
+	mux.HandleFunc("/files", cfg.handleFiles)
+	mux.HandleFunc("/download", cfg.handleDownload)
 	mux.HandleFunc("/login", cfg.handleLogin)
 	mux.HandleFunc("/logout", cfg.handleLogout)
 	mux.HandleFunc("/admin", cfg.handleAdmin)

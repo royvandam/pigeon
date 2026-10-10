@@ -70,8 +70,8 @@ func TestUploadSizeBoundaryAndCleanup(t *testing.T) {
 				t.Fatalf("saved %d files, want 1", len(files))
 			}
 			name := files[0].Name()
-			if !strings.HasSuffix(name, "_report_.txt") {
-				t.Fatalf("unexpected sanitized filename: %q", name)
+			if name != "report?.txt" {
+				t.Fatalf("original filename was not preserved: %q", name)
 			}
 			got, err := os.ReadFile(filepath.Join(cfg.dir, "test-user", name))
 			if err != nil || string(got) != tt.contents {

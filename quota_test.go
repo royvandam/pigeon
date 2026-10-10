@@ -120,7 +120,7 @@ func TestConcurrentUploadsCannotExceedQuota(t *testing.T) {
 	results := make(chan int, count)
 	var workers sync.WaitGroup
 	for i := 0; i < count; i++ {
-		r := uploadRequest(t, "file.txt", strings.Repeat("x", 60))
+		r := uploadRequest(t, "file-"+strconv.Itoa(i)+".txt", strings.Repeat("x", 60))
 		r.Header.Del("Authorization")
 		r.AddCookie(cookie)
 		r.Header.Set("X-CSRF-Token", csrf)

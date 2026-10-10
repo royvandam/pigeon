@@ -67,6 +67,13 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dir := filepath.Join(cfg.dir, a.User.Slug)
+	root, err := cfg.openUserRoot(a.User)
+	if err != nil {
+		message, status := storageError(err)
+		http.Error(w, message, status)
+		return
+	}
+	root.Close()
 	used, err := diskUsage(r.Context(), dir)
 	if err != nil {
 		http.Error(w, "failed to check storage usage", http.StatusInternalServerError)
@@ -81,14 +88,10 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, remaining+multipartOverhead)
 	defer r.Body.Close()
 	mr := multipart.NewReader(r.Body, boundary)
-	if err := os.MkdirAll(dir, 0o750); err != nil {
-		http.Error(w, "failed to create user directory", http.StatusInternalServerError)
-		return
-	}
-
-	batch, err := newUploadBatch(dir)
+	batch, err := newUploadBatch(dir, r.URL.Query().Get("dir"))
 	if err != nil {
-		http.Error(w, "failed to prepare upload", http.StatusInternalServerError)
+		message, status := storageError(err)
+		http.Error(w, message, status)
 		return
 	}
 	defer batch.close()
@@ -123,7 +126,8 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 		}
 		name := disposition["filename"]
 		if err := batch.checkPath(name); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			message, status := storageError(err)
+			http.Error(w, message, status)
 			return
 		}
 		if err := batch.add(name, part, remaining-batch.bytes); err != nil {
@@ -153,7 +157,8 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 	progress.setState("finalizing")
 	savedName, group, err := batch.publish()
 	if err != nil {
-		http.Error(w, "failed to save upload", http.StatusInternalServerError)
+		message, status := storageError(err)
+		http.Error(w, message, status)
 		return
 	}
 	progress.setState("complete")

@@ -11,7 +11,11 @@ import (
 //go:embed templates/index.html
 var indexHTML string
 
-var indexTmpl = template.Must(template.New("index").Parse(indexHTML))
+//go:embed templates/files.html
+var filesHTML string
+
+var indexTmpl = template.Must(template.New("index").Parse(indexHTML + filesHTML))
+var filesTmpl = indexTmpl.Lookup("fileList")
 
 //go:embed templates/login.html
 var loginHTML string
@@ -55,27 +59,49 @@ func (cfg config) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
+	messages := map[string]string{"mkdir": "Folder created.", "rename": "Item renamed.", "move": "Item moved.", "delete": "Item deleted."}
+	cfg.renderIndex(w, r, a, r.URL.Query().Get("dir"), messages[r.URL.Query().Get("result")], "", http.StatusOK)
+}
+
+func (cfg config) renderIndex(w http.ResponseWriter, r *http.Request, a authentication, directory, message, fileError string, status int) {
+	root, err := cfg.openUserRoot(a.User)
+	if err != nil {
+		message, status := storageError(err)
+		http.Error(w, message, status)
+		return
+	}
+	defer root.Close()
+	explorer, err := readExplorer(root, directory, a.CSRFToken)
+	if err != nil {
+		message, status := storageError(err)
+		http.Error(w, message, status)
+		return
+	}
 	used, err := diskUsage(r.Context(), filepath.Join(cfg.dir, a.User.Slug))
 	if err != nil {
 		http.Error(w, "failed to check storage usage", http.StatusInternalServerError)
 		return
 	}
 	data := struct {
+		explorerData
 		QuotaHuman     string
 		UsedHuman      string
 		RemainingHuman string
 		RemainingBytes int64
 		Username       string
 		Admin          bool
-		CSRFToken      string
+		Message        string
+		FileError      string
 	}{
+		explorerData:   explorer,
 		QuotaHuman:     humanBytes(a.User.QuotaBytes),
 		UsedHuman:      humanBytes(used),
 		RemainingHuman: humanBytes(remainingQuota(a.User.QuotaBytes, used)),
 		RemainingBytes: remainingQuota(a.User.QuotaBytes, used),
 		Username:       a.User.Username,
 		Admin:          a.User.Admin,
-		CSRFToken:      a.CSRFToken,
+		Message:        message,
+		FileError:      fileError,
 	}
-	renderTemplate(w, indexTmpl, data, http.StatusOK)
+	renderTemplate(w, indexTmpl, data, status)
 }

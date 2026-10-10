@@ -8,15 +8,18 @@ const { test } = require('node:test');
 const html = fs.readFileSync(path.join(__dirname, '../templates/index.html'), 'utf8');
 const script = html.match(/<script>\s*([\s\S]*?)<\/script>/)[1]
   .replace('{{.RemainingBytes}}', '10000000')
+  .replace('{{.Directory}}', JSON.stringify('My folder/docs'))
   .replace('{{.CSRFToken}}', JSON.stringify('a'.repeat(43)));
 
-function page(size = 10000) {
+function page(size = 10000, options = {}) {
   let now = 0;
   let nextTimer = 0;
   const timers = new Map();
   const elements = new Map();
   const requests = [];
   const uploads = [];
+  const refreshes = [];
+  const dialogs = {answer: null, confirmed: false, message: ''};
   for (const match of html.matchAll(/id="([^"]+)"/g)) {
     const events = new Map();
     const element = {
@@ -24,7 +27,7 @@ function page(size = 10000) {
       classList: {add() {}, remove() {}},
       setAttribute(name, value) { this.attributes[name] = value; },
       addEventListener(name, callback) { events.set(name, callback); },
-      dispatch(name) { events.get(name)(); }
+      dispatch(name, event) { events.get(name)(event); }
     };
     Object.defineProperty(element, 'value', {set(value) { if (value === '') this.files = []; }});
     elements.set(match[1], element);
@@ -40,6 +43,10 @@ function page(size = 10000) {
   vm.runInNewContext(script, {
     document: {getElementById(id) { return elements.get(id); }},
     XMLHttpRequest: XHR, FormData, crypto: webcrypto, AbortController,
+    window: {
+      prompt(message) { dialogs.message = message; return dialogs.answer; },
+      confirm(message) { dialogs.message = message; return dialogs.confirmed; }
+    },
     performance: {now() { return now; }},
     setTimeout(callback, delay) {
       const id = ++nextTimer;
@@ -47,8 +54,12 @@ function page(size = 10000) {
       return id;
     },
     clearTimeout(id) { timers.delete(id); },
-    fetch(url, options) {
-      return new Promise((resolve, reject) => { requests.push({url, options, resolve, reject}); });
+    fetch(url, fetchOptions) {
+      if (url.startsWith('/files?')) {
+        refreshes.push({url, options: fetchOptions});
+        return Promise.resolve({ok: !options.refreshFails, async text() { return '<table><tr><td>test.bin</td></tr></table>'; }});
+      }
+      return new Promise((resolve, reject) => { requests.push({url, options: fetchOptions, resolve, reject}); });
     }
   });
   function text(id) { return elements.get(id).textContent; }
@@ -81,11 +92,12 @@ function page(size = 10000) {
     xhr.responseText = status === 200 ? 'ok\nsaved_as=test.bin\nbytes=' + size : 'disk quota exceeded';
     xhr.onload();
   }
-  return {text, elements, xhr, requests, timers, reply, poll, finish, settle, select};
+  return {text, elements, xhr, requests, timers, reply, poll, finish, settle, select, refreshes, dialogs};
 }
 
 test('browser send completion does not advance server progress to 100%', async () => {
   const p = page();
+  assert.equal(p.xhr.url, '/upload?dir=My%20folder%2Fdocs');
   assert.match(p.xhr.headers['X-Upload-ID'], /^[a-f0-9]{32}$/);
   assert.equal(p.xhr.headers['X-CSRF-Token'], 'a'.repeat(43));
   assert.match(p.requests[0].url, /^\/upload-progress\?id=[a-f0-9]{32}$/);
@@ -112,7 +124,50 @@ test('browser send completion does not advance server progress to 100%', async (
   assert.equal(p.elements.get('progress').attributes['aria-valuenow'], '100');
   assert.equal(p.text('phase'), 'Done');
   assert.equal(p.text('eta'), '0s');
+  await p.settle();
+  assert.match(p.elements.get('fileList').innerHTML, /test.bin/);
+  assert.equal(p.refreshes[0].url, '/files?dir=My%20folder%2Fdocs');
   assert.equal(p.timers.size, 0);
+});
+
+test('file actions prompt for names and destinations and confirm recursive deletion', () => {
+  const p = page();
+  const fields = new Map([['name', {value: 'old.txt'}], ['destination', {value: ''}]]);
+  const form = {dataset: {fileAction: 'rename', name: 'old.txt'}, elements: {namedItem(name) { return fields.get(name); }}};
+  function submit() {
+    const event = {target: form, prevented: false, preventDefault() { this.prevented = true; }};
+    p.elements.get('fileList').dispatch('submit', event);
+    return event;
+  }
+  assert.equal(submit().prevented, true);
+  p.dialogs.answer = 'new.txt';
+  assert.equal(submit().prevented, false);
+  assert.equal(fields.get('name').value, 'new.txt');
+  form.dataset.fileAction = 'move';
+  p.dialogs.answer = 'Archive/docs';
+  assert.equal(submit().prevented, false);
+  assert.equal(fields.get('destination').value, 'Archive/docs');
+  p.dialogs.answer = '';
+  assert.equal(submit().prevented, false);
+  assert.equal(fields.get('destination').value, '');
+  form.dataset.fileAction = 'delete';
+  form.dataset.directory = 'true';
+  assert.equal(submit().prevented, true);
+  assert.match(p.dialogs.message, /everything inside it/);
+  p.dialogs.confirmed = true;
+  assert.equal(submit().prevented, false);
+  p.xhr.onabort();
+});
+
+test('a failed explorer refresh keeps a successful upload complete and asks for a reload', async () => {
+  const p = page(10000, {refreshFails: true});
+  p.elements.get('fileList').innerHTML = '<table>existing files</table>';
+  p.finish();
+  await p.settle();
+  assert.equal(p.text('phase'), 'Done');
+  assert.equal(p.text('pct'), '100%');
+  assert.equal(p.elements.get('fileList').innerHTML, '<table>existing files</table>');
+  assert.match(p.text('explorerMessage'), /Reload the page/);
 });
 
 test('proxy buffering, queueing, and storage checks do not invent progress or an ETA', async () => {

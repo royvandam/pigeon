@@ -6,13 +6,10 @@ import (
 	"fmt"
 	"io/fs"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 	"unicode"
 )
-
-var filenameBad = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
 
 // Directory uploads use slash-separated relative paths. Validate the original
 // path before converting it to a native path, preserving spaces and Unicode.
@@ -29,20 +26,6 @@ func validateUploadPath(name string) error {
 		}
 	}
 	return nil
-}
-
-func sanitizeFilename(name string) string {
-	name = filepath.Base(name)
-	name = strings.TrimSpace(name)
-	if name == "." || name == ".." {
-		return ""
-	}
-	name = filenameBad.ReplaceAllString(name, "_")
-	name = strings.Trim(name, "._-")
-	if len(name) > 180 {
-		name = name[:180]
-	}
-	return name
 }
 
 func shortRandHex(nbytes int) string {

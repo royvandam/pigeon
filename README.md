@@ -21,24 +21,34 @@ as three lines for automated provisioning.
 Open http://127.0.0.1:8080 and sign in. Administrators can open `/admin` to create
 regular users or additional administrators, assign and change disk quotas, delete
 users, and reset passwords.
-Regular users can upload files but cannot access user management. An administrator
+Regular users can manage their own files but cannot access user management. An administrator
 cannot delete their own account or the last administrator. Resetting a password
 signs that user out on every device; resetting your own password returns you to
 the login page.
 
-## Uploading directories
+## File explorer and uploads
+
+The home page lists your files and folders with sizes and modification times.
+Open a folder to browse its contents; the breadcrumb links return to its parents.
+Create folders, rename items, move them to another existing folder, or delete
+them. Moving asks for a path relative to **My files**, with an empty path meaning
+the root. Deleting a folder removes its contents too and asks for confirmation.
+Files download as attachments, and folders download as ZIP archives, including
+empty subfolders.
 
 Use **Choose files** to select one or several files, or **Or choose a directory**
 to upload a directory and all files in its subfolders. The page shows the number
 of selected files, their combined size, and progress for the whole upload.
 
-Directory uploads preserve filenames (including spaces, Unicode, and dotfiles)
-and the folder hierarchy inside a unique upload folder. For example,
-`project/docs/readme.txt` is stored as
-`uploads/roy-van-dijk/<timestamp>_<random>/project/docs/readme.txt`.
-Selecting several individual files also saves them together in a unique folder.
-A single individual file keeps the existing timestamped, sanitized filename.
-Repeated uploads create separate destinations and do not overwrite earlier files.
+Uploads go into the folder currently open in the explorer. Original filenames
+(including spaces, Unicode, and dotfiles) and directory hierarchies are preserved,
+without timestamped filenames or wrapper folders. For example, uploading
+`project/docs/readme.txt` while browsing `Archive` saves it as
+`uploads/roy-van-dijk/Archive/project/docs/readme.txt`.
+Directory uploads can add files to existing folders. Existing files are never
+replaced: a filename conflict rejects the whole upload with HTTP 409. Rename,
+move, or delete the existing item before uploading a replacement. Previously
+uploaded timestamped files and folders remain accessible in the explorer.
 The directory picker includes files; empty directories are not created.
 
 The combined file size must fit the user's remaining quota. Each batch is
@@ -81,7 +91,7 @@ from the folder frees quota. Multipart overhead is excluded from disk usage;
 requests allow up to another 10 MiB for multipart data.
 
 Uploads exceeding the remaining quota receive HTTP 413, and the entire failed
-batch is removed. Uploads for the same user and quota edits are serialized in the
+batch is removed. Uploads, file changes, and quota edits for the same user are serialized in the
 running server; different users can upload simultaneously. Run one server process per
 upload root. A quota may be reduced below current usage: existing files are
 preserved and new uploads are blocked until usage falls below the quota or an
@@ -108,6 +118,8 @@ root; they are not automatically assigned to an account.
 ## API
 
 `POST /upload` accepts `multipart/form-data` with one or more parts named `file`.
+Add `?dir=Archive/docs` to upload into an existing folder relative to your root;
+omitting `dir` uploads to the root.
 Authenticate using HTTP Basic authentication with a username and password:
 
 ```sh
@@ -124,14 +136,46 @@ curl --user 'Roy Van Dijk' \
   http://127.0.0.1:8080/upload
 ```
 
-Successful responses include `saved_as` (the saved filename or batch folder) and
+Successful responses include `saved_as` (the file's relative path for a single
+individual file, or the destination folder for a batch; `.` means the root) and
 `bytes` (the sum of all file sizes). Directory and multiple-file responses also
 include `files` (the number of saved files). Responses include `X-Quota-Limit`,
 `X-Quota-Used`, and `X-Quota-Remaining` headers (bytes). All parts named `file` are
 saved. Paths must be relative, use `/` separators, and contain no empty, `.` or
 `..` components, backslashes, Windows drive prefixes, or control characters. File and directory
-components may contain at most 255 bytes; full paths at most 4095 bytes. Duplicate
-paths and file/directory conflicts return HTTP 400 without saving any of the batch.
+components may contain at most 255 bytes; full paths at most 4095 bytes. Names
+starting with `.upload-` are reserved for private staging and cannot be accessed.
+Duplicate or conflicting paths within a request return HTTP 400. Conflicts with
+existing files or folders return HTTP 409 without saving any of the batch.
+
+`GET /?dir=Archive/docs` opens the explorer. `GET /files?dir=Archive/docs`
+returns its HTML file-list fragment. `GET /download?path=Archive/docs/report.pdf`
+downloads a file; a directory path returns a ZIP, and an empty path downloads
+the entire user folder. These endpoints require authentication and can only
+access the authenticated user's files. Symbolic links are rejected.
+
+`POST /files` accepts URL-encoded forms with `action` and an optional `dir`
+(the folder to return to). Actions are:
+
+| Action | Fields | Behavior |
+| --- | --- | --- |
+| `mkdir` | `name` | Create a folder inside `dir`. |
+| `rename` | `path`, `name` | Give an item a new name in its current folder. |
+| `move` | `path`, `destination` | Move an item into an existing folder; empty destination means root. |
+| `delete` | `path` | Delete a file or a folder and its contents. |
+
+`path` and `destination` are relative to the user's root, not to `dir`.
+Successful changes redirect to the explorer. Renames and moves reject existing
+destinations with HTTP 409. The user root cannot be renamed, moved, or deleted.
+
+For example, create a destination and upload there:
+
+```sh
+curl --user 'Roy Van Dijk' --data-urlencode 'action=mkdir' \
+  --data-urlencode 'name=Archive' http://127.0.0.1:8080/files
+curl --user 'Roy Van Dijk' --form 'file=@document.pdf' \
+  'http://127.0.0.1:8080/upload?dir=Archive'
+```
 
 To track progress, send a unique `X-Upload-ID` header (16–64 ASCII letters, digits,
 underscores, or hyphens) with the upload, then poll
@@ -165,7 +209,9 @@ the binary. The browser loads Tailwind CSS from a CDN.
 `main.go` handles startup, `database.go` persists settings and the schema,
 `setup.go` handles first-run provisioning, `users.go` manages accounts, and
 `session.go` and `auth.go` handle authentication. `admin.go`, `index.go`, and
-`upload.go` serve the management, upload page, and upload endpoint.
+`upload.go` serve user management, the explorer page, and the upload endpoint.
+`files.go` lists and manages stored items, `storage.go` validates paths and confines
+access to user roots, and `download.go` serves files and ZIP archives.
 `upload_files.go` streams and publishes batches. `server.go` handles routing and
 shutdown; `quota.go` measures storage and enforces quotas. `upload_progress.go`
 tracks uploads and serves authenticated progress snapshots.
