@@ -29,18 +29,18 @@
         <input type="hidden" name="csrf_token" value="{{.CSRFToken}}" />
         <input type="hidden" name="action" value="create" />
         <div class="flex-1">
-          <label for="new-username" class="block text-sm">Username</label>
+          <label for="new-username" class="block">Username</label>
           <input id="new-username" name="username" required maxlength="64" autocomplete="off"
             class="mt-2 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2" />
         </div>
         <div class="flex-1">
-          <label for="new-password" class="block text-sm">Password</label>
+          <label for="new-password" class="block">Password</label>
           <input id="new-password" name="password" type="password" required minlength="8" autocomplete="new-password"
             class="mt-2 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2" />
         </div>
-        <label class="pb-2 text-sm"><input type="checkbox" name="admin" class="mr-2" />Administrator</label>
+        <label class="pb-2"><input type="checkbox" name="admin" class="mr-2" />Administrator</label>
         <div>
-          <label for="new-quota" class="block text-sm">Disk quota</label>
+          <label for="new-quota" class="block">Disk quota</label>
           <input id="new-quota" name="quota" value="1GB" required
             class="mt-2 w-28 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2" />
         </div>

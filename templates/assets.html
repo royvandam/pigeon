@@ -1,4 +1,16 @@
 {{define "pageAssets"}}
 <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@7.1.0/css/all.min.css" />
+<style>
+  /* Keep control text consistent regardless of surrounding text utilities. */
+  :where(input, select, textarea, button, label, a) {
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+  }
+
+  input::file-selector-button {
+    font-size: inherit;
+    line-height: inherit;
+  }
+</style>
 {{end}}

@@ -38,10 +38,10 @@
           <form id="createFolderForm" method="post" action="/files" class="flex items-start gap-2">
             <input type="hidden" name="action" value="mkdir" /><input type="hidden" name="dir" value="{{.Directory}}" /><input type="hidden" name="csrf_token" value="{{.CSRFToken}}" />
             <div>
-              <input id="folderName" name="name" required maxlength="255" aria-label="New folder name" aria-describedby="folderNameError" data-validation-error="folderNameError" data-required-message="Enter a folder name." placeholder="New folder name" class="w-36 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-xs text-zinc-200 aria-invalid:border-red-500" />
+              <input id="folderName" name="name" required maxlength="255" aria-label="New folder name" aria-describedby="folderNameError" data-validation-error="folderNameError" data-required-message="Enter a folder name." placeholder="New folder name" class="w-36 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-zinc-200 aria-invalid:border-red-500" />
               <p id="folderNameError" hidden role="alert" class="mt-2 max-w-48 text-xs text-red-300"></p>
             </div>
-            <button type="submit" class="whitespace-nowrap rounded-lg bg-zinc-800 px-3 py-2 text-xs text-zinc-100 hover:bg-zinc-700"><i class="fa-solid fa-folder-plus mr-1" aria-hidden="true"></i>Create folder</button>
+            <button type="submit" class="whitespace-nowrap rounded-lg bg-zinc-800 px-3 py-2 text-zinc-100 hover:bg-zinc-700"><i class="fa-solid fa-folder-plus mr-1" aria-hidden="true"></i>Create folder</button>
           </form>
         </div>
         <p id="explorerMessage" role="status" aria-live="polite" class="px-4 pt-3 text-xs {{if .FileError}}text-red-300{{else}}text-zinc-400{{end}}">{{if .FileError}}{{.FileError}}{{else}}{{.Message}}{{end}}</p>
@@ -54,19 +54,19 @@
           <p class="mt-1 text-sm text-zinc-400">Upload to: <strong class="text-zinc-200">/{{.Directory}}</strong></p>
         </div>
         <div>
-          <label for="file" class="block text-sm font-medium text-zinc-200">Choose files</label>
+          <label for="file" class="block font-medium text-zinc-200">Choose files</label>
           <div class="mt-2 rounded-xl border border-dashed border-zinc-800 bg-zinc-950/20 p-4">
             <input
               id="file"
               type="file"
               multiple
-              class="block w-full text-sm text-zinc-200 file:mr-4 file:rounded-lg file:border-0 file:bg-zinc-800 file:px-3 file:py-2 file:text-sm file:font-medium file:text-zinc-100 hover:file:bg-zinc-700"
+              class="block w-full text-zinc-200 file:mr-4 file:rounded-lg file:border-0 file:bg-zinc-800 file:px-3 file:py-2 file:font-medium file:text-zinc-100 hover:file:bg-zinc-700"
             />
           </div>
         </div>
 
         <div>
-          <label for="directory" class="block text-sm font-medium text-zinc-200">Or choose a directory</label>
+          <label for="directory" class="block font-medium text-zinc-200">Or choose a directory</label>
           <div class="mt-2 rounded-xl border border-dashed border-zinc-800 bg-zinc-950/20 p-4">
             <input
               id="directory"
@@ -74,7 +74,7 @@
               webkitdirectory
               multiple
               aria-describedby="directoryHelp"
-              class="block w-full text-sm text-zinc-200 file:mr-4 file:rounded-lg file:border-0 file:bg-zinc-800 file:px-3 file:py-2 file:text-sm file:font-medium file:text-zinc-100 hover:file:bg-zinc-700"
+              class="block w-full text-zinc-200 file:mr-4 file:rounded-lg file:border-0 file:bg-zinc-800 file:px-3 file:py-2 file:font-medium file:text-zinc-100 hover:file:bg-zinc-700"
             />
             <p id="directoryHelp" class="mt-3 text-xs text-zinc-500">Includes files in all subfolders and preserves their names and folder structure.</p>
           </div>
@@ -91,7 +91,7 @@
         <div class="flex items-center gap-3">
           <button
             id="btn"
-            class="inline-flex items-center justify-center gap-2 rounded-xl bg-zinc-100 px-4 py-2 text-sm font-semibold text-zinc-900 hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+            class="inline-flex items-center justify-center gap-2 rounded-xl bg-zinc-100 px-4 py-2 font-semibold text-zinc-900 hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
           >
             <i class="fa-solid fa-upload" aria-hidden="true"></i>
             Upload here

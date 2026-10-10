@@ -210,6 +210,8 @@ go build -o uploader .
 Run and build the whole package (`.`). All pages in `templates/` are embedded in
 the binary. The browser loads Tailwind CSS and Font Awesome Free from a CDN via
 `templates/assets.html`.
+That shared template also sets fields, labels, buttons, and links to a consistent
+14px font size and 20px line height, including file picker buttons.
 `templates/dialog.html` supplies the common dialog markup and event handling for
 the explorer and user management pages. `templates/validation.html` replaces
 native validation popups for folder creation and renaming with inline errors,

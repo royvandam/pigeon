@@ -14,7 +14,7 @@
         <td class="whitespace-nowrap px-3 py-3 text-xs text-zinc-400">{{.Size}}</td>
         <td class="hidden whitespace-nowrap px-3 py-3 text-xs text-zinc-500 lg:table-cell">{{.Modified}}</td>
         <td class="px-3 py-3">
-          <div class="flex flex-wrap items-center justify-end gap-x-3 gap-y-2 text-xs">
+          <div class="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
             <a href="{{.DownloadURL}}" class="text-zinc-300 hover:underline"><i class="fa-solid fa-download mr-1" aria-hidden="true"></i>{{if .Directory}}Download ZIP{{else}}Download{{end}}</a>
             <button type="button" data-dialog-action="rename" data-name="{{.Name}}" data-path="{{.Path}}" data-dir="{{$.Directory}}" class="text-zinc-300 hover:underline"><i class="fa-solid fa-pen mr-1" aria-hidden="true"></i>Rename</button>
             <button type="button" data-dialog-action="move" data-name="{{.Name}}" data-path="{{.Path}}" data-dir="{{$.Directory}}" class="text-zinc-300 hover:underline"><i class="fa-solid fa-folder-tree mr-1" aria-hidden="true"></i>Move</button>

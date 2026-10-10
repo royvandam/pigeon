@@ -15,16 +15,16 @@
       <form method="post" action="/login" class="mt-6 space-y-4">
         <input type="hidden" name="csrf_token" value="{{.CSRFToken}}" />
         <div>
-          <label for="username" class="block text-sm">Username</label>
+          <label for="username" class="block">Username</label>
           <input id="username" name="username" autocomplete="username" required autofocus maxlength="64"
             class="mt-2 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2" />
         </div>
         <div>
-          <label for="password" class="block text-sm">Password</label>
+          <label for="password" class="block">Password</label>
           <input id="password" name="password" type="password" autocomplete="current-password" required
             class="mt-2 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2" />
         </div>
-        <button type="submit" class="rounded-lg bg-zinc-100 px-4 py-2 text-sm font-semibold text-zinc-900"><i class="fa-solid fa-right-to-bracket mr-1" aria-hidden="true"></i>Sign in</button>
+        <button type="submit" class="rounded-lg bg-zinc-100 px-4 py-2 font-semibold text-zinc-900"><i class="fa-solid fa-right-to-bracket mr-1" aria-hidden="true"></i>Sign in</button>
       </form>
     </div>
   </main>
