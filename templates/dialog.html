@@ -11,8 +11,9 @@
       <p id="actionDialogError" hidden role="alert" class="mt-2 text-xs text-red-300"></p>
       <p id="actionDialogHelp" hidden class="mt-2 text-xs text-zinc-400">Enter an existing folder path relative to My files. Leave empty to move to My files.</p>
     </div>
+    {{template "shareControls" .}}
     <div class="mt-6 flex justify-end gap-3">
-      <button id="actionDialogCancel" type="button" class="rounded-lg bg-zinc-800 px-4 py-2 hover:bg-zinc-700"><i class="fa-solid fa-xmark mr-1" aria-hidden="true"></i>Cancel</button>
+      <button id="actionDialogCancel" type="button" class="rounded-lg bg-zinc-800 px-4 py-2 hover:bg-zinc-700"><i class="fa-solid fa-xmark mr-1" aria-hidden="true"></i><span id="actionDialogCancelLabel">Cancel</span></button>
       <button id="actionDialogConfirm" type="submit" class="rounded-lg bg-zinc-100 px-4 py-2 font-semibold text-zinc-900 hover:bg-white data-[danger=true]:bg-red-600 data-[danger=true]:text-white data-[danger=true]:hover:bg-red-500"><i id="actionDialogConfirmIcon" class="fa-solid fa-check mr-1" aria-hidden="true"></i><span id="actionDialogConfirmLabel">Save</span></button>
     </div>
   </form>
@@ -26,32 +27,36 @@
   const input = document.getElementById('actionDialogValue');
   const cancel = document.getElementById('actionDialogCancel');
   const confirmButton = document.getElementById('actionDialogConfirm');
+  const sharePanel = document.getElementById('shareControls');
 
   // Delegate to the document so refreshed file lists use the same dialog.
   document.addEventListener('click', event => {
     const button = event.target.closest('button[data-dialog-action]');
     if (!button) return;
     const action = button.dataset.dialogAction;
-    if (!['rename', 'move', 'delete-file', 'delete-user'].includes(action)) return;
+    if (!['rename', 'move', 'delete-file', 'delete-user', 'share'].includes(action)) return;
     event.preventDefault();
 
     const renaming = action === 'rename';
+    const sharing = action === 'share';
     const deletingUser = action === 'delete-user';
     const deleting = action === 'delete-file' || deletingUser;
     const name = button.dataset.name;
-    const verb = deletingUser ? 'Delete user' : (deleting ? 'Delete' : (renaming ? 'Rename' : 'Move'));
+    const verb = sharing ? 'Share' : (deletingUser ? 'Delete user' : (deleting ? 'Delete' : (renaming ? 'Rename' : 'Move')));
     document.getElementById('actionDialogTitle').textContent = verb + ' "' + name + '"' + (deleting ? '?' : '');
     const description = document.getElementById('actionDialogDescription');
-    description.hidden = !deleting;
-    description.textContent = !deleting ? '' : deletingUser
+    description.hidden = !deleting && !sharing;
+    description.textContent = sharing
+      ? 'Anyone with the link can download ' + (button.dataset.directory === 'true' ? 'this folder as a ZIP, including files added later.' : 'this file.') + ' Links stay active until revoked or the item is renamed, moved, or deleted.'
+      : !deleting ? '' : deletingUser
       ? 'The user will lose access. Their uploads will be preserved and their username and folder will remain reserved.'
       : (button.dataset.directory === 'true' ? 'This permanently deletes the folder and everything inside it.' : 'This permanently deletes the file.');
 
     // Set attributes directly: the hidden input named "action" can shadow
     // the form's action property in the DOM.
-    form.setAttribute('action', deletingUser ? '/admin' : '/files');
+    form.setAttribute('action', sharing ? '/shares' : (deletingUser ? '/admin' : '/files'));
     fields.replaceChildren();
-    const values = deletingUser
+    const values = sharing ? {} : deletingUser
       ? {action: 'delete', user_id: button.dataset.userId}
       : {action: deleting ? 'delete' : action, path: button.dataset.path, dir: button.dataset.dir || ''};
     for (const [name, value] of Object.entries(values)) {
@@ -62,28 +67,36 @@
       fields.append(field);
     }
 
-    document.getElementById('actionDialogInputGroup').hidden = deleting;
+    document.getElementById('actionDialogInputGroup').hidden = deleting || sharing;
     document.getElementById('actionDialogLabel').textContent = renaming ? 'New name' : 'Destination folder';
     document.getElementById('actionDialogHelp').hidden = action !== 'move';
     input.setAttribute('aria-describedby', action === 'move' ? 'actionDialogHelp actionDialogError' : 'actionDialogError');
-    input.disabled = deleting;
+    input.disabled = deleting || sharing;
     input.required = renaming;
     input.name = renaming ? 'name' : 'destination';
     input.maxLength = renaming ? 255 : 4095;
-    input.value = deleting ? '' : (renaming ? name : button.dataset.dir || '');
+    input.value = deleting || sharing ? '' : (renaming ? name : button.dataset.dir || '');
     input.dispatchEvent(new Event('input', {bubbles: true}));
     document.getElementById('actionDialogConfirmLabel').textContent = deleting ? 'Delete' : 'Save';
     document.getElementById('actionDialogConfirmIcon').className = 'fa-solid ' + (deleting ? 'fa-trash-can' : 'fa-check') + ' mr-1';
     confirmButton.dataset.danger = String(deleting);
+    confirmButton.hidden = confirmButton.disabled = sharing;
+    sharePanel.hidden = !sharing;
+    document.getElementById('actionDialogCancelLabel').textContent = sharing ? 'Close' : 'Cancel';
     dialog.showModal();
-    if (deleting) {
+    if (sharing) dialog.dispatchEvent(new CustomEvent('share', {detail: {path: button.dataset.path}}));
+    if (deleting || sharing) {
       cancel.focus();
     } else {
       input.focus();
       input.select();
     }
   });
+  form.addEventListener('submit', event => {
+    if (!sharePanel.hidden) event.preventDefault();
+  });
   cancel.addEventListener('click', () => dialog.close());
 })();
 </script>
+{{template "shareScript" .}}
 {{end}}

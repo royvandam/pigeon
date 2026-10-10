@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -22,6 +23,8 @@ func newServer(cfg config) *http.Server {
 	mux.HandleFunc("/upload-progress", cfg.handleUploadProgress)
 	mux.HandleFunc("/files", cfg.handleFiles)
 	mux.HandleFunc("/download", cfg.handleDownload)
+	mux.HandleFunc("/shares", cfg.handleShares)
+	mux.HandleFunc("/s/{token}", cfg.handleSharedDownload)
 	mux.HandleFunc("/login", cfg.handleLogin)
 	mux.HandleFunc("/logout", cfg.handleLogout)
 	mux.HandleFunc("/admin", cfg.handleAdmin)
@@ -61,6 +64,10 @@ func logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		next.ServeHTTP(w, r)
-		log.Printf("%s %s %s", r.Method, r.URL.Path, time.Since(start).Truncate(time.Millisecond))
+		requestPath := r.URL.Path
+		if strings.HasPrefix(requestPath, "/s/") {
+			requestPath = "/s/[redacted]" // Share tokens grant access to private files.
+		}
+		log.Printf("%s %s %s", r.Method, requestPath, time.Since(start).Truncate(time.Millisecond))
 	})
 }

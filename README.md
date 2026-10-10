@@ -67,11 +67,32 @@ rolling five-second window of server progress, excluding multipart overhead.
 Queued uploads and storage checks show their current phase; final saving shows
 **Finishing…** until confirmed. A stalled transfer stops reporting a countdown.
 
+## Shareable downloads
+
+Choose **Share** beside a file or folder, then **Create link** and **Copy**.
+Anyone with that URL can download the item without an account. Files download
+as attachments; folders download as ZIPs containing their current contents,
+including files added after the link was created. Opening the Share dialog does
+not enable sharing until you choose **Create link**.
+
+Each item has one reusable link. Links are stored in SQLite, survive restarts,
+and do not expire automatically. Open **Share** again to copy the existing link
+or choose **Revoke link**. Creating another link after revocation generates a
+different URL; the old URL remains disabled. If clipboard access is unavailable,
+the dialog selects the URL so you can copy it manually.
+
+Renaming, moving, or deleting an item revokes links to that item and its
+descendants, so recreating an old path cannot expose replacement files. Deleting
+an account also revokes all its links while preserving its uploaded files.
+Password resets leave sharing links active. Revocation blocks new downloads;
+downloads already in progress can finish. Public tokens are omitted from the
+application's request logs.
+
 ## Configuration
 
 The SQLite database defaults to `./uploader.db`. Select another location with
 `-db /path/to/uploader.db`. The database stores usernames, password hashes,
-administrator roles, per-user disk quotas, login sessions, and server settings.
+administrator roles, per-user disk quotas, login sessions, share links, and server settings.
 
 On a new database, server settings default to `./uploads` and `0.0.0.0:8080`.
 Use `-dir` or `-listen` to change them. Overrides are saved in SQLite and reused
@@ -113,7 +134,8 @@ punctuation and whitespace become hyphens. Other Unicode letters and digits are
 retained. Username comparisons are case-insensitive. Creation fails if the
 username or normalized folder name is already reserved.
 
-Deleting an account disables access immediately and invalidates its sessions.
+Deleting an account disables access immediately and invalidates its sessions and
+share links.
 Its files remain on disk, and a small deleted account record reserves its
 username and folder so a future account cannot inherit those uploads. Files
 uploaded by the previous shared-password implementation remain in the upload
@@ -157,6 +179,19 @@ returns its HTML file-list fragment. `GET /download?path=Archive/docs/report.pdf
 downloads a file; a directory path returns a ZIP, and an empty path downloads
 the entire user folder. These endpoints require authentication and can only
 access the authenticated user's files. Symbolic links are rejected.
+
+`GET /shares?path=Archive/docs/report.pdf` returns `{"url":"/s/<token>"}`
+for an existing link or `{"url":""}` when sharing is disabled.
+`POST /shares` accepts URL-encoded `action=create` or `action=revoke`, plus
+`path`. Both endpoints require authentication and manage only the signed-in
+user's links. Session-authenticated POSTs also require `csrf_token`, like other
+file operations. The path must name a file or folder; sharing the account root
+is not supported.
+
+`GET /s/<token>` and `HEAD /s/<token>` provide the shared download without
+authentication. File downloads support byte ranges. Query parameters cannot
+change the shared item. Invalid or revoked links return HTTP 404, and these
+URLs allow downloads only.
 
 `POST /files` accepts URL-encoded forms with `action` and an optional `dir`
 (the folder to return to). Actions are:
@@ -213,7 +248,8 @@ the binary. The browser loads Tailwind CSS and Font Awesome Free from a CDN via
 That shared template also sets fields, labels, buttons, and links to a consistent
 14px font size and 20px line height, including file picker buttons.
 `templates/dialog.html` supplies the common dialog markup and event handling for
-the explorer and user management pages. `templates/validation.html` replaces
+the explorer and user management pages. `templates/shares.html` supplies the
+sharing controls within that dialog. `templates/validation.html` replaces
 native validation popups for folder creation and renaming with inline errors,
 while keeping the browser's constraint validation and server-side checks.
 

@@ -154,7 +154,10 @@ func (cfg config) handleFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	action := r.PostForm.Get("action")
-	err = manageFile(root, action, directory, r.PostForm.Get("path"), r.PostForm.Get("name"), r.PostForm.Get("destination"))
+	source := r.PostForm.Get("path")
+	err = manageFile(root, action, directory, source, r.PostForm.Get("name"), r.PostForm.Get("destination"), func() error {
+		return cfg.store.revokePathShares(r.Context(), a.User.ID, source)
+	})
 	if err != nil {
 		message, status := storageError(err)
 		cfg.renderIndex(w, r, a, directory, "", message, status)
@@ -178,7 +181,7 @@ func validateEntryName(name string) error {
 	return validateStoragePath(name, false)
 }
 
-func manageFile(root *os.Root, action, directory, source, name, destination string) error {
+func manageFile(root *os.Root, action, directory, source, name, destination string, beforeMutation func() error) error {
 	if action == "mkdir" {
 		if err := validateEntryName(name); err != nil {
 			return err
@@ -205,6 +208,9 @@ func manageFile(root *os.Root, action, directory, source, name, destination stri
 		return err
 	}
 	if action == "delete" {
+		if err := beforeMutation(); err != nil {
+			return err
+		}
 		return root.RemoveAll(filepath.FromSlash(source))
 	}
 	var target string
@@ -231,6 +237,11 @@ func manageFile(root *os.Root, action, directory, source, name, destination stri
 	if _, err := storageInfo(root, target); err == nil {
 		return fmt.Errorf("%w: %q", errFileConflict, target)
 	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	// Revoke only after validation, but before changing the path. A failed
+	// filesystem operation may disable a link; a reused path must never revive it.
+	if err := beforeMutation(); err != nil {
 		return err
 	}
 	return root.Rename(filepath.FromSlash(source), filepath.FromSlash(target))

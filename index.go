@@ -23,7 +23,10 @@ var assetsHTML string
 //go:embed templates/validation.html
 var validationHTML string
 
-var indexTmpl = template.Must(template.New("index").Parse(indexHTML + filesHTML + dialogHTML + assetsHTML + validationHTML))
+//go:embed templates/shares.html
+var sharesHTML string
+
+var indexTmpl = template.Must(template.New("index").Parse(indexHTML + filesHTML + dialogHTML + assetsHTML + validationHTML + sharesHTML))
 var filesTmpl = indexTmpl.Lookup("fileList")
 
 //go:embed templates/login.html
@@ -34,7 +37,7 @@ var adminHTML string
 
 var (
 	loginTmpl = template.Must(template.New("login").Parse(loginHTML + assetsHTML))
-	adminTmpl = template.Must(template.New("admin").Parse(adminHTML + dialogHTML + assetsHTML + validationHTML))
+	adminTmpl = template.Must(template.New("admin").Parse(adminHTML + dialogHTML + assetsHTML + validationHTML + sharesHTML))
 )
 
 type loginPage struct {

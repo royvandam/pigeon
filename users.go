@@ -216,5 +216,8 @@ func (s *store) deleteUser(ctx context.Context, id, actorID int64) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, id); err != nil {
 		return err
 	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM shares WHERE user_id = ?`, id); err != nil {
+		return err
+	}
 	return tx.Commit()
 }

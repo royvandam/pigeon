@@ -33,45 +33,81 @@ func (cfg config) handleDownload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer root.Close()
 	name := r.URL.Query().Get("path")
-	info, err := storageInfo(root, name)
+	download, err := openStoredDownload(root, name, a.User.Slug)
 	if err != nil {
 		message, status := storageError(err)
 		http.Error(w, message, status)
 		return
 	}
-	w.Header().Set("X-Content-Type-Options", "nosniff")
+	defer download.Close()
+	download.ServeHTTP(w, r)
+}
+
+type storedDownload struct {
+	file     *os.File
+	folder   *os.Root
+	info     fs.FileInfo
+	filename string
+}
+
+func openStoredDownload(root *os.Root, name, rootName string) (*storedDownload, error) {
+	info, err := storageInfo(root, name)
+	if err != nil {
+		return nil, err
+	}
+	download := &storedDownload{info: info, filename: info.Name()}
 	if info.IsDir() {
 		folder, err := root.OpenRoot(nativeStoragePath(name))
 		if err != nil {
-			message, status := storageError(err)
-			http.Error(w, message, status)
-			return
+			return nil, err
 		}
-		defer folder.Close()
-		filename := path.Base(name)
+		download.folder = folder
+		download.filename = path.Base(name)
 		if name == "" {
-			filename = a.User.Slug
+			download.filename = rootName
 		}
-		w.Header().Set("Content-Type", "application/zip")
-		w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": filename + ".zip"}))
-		if r.Method == http.MethodHead {
-			return
-		}
-		if err := writeFolderZip(w, r, folder, filename); err != nil {
-			log.Printf("folder download failed: %v", err)
-		}
-		return
+		return download, nil
 	}
 	file, err := root.Open(filepath.FromSlash(name))
 	if err != nil {
-		message, status := storageError(err)
-		http.Error(w, message, status)
+		return nil, err
+	}
+	info, err = file.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		file.Close()
+		if err == nil {
+			err = fmt.Errorf("%w: special files cannot be downloaded", errStoragePath)
+		}
+		return nil, err
+	}
+	download.file, download.info = file, info
+	return download, nil
+}
+
+func (d *storedDownload) Close() {
+	if d.file != nil {
+		d.file.Close()
+	}
+	if d.folder != nil {
+		d.folder.Close()
+	}
+}
+
+func (d *storedDownload) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if d.folder != nil {
+		w.Header().Set("Content-Type", "application/zip")
+		w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": d.filename + ".zip"}))
+		if r.Method != http.MethodHead {
+			if err := writeFolderZip(w, r, d.folder, d.filename); err != nil {
+				log.Printf("folder download failed: %v", err)
+			}
+		}
 		return
 	}
-	defer file.Close()
 	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": info.Name()}))
-	http.ServeContent(w, r, info.Name(), info.ModTime(), file)
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": d.filename}))
+	http.ServeContent(w, r, d.filename, d.info.ModTime(), d.file)
 }
 
 func writeFolderZip(w io.Writer, r *http.Request, root *os.Root, prefix string) error {

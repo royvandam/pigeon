@@ -112,7 +112,7 @@ func TestExplorerActionsRequireDialogConfirmation(t *testing.T) {
 			t.Fatalf("GET %s: %d, %s", location, w.Code, w.Body)
 		}
 		body := w.Body.String()
-		for _, action := range []string{"rename", "move", "delete-file"} {
+		for _, action := range []string{"rename", "move", "delete-file", "share"} {
 			button := regexp.MustCompile(`<button\b[^>]*data-dialog-action="` + action + `"[^>]*>`).FindString(body)
 			if button == "" || !strings.Contains(button, `type="button"`) || !strings.Contains(button, `data-path="original.txt"`) {
 				t.Errorf("%s %s must open a dialog without submitting: %q", location, action, button)

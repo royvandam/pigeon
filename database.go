@@ -102,6 +102,14 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 CREATE INDEX IF NOT EXISTS sessions_user_id ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS sessions_expires_at ON sessions(expires_at);
+CREATE TABLE IF NOT EXISTS shares (
+  token TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  path TEXT NOT NULL,
+  is_directory INTEGER NOT NULL CHECK (is_directory IN (0, 1)),
+  created_at INTEGER NOT NULL,
+  UNIQUE (user_id, path)
+);
 `, defaultUserQuota))
 	if err != nil {
 		return err
