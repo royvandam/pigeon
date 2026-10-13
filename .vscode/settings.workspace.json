@@ -1,0 +1,16 @@
+{
+    "go.alternateTools": {
+        "go": "$(bash \"${workspaceFolder}/.vscode/settings-helper.sh\" --get-go-path)",
+        "gopls": "$(bash \"${workspaceFolder}/.vscode/settings-helper.sh\" --get-gopls-path)",
+        "goimports": "$(bash \"${workspaceFolder}/.vscode/settings-helper.sh\" --get-goimports-path)"
+    },
+    "go.toolsEnvVars": {
+        "PATH": "$(bash \"${workspaceFolder}/.vscode/settings-helper.sh\" --get-env-path)",
+        "TMPDIR": "/tmp",
+        "TMP": "/tmp",
+        "TEMP": "/tmp"
+    },
+    "[go]": {
+        "editor.defaultFormatter": "golang.go"
+    }
+}
