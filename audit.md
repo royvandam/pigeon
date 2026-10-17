@@ -26,7 +26,7 @@ Recommended order: A1, A5, A3, A4, A2, A6, then the rest.
 | [A3](#a3-quota-does-not-limit-disk-space-or-inodes) | Medium | Quota does not limit disk space or inodes | Open |
 | [A4](#a4-password-checks-have-no-rate-limit) | Medium | Password checks have no rate limit | Open |
 | [A5](#a5-go-1267-has-reachable-standard-library-vulnerabilities) | Medium | Go 1.26.7 has reachable standard-library vulnerabilities | Fixed in #2 |
-| [A6](#a6-no-content-security-policy-or-framing-protection) | Low | No Content Security Policy or framing protection | Open |
+| [A6](#a6-no-content-security-policy-or-framing-protection) | Low | No Content Security Policy or framing protection | Fixed in #4 |
 | [A7](#a7-expired-sessions-can-turn-into-stored-basic-credentials) | Low | Expired sessions can turn into stored Basic credentials | Open |
 | [A8](#a8-request-log-forging-and-share-token-redaction-bypass) | Low | Request log forging and share-token redaction bypass | Open |
 | [A9](#a9-bidirectional-and-invisible-characters-in-filenames) | Low | Bidirectional and invisible characters in filenames | Open |
@@ -255,7 +255,7 @@ unmaintained; it has no fix, and Pigeon does not import that package.
 
 ## A6. No Content Security Policy or framing protection
 
-**Severity:** Low · **Status:** Open · *verified* · Depends on A1
+**Severity:** Low · **Status:** Fixed in #4 · *verified*
 
 **Location:** [internal/pigeon/templates.go:31-40](internal/pigeon/templates.go#L31-L40)
 
@@ -281,6 +281,23 @@ X-Content-Type-Options: nosniff
 **Done when:** every HTML response carries the headers, the browser console
 shows no CSP violations on the explorer, admin, and login pages, and a test
 asserts the headers.
+
+**Resolution:** a `securityHeaders` middleware in `server.go` sets the headers
+on every response: pages, assets, redirects, errors, and downloads. The policy
+is the one above. `X-Frame-Options: DENY` is added for browsers without
+`frame-ancestors`. Share endpoints still override the referrer policy with
+`no-referrer`.
+
+- `TestResponsesCarrySecurityHeaders` covers each response kind.
+- `TestTemplatesContainNoInlineScriptsOrStyles` keeps templates compatible with
+  the policy.
+
+In headless Chromium, the following produced no CSP violations or console
+errors: sign-in, the validation tooltip, the share-link `fetch`, an upload
+with progress polling and list refresh, a folder created by form POST and
+redirect, and the admin dialogs. A deliberately injected inline script was
+blocked and reported, which confirms detection works. Screenshots of seven page
+states are pixel-identical to the build without these headers.
 
 ---
 

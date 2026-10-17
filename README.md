@@ -258,6 +258,14 @@ a CSRF token, and browser uploads send it in the `X-CSRF-Token` header. Session
 tokens are stored as hashes. Passwords use bcrypt. Use HTTPS when serving the
 application beyond a trusted local network.
 
+Every response sends a Content Security Policy that allows only same-origin
+scripts, styles, fonts, and requests, and forbids inline code, plugins, base-URL
+changes, form posts to other sites, and framing. Responses also send
+`X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, and
+`Referrer-Policy: same-origin`; public share links use `no-referrer`. Templates
+must not contain inline scripts, `style` attributes, or event handler
+attributes. A test enforces this.
+
 ## Project layout
 
 The repository uses the applicable directory conventions from
