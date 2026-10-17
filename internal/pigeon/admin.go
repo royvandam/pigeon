@@ -123,7 +123,7 @@ func (cfg config) handleAdmin(w http.ResponseWriter, r *http.Request) {
 			Heading: map[string]string{"create": "User created", "recycle": "User recycled", "reset": "Password reset"}[command.action],
 		}, SignedOut: change.ActorPasswordChanged}
 		if data.SignedOut {
-			clearSessionCookie(w, r)
+			cfg.clearSessionCookie(w, r)
 			w.Header().Set("Cache-Control", "no-store")
 			renderTemplate(w, adminTmpl, data, http.StatusOK)
 		} else {

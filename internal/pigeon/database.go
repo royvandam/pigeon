@@ -25,6 +25,7 @@ type settings struct {
 	dir            string
 	listen         string
 	trustedProxies string // comma-separated addresses and CIDR ranges
+	publicURL      string // external origin, such as https://files.example.com
 }
 
 func (s settings) validate() error {
@@ -38,7 +39,10 @@ func (s settings) validate() error {
 	if _, err := strconv.ParseUint(port, 10, 16); err != nil {
 		return fmt.Errorf("invalid listen port: %w", err)
 	}
-	_, err = parseTrustedProxies(s.trustedProxies)
+	if _, err := parseTrustedProxies(s.trustedProxies); err != nil {
+		return err
+	}
+	_, err = parsePublicURL(s.publicURL)
 	return err
 }
 
@@ -84,7 +88,8 @@ CREATE TABLE IF NOT EXISTS settings (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   uploads_dir TEXT NOT NULL,
   listen TEXT NOT NULL,
-  trusted_proxies TEXT NOT NULL DEFAULT ''
+  trusted_proxies TEXT NOT NULL DEFAULT '',
+  public_url TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -118,7 +123,7 @@ CREATE TABLE IF NOT EXISTS shares (
 	if err != nil {
 		return err
 	}
-	var hasQuota, hasUploadLimit, hasTrustedProxies bool
+	var hasQuota, hasUploadLimit, hasTrustedProxies, hasPublicURL bool
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pragma_table_info('users') WHERE name = 'quota_bytes')`).Scan(&hasQuota); err != nil {
 		return err
 	}
@@ -143,13 +148,21 @@ CREATE TABLE IF NOT EXISTS shares (
 			return err
 		}
 	}
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pragma_table_info('settings') WHERE name = 'public_url')`).Scan(&hasPublicURL); err != nil {
+		return err
+	}
+	if !hasPublicURL {
+		if _, err := tx.ExecContext(ctx, `ALTER TABLE settings ADD COLUMN public_url TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+	}
 	dir, err := filepath.Abs("./uploads")
 	if err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx,
 		`INSERT OR IGNORE INTO settings (id, uploads_dir, listen) VALUES (1, ?, ?)`,
-		dir, "0.0.0.0:8080"); err != nil {
+		dir, defaultListen); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -157,8 +170,8 @@ CREATE TABLE IF NOT EXISTS shares (
 
 func (s *store) loadSettings(ctx context.Context) (settings, error) {
 	var cfg settings
-	err := s.db.QueryRowContext(ctx, `SELECT uploads_dir, listen, trusted_proxies FROM settings WHERE id = 1`).
-		Scan(&cfg.dir, &cfg.listen, &cfg.trustedProxies)
+	err := s.db.QueryRowContext(ctx, `SELECT uploads_dir, listen, trusted_proxies, public_url FROM settings WHERE id = 1`).
+		Scan(&cfg.dir, &cfg.listen, &cfg.trustedProxies, &cfg.publicURL)
 	if err != nil {
 		return cfg, err
 	}
@@ -169,7 +182,7 @@ func (s *store) saveSettings(ctx context.Context, cfg settings) error {
 	if err := cfg.validate(); err != nil {
 		return err
 	}
-	_, err := s.db.ExecContext(ctx, `UPDATE settings SET uploads_dir = ?, listen = ?, trusted_proxies = ? WHERE id = 1`,
-		cfg.dir, cfg.listen, cfg.trustedProxies)
+	_, err := s.db.ExecContext(ctx, `UPDATE settings SET uploads_dir = ?, listen = ?, trusted_proxies = ?, public_url = ? WHERE id = 1`,
+		cfg.dir, cfg.listen, cfg.trustedProxies, cfg.publicURL)
 	return err
 }

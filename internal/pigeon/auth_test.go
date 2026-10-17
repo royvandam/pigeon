@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -275,5 +276,191 @@ func TestSessionExpirationAndCrossOriginRequests(t *testing.T) {
 	}
 	if _, err := cfg.store.session(context.Background(), cookie.Value); !errors.Is(err, errInvalidCredentials) {
 		t.Fatal("expired session still works")
+	}
+}
+
+func TestNewDatabasesListenOnLoopback(t *testing.T) {
+	s, err := openStore(context.Background(), filepath.Join(t.TempDir(), "new.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.db.Close()
+	got, err := s.loadSettings(context.Background())
+	if err != nil || got.listen != "127.0.0.1:8080" || got.publicURL != "" {
+		t.Fatalf("new database settings = %#v, %v", got, err)
+	}
+}
+
+func cookieNamed(w *httptest.ResponseRecorder, name string) *http.Cookie {
+	for _, cookie := range w.Result().Cookies() {
+		if cookie.Name == name {
+			return cookie
+		}
+	}
+	return nil
+}
+
+// A TLS-terminating proxy forwards plain HTTP and rewrites Host, as some
+// proxies do; the browser still talks HTTPS to the public origin.
+func TestHTTPSPublicURLSecuresCookiesAndEnablesHSTS(t *testing.T) {
+	for _, tt := range []struct {
+		publicURL string
+		secure    bool
+	}{
+		{"https://files.example.com", true},
+		{"http://files.example.com", false},
+		{"", false},
+	} {
+		t.Run("public URL "+tt.publicURL, func(t *testing.T) {
+			cfg := newTestConfig(t, 100)
+			publicURL, err := parsePublicURL(tt.publicURL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg.publicURL = publicURL
+			if _, err := cfg.store.createUser(context.Background(), "Admin", testPassword, true); err != nil {
+				t.Fatal(err)
+			}
+			handler := newServer(cfg).Handler
+			check := func(step string, w *httptest.ResponseRecorder, cookie string, status int) *http.Cookie {
+				t.Helper()
+				c := cookieNamed(w, cookie)
+				hsts := w.Header().Get("Strict-Transport-Security")
+				if w.Code != status || c == nil || c.Secure != tt.secure || (hsts == strictTransportSecurity) != tt.secure {
+					t.Fatalf("%s: status %d, cookie %+v, HSTS %q", step, w.Code, c, hsts)
+				}
+				return c
+			}
+			forwarded := func(r *http.Request) *http.Request {
+				r.Host = "127.0.0.1:8080"
+				if publicURL != nil {
+					r.Header.Set("Origin", publicURL.String())
+				}
+				return r
+			}
+
+			login := check("login page", serve(handler, httptest.NewRequest(http.MethodGet, "/login", nil)), loginCookieName, http.StatusOK)
+			r := forwarded(formRequest("/login", url.Values{"username": {"Admin"}, "password": {testPassword}, "csrf_token": {login.Value}}, login))
+			w := serve(handler, r)
+			session := check("sign-in", w, sessionCookieName, http.StatusSeeOther)
+			check("sign-in clears the login cookie", w, loginCookieName, http.StatusSeeOther)
+
+			a, err := cfg.store.session(context.Background(), session.Value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			reset := forwarded(formRequest("/admin", url.Values{"action": {"reset"}, "user_id": {strconv.FormatInt(a.User.ID, 10)}, "csrf_token": {a.CSRFToken}}, session))
+			if c := check("own password reset", serve(handler, reset), sessionCookieName, http.StatusOK); c.MaxAge >= 0 {
+				t.Fatalf("own password reset kept the session cookie: %+v", c)
+			}
+
+			session, csrf := sessionFor(t, cfg, "Test User")
+			logout := forwarded(formRequest("/logout", url.Values{"csrf_token": {csrf}}, session))
+			if c := check("sign-out", serve(handler, logout), sessionCookieName, http.StatusSeeOther); c.MaxAge >= 0 {
+				t.Fatalf("sign-out kept the session cookie: %+v", c)
+			}
+		})
+	}
+}
+
+func TestOriginCheckAcceptsThePublicURLBehindARewritingProxy(t *testing.T) {
+	publicURL, err := parsePublicURL("https://files.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		name, host, origin string
+		publicURL          bool
+		want               bool
+	}{
+		{"origin matches Host", "files.example.com", "https://files.example.com", false, true},
+		{"rewritten Host without a public URL", "127.0.0.1:8080", "https://files.example.com", false, false},
+		{"rewritten Host with the public URL", "127.0.0.1:8080", "https://files.example.com", true, true},
+		{"public host over the wrong scheme", "127.0.0.1:8080", "http://files.example.com", true, false},
+		{"another site", "127.0.0.1:8080", "https://attacker.example", true, false},
+		{"no Origin header", "127.0.0.1:8080", "", true, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config{}
+			if tt.publicURL {
+				cfg.publicURL = publicURL
+			}
+			r := httptest.NewRequest(http.MethodPost, "/files", nil)
+			r.Host = tt.host
+			if tt.origin != "" {
+				r.Header.Set("Origin", tt.origin)
+			}
+			if got := cfg.sameOrigin(r); got != tt.want {
+				t.Fatalf("sameOrigin = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPublicURLIsValidatedNormalizedAndPersisted(t *testing.T) {
+	for value, want := range map[string]string{
+		"https://Files.Example.com/": "https://files.example.com",
+		"http://192.168.1.10:8080":   "http://192.168.1.10:8080",
+	} {
+		u, err := parsePublicURL(value)
+		if err != nil || u.String() != want {
+			t.Errorf("parsePublicURL(%q) = %v, %v; want %s", value, u, err, want)
+		}
+	}
+	for _, value := range []string{"files.example.com", "ftp://files.example.com", "https://user@files.example.com",
+		"https://files.example.com/pigeon", "https://files.example.com/?q=1", "https://files.example.com/#top", "https:///"} {
+		if _, err := parsePublicURL(value); !errors.Is(err, errInvalidPublicURL) {
+			t.Errorf("%q accepted: %v", value, err)
+		}
+	}
+
+	cfg := newTestConfig(t, 100)
+	ctx := context.Background()
+	if err := cfg.store.saveSettings(ctx, settings{dir: cfg.dir, listen: defaultListen, publicURL: "files.example.com"}); err == nil {
+		t.Fatal("an invalid public URL was saved")
+	}
+	want := settings{dir: cfg.dir, listen: defaultListen, publicURL: "https://files.example.com"}
+	if err := cfg.store.saveSettings(ctx, want); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := cfg.store.loadSettings(ctx); err != nil || got != want {
+		t.Fatalf("settings = %#v, %v", got, err)
+	}
+	// Databases created before the setting existed gain an empty column.
+	if _, err := cfg.store.db.Exec(`ALTER TABLE settings DROP COLUMN public_url`); err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.store.db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err := openStore(ctx, filepath.Join(filepath.Dir(cfg.dir), "app.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.db.Close()
+	if got, err := s.loadSettings(ctx); err != nil || got != (settings{dir: cfg.dir, listen: defaultListen}) {
+		t.Fatalf("migrated settings = %#v, %v", got, err)
+	}
+}
+
+func TestPlainHTTPOnTheNetworkIsWarnedAbout(t *testing.T) {
+	https, _ := parsePublicURL("https://files.example.com")
+	plain, _ := parsePublicURL("http://files.example.com")
+	for _, tt := range []struct {
+		listen    string
+		publicURL *url.URL
+		warn      bool
+	}{
+		{"127.0.0.1:8080", nil, false},
+		{"[::1]:8080", nil, false},
+		{"localhost:8080", nil, false},
+		{"0.0.0.0:8080", nil, true},
+		{":8080", nil, true},
+		{"192.168.1.5:8080", plain, true},
+		{"0.0.0.0:8080", https, false},
+	} {
+		if got := plainHTTPWarning(tt.listen, tt.publicURL) != ""; got != tt.warn {
+			t.Errorf("listen %s, public URL %v: warning = %t, want %t", tt.listen, tt.publicURL, got, tt.warn)
+		}
 	}
 }
