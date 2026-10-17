@@ -1,0 +1,5 @@
+/* Source for static/tailwind.css. Regenerate with `go generate ./web` after
+   changing Tailwind classes in templates or scripts. */
+@import "tailwindcss" source(none);
+@source "./templates";
+@source "./static/*.js";
