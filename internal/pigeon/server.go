@@ -32,7 +32,7 @@ func newServer(cfg config) *http.Server {
 
 	return &http.Server{
 		Addr:              cfg.listen,
-		Handler:           logRequests(mux),
+		Handler:           logRequests(securityHeaders(mux)),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
@@ -59,6 +59,22 @@ func runServer(ctx context.Context, srv *http.Server) error {
 		}
 		return nil
 	}
+}
+
+// Pages load only embedded same-origin assets and contain no inline scripts or
+// styles, so the policy allows nothing else. Handlers may tighten the referrer
+// policy, as public share links do.
+const contentSecurityPolicy = "default-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
+
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("Content-Security-Policy", contentSecurityPolicy)
+		h.Set("Referrer-Policy", "same-origin")
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY") // For browsers without frame-ancestors.
+		next.ServeHTTP(w, r)
+	})
 }
 
 func logRequests(next http.Handler) http.Handler {
