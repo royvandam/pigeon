@@ -282,7 +282,7 @@ func TestDeletedUsersLosePublicAccessWhileUploadsArePreserved(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := cfg.store.resetPassword(context.Background(), u.ID, "changed-password"); err != nil {
+	if _, err := cfg.store.resetPassword(context.Background(), u.ID, "changed-password"); err != nil {
 		t.Fatal(err)
 	}
 	if w := publicDownload(cfg, http.MethodGet, link); w.Code != http.StatusOK {

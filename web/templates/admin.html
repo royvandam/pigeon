@@ -3,11 +3,12 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Manage users · Upload</title>
+  <title>{{if .SignedOut}}Password reset{{else}}Manage users{{end}} · Upload</title>
   {{template "pageAssets" .}}
 </head>
 <body class="min-h-screen bg-zinc-950 text-zinc-100">
   <main class="mx-auto max-w-5xl px-4 py-10">
+    {{if not .SignedOut}}
     <div class="flex flex-wrap items-center justify-between gap-4">
       <div>
         <h1 class="text-xl font-semibold"><i class="fa-solid fa-users mr-2 text-zinc-400" aria-hidden="true"></i>Manage users</h1>
@@ -20,16 +21,26 @@
     </div>
     {{if .Error}}<p role="alert" class="mt-6 rounded-lg border border-red-900 bg-red-950/40 p-3 text-sm text-red-200">{{.Error}}</p>{{end}}
     {{if .Message}}<p role="status" class="mt-6 rounded-lg border border-green-900 bg-green-950/40 p-3 text-sm text-green-200">{{.Message}}</p>{{end}}
-    {{if .CreatedUser}}
-    <section aria-labelledby="createdUserTitle" class="mt-6 rounded-2xl border border-green-900 bg-green-950/40 p-6">
-      <h2 id="createdUserTitle" class="font-semibold text-green-200"><i class="fa-solid fa-circle-check mr-2" aria-hidden="true"></i>User {{if .CreatedUser.Recycled}}recycled{{else}}created{{end}}: {{.CreatedUser.Username}}</h2>
-      <p class="mt-3 text-sm text-zinc-300">Copy this passphrase and give it to {{.CreatedUser.Username}}. It is shown only on this page.</p>
+    {{end}}
+    {{if .Credentials}}
+    <section aria-labelledby="credentialTitle" class="mt-6 rounded-2xl border border-green-900 bg-green-950/40 p-6">
+      <h2 id="credentialTitle" class="font-semibold text-green-200"><i class="fa-solid fa-circle-check mr-2" aria-hidden="true"></i>{{.Credentials.Heading}}: {{.Credentials.Username}}</h2>
+      {{if .SignedOut}}
+      <p class="mt-3 text-sm text-zinc-300">You have been signed out. Copy this passphrase before leaving this page and use it to sign in again. It is shown only on this page.</p>
+      {{else}}
+      <p class="mt-3 text-sm text-zinc-300">Copy this passphrase and give it to {{.Credentials.Username}}. It is shown only on this page.</p>
+      {{end}}
       <p class="mt-4 text-sm text-zinc-400">Passphrase</p>
-      <code id="createdPassphrase" class="mt-2 block select-all rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100">{{.CreatedUser.Passphrase}}</code>
+      <code id="issuedPassphrase" class="mt-2 block select-all rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100">{{.Credentials.Passphrase}}</code>
       <p class="mt-2 text-xs text-zinc-400">Use it exactly as shown, including the hyphens.</p>
+      {{if .SignedOut}}
+      <a href="/login" class="mt-4 inline-block rounded-lg bg-zinc-800 px-4 py-2 hover:bg-zinc-700"><i class="fa-solid fa-right-to-bracket mr-1" aria-hidden="true"></i>Sign in</a>
+      {{else}}
       <a href="/admin" class="mt-4 inline-block rounded-lg bg-zinc-800 px-4 py-2 hover:bg-zinc-700"><i class="fa-solid fa-check mr-1" aria-hidden="true"></i>Done</a>
+      {{end}}
     </section>
     {{end}}
+    {{if not .SignedOut}}
     {{if .RecycleCandidate}}
     <section aria-labelledby="recycleCandidateTitle" class="mt-6 rounded-2xl border border-zinc-700 bg-zinc-900/40 p-6">
       <h2 id="recycleCandidateTitle" class="font-semibold">This username or upload folder belongs to a deleted account</h2>
@@ -62,7 +73,7 @@
     <section class="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-6">
       <h2 class="font-semibold">Users</h2>
       <p class="mt-2 text-sm text-zinc-400">Deleting a user preserves their uploads and reserves their username and folder. Password resets sign the user out on all devices.</p>
-      <p class="mt-2 text-xs text-zinc-400">Replacement passwords need at least 8 characters and may contain at most 72 bytes.</p>
+      <p class="mt-2 text-xs text-zinc-400">Confirming a password reset generates a new four-word passphrase and shows it only in the reset result.</p>
       <div class="mt-4 overflow-x-auto">
         <table class="w-full text-left text-sm">
           <thead class="text-zinc-400"><tr class="border-b border-zinc-800">
@@ -90,14 +101,7 @@
                 </form>
               </td>
               <td class="py-4">
-                <form method="post" action="/admin" class="flex flex-wrap gap-2">
-                  {{template "csrfField" $}}
-                  <input type="hidden" name="action" value="reset" />
-                  <input type="hidden" name="user_id" value="{{.ID}}" />
-                  <input name="password" aria-label="New password for {{.Username}}" placeholder="New password" type="password" required minlength="8" autocomplete="new-password" data-required-message="Enter a new password."
-                    class="w-40 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2" />
-                  <button type="submit" class="rounded-lg border border-zinc-600 px-3 py-2"><i class="fa-solid fa-key mr-1" aria-hidden="true"></i>Reset password</button>
-                </form>
+                <button type="button" data-dialog-action="reset-password" data-name="{{.Username}}" data-user-id="{{.ID}}" data-self="{{eq .ID $.CurrentID}}" class="rounded-lg border border-zinc-600 px-3 py-2"><i class="fa-solid fa-key mr-1" aria-hidden="true"></i>Reset password</button>
                 {{if ne .ID $.CurrentID}}
                 <button type="button" data-dialog-action="delete-user" data-name="{{.Username}}" data-user-id="{{.ID}}" class="mt-2 rounded-lg border border-red-900 px-3 py-2 text-red-300"><i class="fa-solid fa-user-minus mr-1" aria-hidden="true"></i>Delete user</button>
                 {{end}}
@@ -137,9 +141,12 @@
       </div>
     </section>
     {{end}}
+    {{end}}
   </main>
+  {{if not .SignedOut}}
   {{template "actionDialog" .}}
   {{template "formValidation" .}}
+  {{end}}
 </body>
 </html>
 

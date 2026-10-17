@@ -50,7 +50,7 @@ func TestAdminPurgeAndRecreateAccount(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("purged username could not be reused: %d %s", w.Code, w.Body)
 	}
-	passphrase := createdPassphrase(t, w)
+	passphrase := displayedPassphrase(t, w)
 	fresh, err := cfg.store.authenticate(ctx, u.Username, passphrase)
 	if err != nil || fresh.ID == u.ID {
 		t.Fatalf("recreated account reused the purged identity: %#v %v", fresh, err)

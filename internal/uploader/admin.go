@@ -18,15 +18,16 @@ type adminPage struct {
 	DeletedUsers       []adminUser
 	Error              string
 	Message            string
-	CreatedUser        *createdUserCredentials
+	Credentials        *credentialNotice
+	SignedOut          bool
 	RecycleCandidateID int64
 	RecycleCandidate   *adminUser
 }
 
-type createdUserCredentials struct {
+type credentialNotice struct {
 	Username   string
 	Passphrase string
-	Recycled   bool
+	Heading    string
 }
 
 type adminUser struct {
@@ -79,7 +80,7 @@ func (cfg config) handleAdmin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodGet {
-		messages := map[string]string{"created": "User created.", "deleted": "User deleted. Their uploads have been preserved.", "purged": "Account and uploads permanently deleted. The username and folder are available for reuse.", "reset": "Password reset. The user must sign in again.", "quota": "Disk quota updated."}
+		messages := map[string]string{"deleted": "User deleted. Their uploads have been preserved.", "purged": "Account and uploads permanently deleted. The username and folder are available for reuse.", "quota": "Disk quota updated."}
 		cfg.renderAdmin(w, r, a, adminPage{Message: messages[r.URL.Query().Get("result")]}, http.StatusOK)
 		return
 	}
@@ -117,18 +118,20 @@ func (cfg config) handleAdmin(w http.ResponseWriter, r *http.Request) {
 	if change.Credentials != nil {
 		// Credentials appear only in this uncached response, never a redirect,
 		// cookie, or persistent page state.
-		cfg.renderAdmin(w, r, a, adminPage{CreatedUser: &createdUserCredentials{
+		data := adminPage{Credentials: &credentialNotice{
 			Username: change.Credentials.User.Username, Passphrase: change.Credentials.Passphrase,
-			Recycled: command.action == "recycle",
-		}}, http.StatusOK)
+			Heading: map[string]string{"create": "User created", "recycle": "User recycled", "reset": "Password reset"}[command.action],
+		}, SignedOut: change.ActorPasswordChanged}
+		if data.SignedOut {
+			clearSessionCookie(w, r)
+			w.Header().Set("Cache-Control", "no-store")
+			renderTemplate(w, adminTmpl, data, http.StatusOK)
+		} else {
+			cfg.renderAdmin(w, r, a, data, http.StatusOK)
+		}
 		return
 	}
-	if change.ActorPasswordChanged {
-		clearSessionCookie(w, r)
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
-		return
-	}
-	results := map[string]string{"delete": "deleted", "reset": "reset", "quota": "quota", "purge": "purged"}
+	results := map[string]string{"delete": "deleted", "quota": "quota", "purge": "purged"}
 	http.Redirect(w, r, "/admin?result="+results[command.action], http.StatusSeeOther)
 }
 
@@ -152,7 +155,6 @@ func parseAccountCommand(form url.Values) (accountCommand, error) {
 			return command, errors.New("invalid user ID")
 		}
 		command.id = id
-		command.password = form.Get("password")
 		if command.action == "quota" {
 			quota, err := parseQuota(form.Get("quota"))
 			if err != nil {

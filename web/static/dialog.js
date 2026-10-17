@@ -21,6 +21,13 @@
       submit: 'Delete', icon: 'fa-trash-can', danger: true,
       description: () => 'The user will lose access. Their uploads will be preserved and their username and folder will remain reserved.'
     }],
+    ['reset-password', {
+      title: 'Reset password for', endpoint: '/admin', fields: userFields('reset'), confirm: true,
+      submit: 'Reset password', icon: 'fa-key', danger: true,
+      description: data => 'This replaces the current password with a new four-word passphrase. '
+        + (data.self === 'true' ? 'You will be signed out on all devices. ' : 'This user will be signed out on all devices. ')
+        + 'Copy the new passphrase from the result page.'
+    }],
     ['recycle-user', {
       title: 'Recycle account', endpoint: '/admin', fields: userFields('recycle'), confirm: true,
       submit: 'Recycle account', icon: 'fa-recycle',

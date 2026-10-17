@@ -68,7 +68,7 @@ func TestReadAccessRechecksIdentityAfterWaiting(t *testing.T) {
 		}
 		done <- err
 	}()
-	err = cfg.store.resetPassword(ctx, u.ID, "replacement-password")
+	_, err = cfg.store.resetPassword(ctx, u.ID, "replacement-password")
 	release()
 	if err != nil {
 		t.Fatal(err)

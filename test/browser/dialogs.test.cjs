@@ -139,6 +139,58 @@ test('user deletion shares confirmation handling and does not retain file fields
   assert.equal(p.elements.get('actionDialogConfirm').dataset.danger, 'false');
 });
 
+for (const self of [false, true]) {
+  test(`password reset confirms ${self ? 'signing yourself out' : 'the selected user'} with Cancel focused`, () => {
+    const p = page();
+    p.open('move');
+    p.cancel();
+    assert.equal(p.open('reset-password', {name: 'Alice', userId: '42', self: String(self)}).prevented, true);
+    assert.equal(p.dialog.open, true);
+    assert.equal(p.form.attributes.action, '/admin');
+    assert.deepEqual(p.fields(), {action: 'reset', user_id: '42'});
+    assert.equal(p.elements.get('actionDialogTitle').textContent, 'Reset password for "Alice"?');
+    const description = p.elements.get('actionDialogDescription').textContent;
+    assert.match(description, /replaces the current password with a new four-word passphrase/);
+    assert.match(description, self ? /You will be signed out on all devices/ : /This user will be signed out on all devices/);
+    assert.match(description, /Copy the new passphrase from the result page/);
+    assert.equal(p.elements.get('actionDialogConfirmLabel').textContent, 'Reset password');
+    assert.equal(p.elements.get('actionDialogConfirmIcon').className, 'fa-solid fa-key mr-1');
+    assert.equal(p.elements.get('actionDialogConfirm').dataset.danger, 'true');
+    assert.equal(p.elements.get('actionDialogConfirm').disabled, false);
+    assert.equal(p.input.disabled, true);
+    assert.equal(p.input.required, false);
+    assert.equal(p.elements.get('actionDialogInputGroup').hidden, true);
+    assert.equal(p.focused(), 'actionDialogCancel');
+    assert.equal(p.requests.length, 0);
+    p.cancel();
+    assert.equal(p.dialog.open, false);
+    assert.equal(p.requests.length, 0);
+    p.open('reset-password', {name: 'Bob', userId: '43'});
+    assert.deepEqual(p.fields(), {action: 'reset', user_id: '43'});
+    assert.equal(p.submit().prevented, false);
+  });
+}
+
+test('password reset clears sharing controls and restores other dialog modes', () => {
+  const p = page();
+  p.open('share');
+  p.cancel();
+  p.open('reset-password', {name: 'Alice', userId: '42', self: 'true'});
+  assert.equal(p.requests[0].options.signal.aborted, true);
+  assert.equal(p.elements.get('shareControls').hidden, true);
+  assert.equal(p.elements.get('actionDialogConfirm').hidden, false);
+  assert.equal(p.elements.get('actionDialogConfirm').disabled, false);
+  assert.equal(p.elements.get('actionDialogCancelLabel').textContent, 'Cancel');
+  assert.equal(p.submit().prevented, false);
+  p.cancel();
+  p.open('rename');
+  assert.deepEqual(p.fields(), {action: 'rename', path: 'docs/report.txt', dir: 'docs'});
+  assert.equal(p.elements.get('actionDialogConfirmLabel').textContent, 'Save');
+  assert.equal(p.elements.get('actionDialogConfirm').dataset.danger, 'false');
+  assert.equal(p.input.disabled, false);
+  assert.equal(p.input.required, true);
+});
+
 test('unsupported actions are ignored without opening or submitting the dialog', () => {
   for (const action of ['unknown', '__proto__', 'toString']) {
     const p = page();

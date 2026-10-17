@@ -164,7 +164,7 @@ func TestAdminCanAssignAndChangeQuotas(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("create user with quota: %d, %s", w.Code, w.Body)
 	}
-	passphrase := createdPassphrase(t, w)
+	passphrase := displayedPassphrase(t, w)
 	u, err := cfg.store.authenticate(ctx, "Quota User", passphrase)
 	if err != nil || u.QuotaBytes != 20 {
 		t.Fatalf("assigned quota = %#v, %v", u, err)

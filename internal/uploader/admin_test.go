@@ -13,11 +13,11 @@ import (
 	"testing"
 )
 
-func createdPassphrase(t *testing.T, w *httptest.ResponseRecorder) string {
+func displayedPassphrase(t *testing.T, w *httptest.ResponseRecorder) string {
 	t.Helper()
-	match := regexp.MustCompile(`<code id="createdPassphrase"[^>]*>([^<]+)</code>`).FindStringSubmatch(w.Body.String())
+	match := regexp.MustCompile(`<code id="issuedPassphrase"[^>]*>([^<]+)</code>`).FindStringSubmatch(w.Body.String())
 	if len(match) != 2 || len(strings.Split(match[1], "-")) != 4 {
-		t.Fatal("creation response did not display a four-word passphrase")
+		t.Fatal("credential response did not display a four-word passphrase")
 	}
 	return match[1]
 }
@@ -48,7 +48,7 @@ func TestAdminUserRecycling(t *testing.T) {
 	for _, username := range []string{"ÉLISE SMITH", "elise_smith"} {
 		w = httptest.NewRecorder()
 		cfg.handleAdmin(w, formRequest("/admin", url.Values{"action": {"create"}, "username": {username}, "quota": {"1GB"}, "csrf_token": {csrf}}, cookie))
-		if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `id="recycleCandidateTitle"`) || strings.Contains(w.Body.String(), `id="createdPassphrase"`) {
+		if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `id="recycleCandidateTitle"`) || strings.Contains(w.Body.String(), `id="issuedPassphrase"`) {
 			t.Fatalf("reserved name did not offer explicit recycling: %d %s", w.Code, w.Body)
 		}
 		if _, err := cfg.store.authenticate(ctx, old.Username, testPassword); !errors.Is(err, errInvalidCredentials) {
@@ -61,7 +61,7 @@ func TestAdminUserRecycling(t *testing.T) {
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "User recycled: Élise Smith") || strings.Contains(w.Body.String(), `id="deletedUsers"`) {
 		t.Fatalf("recycling failed or left the account deleted: %d %s", w.Code, w.Body)
 	}
-	passphrase := createdPassphrase(t, w)
+	passphrase := displayedPassphrase(t, w)
 	if w.Header().Get("Cache-Control") != "no-store" || w.Header().Get("Location") != "" || len(w.Result().Cookies()) != 0 {
 		t.Fatal("recycled credential must appear only in an uncached response")
 	}
@@ -74,12 +74,12 @@ func TestAdminUserRecycling(t *testing.T) {
 	}
 	w = httptest.NewRecorder()
 	cfg.handleAdmin(w, r)
-	if w.Code != http.StatusOK || strings.Contains(w.Body.String(), passphrase) || strings.Contains(w.Body.String(), `id="createdPassphrase"`) {
+	if w.Code != http.StatusOK || strings.Contains(w.Body.String(), passphrase) || strings.Contains(w.Body.String(), `id="issuedPassphrase"`) {
 		t.Fatal("GET disclosed the recycled passphrase")
 	}
 	w = httptest.NewRecorder()
 	cfg.handleAdmin(w, formRequest("/admin", form, cookie))
-	if w.Code != http.StatusBadRequest || strings.Contains(w.Body.String(), `id="createdPassphrase"`) {
+	if w.Code != http.StatusBadRequest || strings.Contains(w.Body.String(), `id="issuedPassphrase"`) {
 		t.Fatal("repeated recycling succeeded or disclosed an unused credential")
 	}
 	if _, err := cfg.store.authenticate(ctx, old.Username, passphrase); err != nil {
@@ -127,7 +127,7 @@ func TestAdminRecyclingRequiresPermissionAndExplicitPOST(t *testing.T) {
 			r.Header.Set("Origin", tt.origin)
 			w := httptest.NewRecorder()
 			cfg.handleAdmin(w, r)
-			if w.Code != tt.status || strings.Contains(w.Body.String(), `id="createdPassphrase"`) {
+			if w.Code != tt.status || strings.Contains(w.Body.String(), `id="issuedPassphrase"`) {
 				t.Fatalf("unexpected recycling response: %d %s", w.Code, w.Body)
 			}
 			deleted, err := cfg.store.deletedUserIDForUsername(ctx, old.Username)
@@ -168,7 +168,7 @@ func TestAdminGeneratesUserCredentials(t *testing.T) {
 			if w.Code != http.StatusOK {
 				t.Fatalf("create user: %d %s", w.Code, w.Body)
 			}
-			passphrase := createdPassphrase(t, w)
+			passphrase := displayedPassphrase(t, w)
 			if w.Header().Get("Cache-Control") != "no-store" || w.Header().Get("Location") != "" || len(w.Result().Cookies()) != 0 {
 				t.Fatal("generated credential must be in an uncached response, without redirects or cookies")
 			}
@@ -192,7 +192,7 @@ func TestAdminGeneratesUserCredentials(t *testing.T) {
 			r.AddCookie(cookie)
 			w = httptest.NewRecorder()
 			cfg.handleAdmin(w, r)
-			if w.Code != http.StatusOK || strings.Contains(w.Body.String(), passphrase) || strings.Contains(w.Body.String(), `id="createdPassphrase"`) || strings.Contains(w.Body.String(), `id="new-password"`) {
+			if w.Code != http.StatusOK || strings.Contains(w.Body.String(), passphrase) || strings.Contains(w.Body.String(), `id="issuedPassphrase"`) || strings.Contains(w.Body.String(), `id="new-password"`) {
 				t.Fatal("management page still prompts for a creation password or discloses an earlier passphrase")
 			}
 
@@ -200,7 +200,7 @@ func TestAdminGeneratesUserCredentials(t *testing.T) {
 			// disclose the unused credential generated for the failed request.
 			w = httptest.NewRecorder()
 			cfg.handleAdmin(w, formRequest("/admin", form, cookie))
-			if w.Code != http.StatusBadRequest || strings.Contains(w.Body.String(), `id="createdPassphrase"`) {
+			if w.Code != http.StatusBadRequest || strings.Contains(w.Body.String(), `id="issuedPassphrase"`) {
 				t.Fatal("duplicate creation succeeded or displayed an unused credential")
 			}
 			if _, err := cfg.store.authenticate(ctx, "Alice Smith", passphrase); err != nil {
@@ -222,7 +222,7 @@ func TestAdminInvalidCreationDoesNotDisplayCredentials(t *testing.T) {
 	} {
 		w := httptest.NewRecorder()
 		cfg.handleAdmin(w, formRequest("/admin", form, cookie))
-		if w.Code != http.StatusBadRequest || strings.Contains(w.Body.String(), `id="createdPassphrase"`) {
+		if w.Code != http.StatusBadRequest || strings.Contains(w.Body.String(), `id="issuedPassphrase"`) {
 			t.Fatalf("invalid creation displayed credentials: status %d", w.Code)
 		}
 	}

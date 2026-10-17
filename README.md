@@ -20,9 +20,9 @@ as three lines for automated provisioning.
 
 Open http://127.0.0.1:8080 and sign in. Administrators can open `/admin` to create
 regular users or additional administrators, assign and change disk quotas, delete
-users, and reset passwords. Creating a user generates a random four-word
-passphrase, separated by hyphens, and shows it to the administrator on the
-creation result page. Copy it before leaving that page; it cannot be retrieved
+users, and reset passwords. Creating a user or resetting a password generates
+a random four-word passphrase, separated by hyphens, and shows it on the
+result page. Copy it before leaving that page; it cannot be retrieved
 later. Only its bcrypt hash is stored. User deletion uses the same confirmation
 dialog as file deletion and preserves the user's uploaded files.
 Deleted accounts appear under **Deleted users**. **Recycle account** asks for
@@ -35,9 +35,11 @@ files and folders after confirmation. Its username and normalized folder name
 can then be used for a new account with empty storage. Purging is available only
 for deleted accounts; active users must be deleted first.
 Regular users can manage their own files but cannot access user management. An administrator
-cannot delete their own account or the last administrator. Resetting a password
-signs that user out on every device; resetting your own password returns you to
-the login page.
+cannot delete their own account or the last administrator. **Reset password**
+opens a confirmation dialog; Cancel or Escape leaves the password and sessions
+unchanged. Confirming the reset signs that user out on every device. Resetting
+your own password shows the new passphrase on a signed-out result page with a
+link to sign in again.
 
 ## File explorer and uploads
 

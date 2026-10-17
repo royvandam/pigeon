@@ -220,27 +220,35 @@ RETURNING id, username, slug, is_admin, auth_version, quota_bytes`, hash, id).
 	return u, nil
 }
 
-func (s *store) resetPassword(ctx context.Context, id int64, password string) error {
+func (s *store) resetPassword(ctx context.Context, id int64, password string) (user, error) {
 	hash, err := hashPassword(password)
 	if err != nil {
-		return err
+		return user{}, err
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return user{}, err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `UPDATE users SET password_hash = ?, auth_version = auth_version + 1 WHERE id = ? AND deleted_at IS NULL`, hash, id)
-	if err != nil {
-		return err
+	var u user
+	err = tx.QueryRowContext(ctx, `
+UPDATE users SET password_hash = ?, auth_version = auth_version + 1
+WHERE id = ? AND deleted_at IS NULL
+RETURNING id, username, slug, is_admin, auth_version, quota_bytes`, hash, id).
+		Scan(&u.ID, &u.Username, &u.Slug, &u.Admin, &u.Version, &u.QuotaBytes)
+	if errors.Is(err, sql.ErrNoRows) {
+		return user{}, errUserNotFound
 	}
-	if n, err := result.RowsAffected(); err != nil || n == 0 {
-		return errUserNotFound
+	if err != nil {
+		return user{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, id); err != nil {
-		return err
+		return user{}, err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return user{}, err
+	}
+	return u, nil
 }
 
 func (s *store) deleteUser(ctx context.Context, id, actorID int64) error {

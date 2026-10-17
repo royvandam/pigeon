@@ -43,7 +43,7 @@ func formRequest(path string, form url.Values, cookie *http.Cookie) *http.Reques
 	return r
 }
 
-func TestAdminUsesSharedDeletionDialog(t *testing.T) {
+func TestAdminUsesSharedAccountDialogs(t *testing.T) {
 	cfg := newTestConfig(t, 100)
 	admin, err := cfg.store.createUser(context.Background(), "Admin", testPassword, true)
 	if err != nil {
@@ -61,6 +61,20 @@ func TestAdminUsesSharedDeletionDialog(t *testing.T) {
 	buttons := regexp.MustCompile(`<button\b[^>]*data-dialog-action="delete-user"[^>]*>`).FindAllString(body, -1)
 	if len(buttons) != 1 || !strings.Contains(buttons[0], `type="button"`) || !strings.Contains(buttons[0], `data-name="Test User"`) || strings.Contains(buttons[0], `data-user-id="`+strconv.FormatInt(admin.ID, 10)+`"`) {
 		t.Fatalf("user deletion must confirm the selected account and exclude self: %v", buttons)
+	}
+	resetButtons := regexp.MustCompile(`<button\b[^>]*data-dialog-action="reset-password"[^>]*>`).FindAllString(body, -1)
+	if len(resetButtons) != 2 || strings.Contains(body, `name="action" value="reset"`) {
+		t.Fatal("password resets must open a confirmation dialog instead of posting directly")
+	}
+	for _, button := range resetButtons {
+		self := strings.Contains(button, `data-user-id="`+strconv.FormatInt(admin.ID, 10)+`"`)
+		name := "Test User"
+		if self {
+			name = admin.Username
+		}
+		if !strings.Contains(button, `type="button"`) || !strings.Contains(button, `data-name="`+name+`"`) || !strings.Contains(button, `data-self="`+strconv.FormatBool(self)+`"`) {
+			t.Fatalf("reset button cannot confirm the selected account or self-reset: %s", button)
+		}
 	}
 	if strings.Count(body, `<dialog id="actionDialog"`) != 1 || !strings.Contains(body, `<form id="actionDialogForm" method="post"`) {
 		t.Fatal("admin page did not render exactly one shared dialog")
@@ -186,7 +200,7 @@ func TestAdminPermissionsCSRFAndUserLifecycle(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("create user: %d %s", w.Code, w.Body)
 	}
-	passphrase := createdPassphrase(t, w)
+	passphrase := displayedPassphrase(t, w)
 	alice, err := cfg.store.authenticate(ctx, "Alice Smith", passphrase)
 	if err != nil || alice.Admin || alice.Slug != "alice-smith" {
 		t.Fatalf("created user: %#v, %v", alice, err)
@@ -195,12 +209,13 @@ func TestAdminPermissionsCSRFAndUserLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reset := url.Values{"action": {"reset"}, "user_id": {strconv.FormatInt(alice.ID, 10)}, "password": {"replacement-password"}, "csrf_token": {csrf}}
+	reset := url.Values{"action": {"reset"}, "user_id": {strconv.FormatInt(alice.ID, 10)}, "csrf_token": {csrf}}
 	w = httptest.NewRecorder()
 	cfg.handleAdmin(w, formRequest("/admin", reset, adminCookie))
-	if w.Code != http.StatusSeeOther {
+	if w.Code != http.StatusOK {
 		t.Fatalf("reset user: %d %s", w.Code, w.Body)
 	}
+	resetPassphrase := displayedPassphrase(t, w)
 	if _, err := cfg.store.session(ctx, oldToken); !errors.Is(err, errInvalidCredentials) {
 		t.Fatalf("password reset did not revoke session: %v", err)
 	}
@@ -210,7 +225,7 @@ func TestAdminPermissionsCSRFAndUserLifecycle(t *testing.T) {
 	if _, err := cfg.store.authenticate(ctx, "Alice Smith", passphrase); !errors.Is(err, errInvalidCredentials) {
 		t.Fatal("old password still works")
 	}
-	alice, err = cfg.store.authenticate(ctx, "Alice Smith", "replacement-password")
+	alice, err = cfg.store.authenticate(ctx, "Alice Smith", resetPassphrase)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +242,7 @@ func TestAdminPermissionsCSRFAndUserLifecycle(t *testing.T) {
 	if _, err := cfg.store.session(ctx, newToken); !errors.Is(err, errInvalidCredentials) {
 		t.Fatal("deleted user's session still works")
 	}
-	if _, err := cfg.store.authenticate(ctx, "Alice Smith", "replacement-password"); !errors.Is(err, errInvalidCredentials) {
+	if _, err := cfg.store.authenticate(ctx, "Alice Smith", resetPassphrase); !errors.Is(err, errInvalidCredentials) {
 		t.Fatal("deleted user can authenticate")
 	}
 	if err := cfg.store.deleteUser(ctx, admin.ID, admin.ID); !errors.Is(err, errDeleteSelf) {

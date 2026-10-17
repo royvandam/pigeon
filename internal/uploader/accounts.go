@@ -26,7 +26,6 @@ type accountCommand struct {
 	action        string
 	id            int64
 	username      string
-	password      string
 	administrator bool
 	quota         int64
 }
@@ -75,7 +74,9 @@ func (m accountManager) apply(ctx context.Context, actor user, command accountCo
 	case "quota":
 		err = m.store.setQuota(ctx, command.id, command.quota)
 	case "reset":
-		err = m.store.resetPassword(ctx, command.id, command.password)
+		change.Credentials, err = issueUserCredentials(func(password string) (user, error) {
+			return m.store.resetPassword(ctx, command.id, password)
+		})
 		change.ActorPasswordChanged = err == nil && command.id == actor.ID
 	default:
 		err = errors.New("unknown action")
