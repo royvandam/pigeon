@@ -16,7 +16,7 @@ go run ./cmd/pigeon -listen 127.0.0.1:8080
 
 On the first run, the terminal asks for the initial administrator's username,
 password, and password confirmation. Password entry is hidden in a terminal.
-Passwords need at least 8 characters and may contain at most 72 bytes. Setup
+Passwords need at least 12 characters and may contain at most 72 bytes. Setup
 finishes before the HTTP listener starts. Subsequent starts use the existing
 accounts and do not prompt again. First-run input can also be supplied on stdin
 as three lines for automated provisioning.
@@ -118,6 +118,27 @@ on later starts without those flags. The upload directory is stored as an absolu
 
 ```sh
 go run ./cmd/pigeon -db ./pigeon.db -dir ./uploads -listen 127.0.0.1:8080
+```
+
+### Sign-in throttling and reverse proxies
+
+Each client may make 10 failed password attempts, through the sign-in form or
+HTTP Basic authentication; one more attempt becomes available every 6 seconds.
+Further attempts receive HTTP 429 with a `Retry-After` header before the
+password is checked. Successful sign-ins don't count against the limit, so API
+clients with valid credentials are never throttled. Clients are identified by
+IPv4 address or IPv6 /64 network. At most one password check per CPU runs at a
+time.
+
+Behind a reverse proxy, every request arrives from the proxy's address. List the
+proxy with `-trusted-proxies` so the server reads the client address from the
+`X-Forwarded-For` header the proxy appends. It accepts comma-separated IP
+addresses and CIDR ranges. The header is ignored on requests from any other
+address, so clients cannot spoof it. Like `-dir` and `-listen`, the value is
+saved; `-trusted-proxies=` clears it.
+
+```sh
+go run ./cmd/pigeon -listen 127.0.0.1:8080 -trusted-proxies 127.0.0.1,::1
 ```
 
 ## Disk quotas

@@ -41,7 +41,7 @@ func parseForm(w http.ResponseWriter, r *http.Request) bool {
 
 func (cfg config) requestAuthentication(r *http.Request) (authentication, error) {
 	if username, password, ok := r.BasicAuth(); ok {
-		u, err := cfg.store.authenticate(r.Context(), username, password)
+		u, err := cfg.checkPassword(r, username, password)
 		return authentication{User: u, Basic: true}, err
 	}
 	cookie, err := r.Cookie(sessionCookieName)
@@ -59,7 +59,11 @@ type authOptions struct {
 func (cfg config) requireAuth(w http.ResponseWriter, r *http.Request, options authOptions) (authentication, bool) {
 	a, err := cfg.requestAuthentication(r)
 	if err != nil {
-		if !errors.Is(err, errInvalidCredentials) {
+		var limited *tooManyAttemptsError
+		if errors.As(err, &limited) {
+			setRetryAfter(w, limited)
+			http.Error(w, limited.Error(), http.StatusTooManyRequests)
+		} else if !errors.Is(err, errInvalidCredentials) {
 			log.Printf("authenticate: %v", err)
 			http.Error(w, "authentication unavailable", http.StatusInternalServerError)
 		} else if options.Browser {
@@ -140,7 +144,13 @@ func (cfg config) handleLogin(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "invalid CSRF token; reload the login page", http.StatusForbidden)
 			return
 		}
-		u, err := cfg.store.authenticate(r.Context(), r.PostForm.Get("username"), r.PostForm.Get("password"))
+		u, err := cfg.checkPassword(r, r.PostForm.Get("username"), r.PostForm.Get("password"))
+		var limited *tooManyAttemptsError
+		if errors.As(err, &limited) {
+			setRetryAfter(w, limited)
+			renderTemplate(w, loginTmpl, loginPage{CSRFToken: cookie.Value, Error: "Too many sign-in attempts. Try again in " + limited.wait() + "."}, http.StatusTooManyRequests)
+			return
+		}
 		if errors.Is(err, errInvalidCredentials) {
 			renderTemplate(w, loginTmpl, loginPage{CSRFToken: cookie.Value, Error: err.Error()}, http.StatusUnauthorized)
 			return
