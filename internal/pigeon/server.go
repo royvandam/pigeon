@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -14,6 +15,9 @@ import (
 type config struct {
 	// trustedProxies may identify clients through X-Forwarded-For.
 	trustedProxies []netip.Prefix
+	// publicURL is the origin people use, such as https://files.example.com;
+	// nil when unknown.
+	publicURL *url.URL
 
 	dir    string
 	listen string
@@ -39,7 +43,7 @@ func newServer(cfg config) *http.Server {
 
 	return &http.Server{
 		Addr:              cfg.listen,
-		Handler:           logRequests(securityHeaders(mux)),
+		Handler:           logRequests(securityHeaders(mux, cfg.httpsOnly())),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
@@ -73,9 +77,12 @@ func runServer(ctx context.Context, srv *http.Server) error {
 // policy, as public share links do.
 const contentSecurityPolicy = "default-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
 
-func securityHeaders(next http.Handler) http.Handler {
+func securityHeaders(next http.Handler, httpsOnly bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
+		if httpsOnly {
+			h.Set("Strict-Transport-Security", strictTransportSecurity)
+		}
 		h.Set("Content-Security-Policy", contentSecurityPolicy)
 		h.Set("Referrer-Policy", "same-origin")
 		h.Set("X-Content-Type-Options", "nosniff")

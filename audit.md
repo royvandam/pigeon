@@ -22,7 +22,7 @@ Recommended order: A1, A5, A3, A4, A2, A6, then the rest.
 | ID | Severity | Finding | Status |
 | --- | --- | --- | --- |
 | [A1](#a1-unpinned-third-party-scripts-on-every-page) | High | Unpinned third-party scripts on every page | Fixed in #3 |
-| [A2](#a2-cleartext-credentials-by-default-cookies-not-secure-behind-a-tls-proxy) | Medium | Cleartext credentials by default; cookies not `Secure` behind a TLS proxy | Open |
+| [A2](#a2-cleartext-credentials-by-default-cookies-not-secure-behind-a-tls-proxy) | Medium | Cleartext credentials by default; cookies not `Secure` behind a TLS proxy | Fixed in #7 |
 | [A3](#a3-quota-does-not-limit-disk-space-or-inodes) | Medium | Quota does not limit disk space or inodes | Fixed in #5 |
 | [A4](#a4-password-checks-have-no-rate-limit) | Medium | Password checks have no rate limit | Fixed in #6 |
 | [A5](#a5-go-1267-has-reachable-standard-library-vulnerabilities) | Medium | Go 1.26.7 has reachable standard-library vulnerabilities | Fixed in #2 |
@@ -90,7 +90,7 @@ blocks, and scripts change styles only through `element.style`, so A6 can use
 
 ## A2. Cleartext credentials by default; cookies not `Secure` behind a TLS proxy
 
-**Severity:** Medium · **Status:** Open
+**Severity:** Medium · **Status:** Fixed in #7
 
 **Location:** [internal/pigeon/database.go:140](internal/pigeon/database.go#L140),
 [internal/pigeon/auth.go:100](internal/pigeon/auth.go#L100),
@@ -118,6 +118,30 @@ blocks, and scripts change styles only through `element.style`, so A6 can use
 setting enabled the session and login cookies carry `Secure` and responses carry
 HSTS, even when the request arrives over plain HTTP from the proxy. Covered by a
 test in `auth_test.go`.
+
+**Resolution:** TLS stays with a reverse proxy; Pigeon gains a persisted
+`-public-url` setting.
+
+- New databases listen on `127.0.0.1:8080`. Existing databases keep their saved
+  address, and startup warns when plain HTTP is reachable from other machines.
+- With an HTTPS public URL, every cookie is `Secure` and every response carries
+  `Strict-Transport-Security: max-age=31536000`, including plain HTTP forwarded
+  by the proxy.
+- The origin check also accepts the public origin, so proxies that rewrite or
+  drop the port from `Host` no longer break form posts.
+- `auth_test.go` covers sign-in, sign-out, and an administrator's own password
+  reset with HTTPS, HTTP, and no public URL, plus the origin check, URL
+  validation and migration, the loopback default, and the warning.
+- The README documents Caddy and nginx deployments.
+
+Both were tested live with TLS: Secure cookies and HSTS, sign-in, a 50 MB
+upload, a cross-site POST rejected with 403, and per-client throttling through
+`X-Forwarded-For`. The nginx test showed that `$proxy_add_x_forwarded_for`
+appends to a client-supplied header. A client connecting from inside a trusted
+range could then name another address and escape A4's limit. The documented
+nginx configuration therefore replaces the header with `$remote_addr`, and the
+README tells operators to trust only the proxies' own addresses. Built-in TLS
+was left out on purpose; it can be added later if needed.
 
 ---
 

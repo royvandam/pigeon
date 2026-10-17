@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log"
 	"net/http"
-	"net/url"
 	"time"
 )
 
@@ -14,17 +13,6 @@ const (
 	loginCookieName   = "pigeon_login_csrf"
 	maxFormBytes      = int64(64 << 10)
 )
-
-func sameOrigin(r *http.Request) bool {
-	if r.Header.Get("Sec-Fetch-Site") == "cross-site" {
-		return false
-	}
-	if origin := r.Header.Get("Origin"); origin != "" {
-		u, err := url.Parse(origin)
-		return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host == r.Host && u.User == nil
-	}
-	return true
-}
 
 func validCSRF(expected, provided string) bool {
 	return len(expected) == 43 && subtle.ConstantTimeCompare([]byte(expected), []byte(provided)) == 1
@@ -79,7 +67,7 @@ func (cfg config) requireAuth(w http.ResponseWriter, r *http.Request, options au
 		return authentication{}, false
 	}
 	if r.Method == http.MethodPost {
-		if !sameOrigin(r) {
+		if !cfg.sameOrigin(r) {
 			http.Error(w, "invalid request origin", http.StatusForbidden)
 			return authentication{}, false
 		}
@@ -98,18 +86,18 @@ func (cfg config) requireAuth(w http.ResponseWriter, r *http.Request, options au
 	return a, true
 }
 
-func setSessionCookie(w http.ResponseWriter, r *http.Request, token string) {
+func (cfg config) setSessionCookie(w http.ResponseWriter, r *http.Request, token string) {
 	http.SetCookie(w, &http.Cookie{
 		Name: sessionCookieName, Value: token, Path: "/", HttpOnly: true,
-		Secure: r.TLS != nil, SameSite: http.SameSiteLaxMode,
+		Secure: cfg.secureCookies(r), SameSite: http.SameSiteLaxMode,
 		MaxAge: int(sessionLifetime.Seconds()), Expires: time.Now().Add(sessionLifetime),
 	})
 }
 
-func clearSessionCookie(w http.ResponseWriter, r *http.Request) {
+func (cfg config) clearSessionCookie(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name: sessionCookieName, Path: "/", HttpOnly: true,
-		Secure: r.TLS != nil, SameSite: http.SameSiteLaxMode, MaxAge: -1,
+		Secure: cfg.secureCookies(r), SameSite: http.SameSiteLaxMode, MaxAge: -1,
 	})
 }
 
@@ -130,11 +118,11 @@ func (cfg config) handleLogin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		http.SetCookie(w, &http.Cookie{Name: loginCookieName, Value: token, Path: "/login", HttpOnly: true,
-			Secure: r.TLS != nil, SameSite: http.SameSiteStrictMode, MaxAge: 600})
+			Secure: cfg.secureCookies(r), SameSite: http.SameSiteStrictMode, MaxAge: 600})
 		renderTemplate(w, loginTmpl, loginPage{CSRFToken: token}, http.StatusOK)
 	case http.MethodPost:
-		if !sameOrigin(r) || !parseForm(w, r) {
-			if !sameOrigin(r) {
+		if !cfg.sameOrigin(r) || !parseForm(w, r) {
+			if !cfg.sameOrigin(r) {
 				http.Error(w, "invalid request origin", http.StatusForbidden)
 			}
 			return
@@ -165,9 +153,9 @@ func (cfg config) handleLogin(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "login unavailable; try again", http.StatusInternalServerError)
 			return
 		}
-		setSessionCookie(w, r, token)
+		cfg.setSessionCookie(w, r, token)
 		http.SetCookie(w, &http.Cookie{Name: loginCookieName, Path: "/login", MaxAge: -1,
-			HttpOnly: true, Secure: r.TLS != nil, SameSite: http.SameSiteStrictMode})
+			HttpOnly: true, Secure: cfg.secureCookies(r), SameSite: http.SameSiteStrictMode})
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 	}
 }
@@ -184,6 +172,6 @@ func (cfg config) handleLogout(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "logout failed", http.StatusInternalServerError)
 		return
 	}
-	clearSessionCookie(w, r)
+	cfg.clearSessionCookie(w, r)
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }

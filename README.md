@@ -112,9 +112,13 @@ The SQLite database defaults to `./pigeon.db`. Select another location with
 `-db /path/to/pigeon.db`. The database stores usernames, password hashes,
 administrator roles, per-user disk quotas, login sessions, share links, and server settings.
 
-On a new database, server settings default to `./uploads` and `0.0.0.0:8080`.
-Use `-dir` or `-listen` to change them. Overrides are saved in SQLite and reused
-on later starts without those flags. The upload directory is stored as an absolute path.
+On a new database, server settings default to `./uploads` and `127.0.0.1:8080`,
+so only this machine can connect until you choose otherwise. Databases created
+before this default keep their saved listen address. Use `-dir` or `-listen` to
+change them. Overrides are saved in SQLite and reused on later starts without
+those flags. The upload directory is stored as an absolute path. At startup the
+server warns when it serves plain HTTP on an address other machines can reach;
+see [Serving over HTTPS](#serving-over-https).
 
 ```sh
 go run ./cmd/pigeon -db ./pigeon.db -dir ./uploads -listen 127.0.0.1:8080
@@ -132,14 +136,74 @@ time.
 
 Behind a reverse proxy, every request arrives from the proxy's address. List the
 proxy with `-trusted-proxies` so the server reads the client address from the
-`X-Forwarded-For` header the proxy appends. It accepts comma-separated IP
-addresses and CIDR ranges. The header is ignored on requests from any other
-address, so clients cannot spoof it. Like `-dir` and `-listen`, the value is
-saved; `-trusted-proxies=` clears it.
+`X-Forwarded-For` header the proxy sets. It accepts comma-separated IP addresses
+and CIDR ranges. The header is ignored on requests from any other address, so
+clients cannot spoof it. List only the proxies' own addresses: a client
+connecting from inside a trusted range could otherwise supply its own address.
+Like `-dir` and `-listen`, the value is saved; `-trusted-proxies=` clears it.
 
 ```sh
 go run ./cmd/pigeon -listen 127.0.0.1:8080 -trusted-proxies 127.0.0.1,::1
 ```
+
+### Serving over HTTPS
+
+Passwords, passphrases, and session cookies must not cross a network
+unencrypted. Pigeon serves plain HTTP; put a TLS-terminating reverse proxy in
+front of it and tell Pigeon the address people use:
+
+```sh
+go run ./cmd/pigeon -listen 127.0.0.1:8080 \
+  -public-url https://files.example.com -trusted-proxies 127.0.0.1,::1
+```
+
+When `-public-url` uses HTTPS:
+
+- every cookie is marked `Secure`;
+- every response sends `Strict-Transport-Security: max-age=31536000`, even
+  though the proxy forwards plain HTTP;
+- form posts and uploads whose `Origin` is the public URL are accepted even if
+  the proxy rewrites the `Host` header.
+
+HSTS covers only this host, not its subdomains. Once browsers have seen it, they
+refuse plain HTTP for the host for a year, so enable it only when HTTPS works.
+The setting is saved like the others; `-public-url=` clears it. The URL must be
+an origin without a path, because Pigeon's routes live at the root.
+
+[Caddy](https://caddyserver.com) obtains and renews certificates automatically.
+It keeps the `Host` header, replaces any client-supplied `X-Forwarded-For` with
+the real client address, and streams uploads:
+
+```caddyfile
+files.example.com {
+	reverse_proxy 127.0.0.1:8080
+}
+```
+
+With nginx, remove the request body size limit, stream uploads so progress and
+quota checks happen as data arrives, and set `X-Forwarded-For` to the client
+address instead of appending to what the client sent:
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name files.example.com;
+    ssl_certificate     /etc/letsencrypt/live/files.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/files.example.com/privkey.pem;
+
+    client_max_body_size 0;
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_request_buffering off;
+        proxy_read_timeout 1h;
+    }
+}
+```
+
 
 ## Disk quotas
 
@@ -288,8 +352,9 @@ The shared `-password` flag and `X-Upload-Password` header have been removed.
 
 The browser uses an HttpOnly session cookie valid for 12 hours. Forms require
 a CSRF token, and browser uploads send it in the `X-CSRF-Token` header. Session
-tokens are stored as hashes. Passwords use bcrypt. Use HTTPS when serving the
-application beyond a trusted local network.
+tokens are stored as hashes. Passwords use bcrypt. Serve the application over
+HTTPS whenever other machines can reach it; see
+[Serving over HTTPS](#serving-over-https).
 
 Every response sends a Content Security Policy that allows only same-origin
 scripts, styles, fonts, and requests, and forbids inline code, plugins, base-URL
