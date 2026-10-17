@@ -5,8 +5,8 @@ individual user accounts, an administrator management page, and streaming
 uploads stored in a separate folder for each user.
 
 Enter the development environment with `nix-shell`. It provides Go 1.26, `gopls`,
-`goimports`, the SQLite CLI, and Node.js for upload-page tests. Go 1.26 or newer
-also works without Nix.
+`goimports`, the SQLite CLI, Node.js for upload-page tests, and the GitHub CLI
+(`gh`). Go 1.26 or newer also works without Nix.
 
 ```sh
 go run ./cmd/pigeon -listen 127.0.0.1:8080
