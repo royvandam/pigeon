@@ -30,6 +30,8 @@ func storageError(err error) (string, int) {
 		return err.Error(), http.StatusBadRequest
 	case errors.Is(err, errFileConflict), errors.Is(err, os.ErrExist):
 		return err.Error(), http.StatusConflict
+	case errors.Is(err, errDiskQuotaExceeded):
+		return "disk quota exceeded", http.StatusRequestEntityTooLarge
 	case errors.Is(err, os.ErrNotExist):
 		return "file or folder not found", http.StatusNotFound
 	case errors.Is(err, errInvalidCredentials):

@@ -23,7 +23,7 @@ Recommended order: A1, A5, A3, A4, A2, A6, then the rest.
 | --- | --- | --- | --- |
 | [A1](#a1-unpinned-third-party-scripts-on-every-page) | High | Unpinned third-party scripts on every page | Fixed in #3 |
 | [A2](#a2-cleartext-credentials-by-default-cookies-not-secure-behind-a-tls-proxy) | Medium | Cleartext credentials by default; cookies not `Secure` behind a TLS proxy | Open |
-| [A3](#a3-quota-does-not-limit-disk-space-or-inodes) | Medium | Quota does not limit disk space or inodes | Open |
+| [A3](#a3-quota-does-not-limit-disk-space-or-inodes) | Medium | Quota does not limit disk space or inodes | Fixed in #5 |
 | [A4](#a4-password-checks-have-no-rate-limit) | Medium | Password checks have no rate limit | Open |
 | [A5](#a5-go-1267-has-reachable-standard-library-vulnerabilities) | Medium | Go 1.26.7 has reachable standard-library vulnerabilities | Fixed in #2 |
 | [A6](#a6-no-content-security-policy-or-framing-protection) | Low | No Content Security Policy or framing protection | Fixed in #4 |
@@ -123,7 +123,7 @@ test in `auth_test.go`.
 
 ## A3. Quota does not limit disk space or inodes
 
-**Severity:** Medium · **Status:** Open · *verified*
+**Severity:** Medium · **Status:** Fixed in #5 · *verified*
 
 **Location:** [internal/pigeon/storage_usage.go:30-43](internal/pigeon/storage_usage.go#L30-L43),
 [internal/pigeon/upload_files.go:79-118](internal/pigeon/upload_files.go#L79-L118)
@@ -162,6 +162,29 @@ Avoid re-walking the full tree for every page view if usage tracking changes.
 
 **Done when:** the reproduction is rejected or charged against the quota, and a
 test in `quota_test.go` or `upload_test.go` covers the limit.
+
+**Resolution:** usage is now counted in 4 KiB allocation units. Each file's size
+is rounded up to a whole unit, with at least one unit even when empty, and each
+folder takes one unit. One rule therefore bounds both disk allocation and the
+number of entries: a 1 GiB quota allows at most 262,144 files and folders.
+
+- Uploads charge each file plus the new folders its path creates, and file
+  contents may use only whole remaining units.
+- Creating a folder through `/files` now needs one free unit.
+- The upload page rounds the same way before sending, using the unit passed in
+  `data-allocation-unit`.
+
+Against a live server with the default 1 GiB quota, the reproduction is now
+charged 126,976,000 bytes (121 MiB, versus 120 MiB allocated on disk) instead of
+zero. Eight such batches were accepted (248,000 inodes) before the next was
+rejected with HTTP 413. Tests at the production unit cover rounding, empty
+files, folders, folder creation at the limit, and the reproduction itself.
+
+Usage is still measured by walking the account's folder on each request; the
+entry bound keeps that walk proportional to the quota. Existing accounts may
+show slightly higher usage after upgrading; an account pushed over its quota
+keeps its files, but new uploads and folders are blocked until it is back
+under.
 
 ---
 

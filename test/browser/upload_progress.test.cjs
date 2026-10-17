@@ -29,7 +29,7 @@ function page(size = 10000, options = {}) {
     Object.defineProperty(element, 'value', {get() { return value; }, set(next) { value = next; if (next === '') this.files = []; }});
     elements.set(match[1], element);
   }
-  elements.get('uploadPanel').dataset = {remainingBytes: '10000000', csrfToken: 'a'.repeat(43), directory: 'My folder/docs'};
+  elements.get('uploadPanel').dataset = {remainingBytes: '10000000', csrfToken: 'a'.repeat(43), directory: 'My folder/docs', ...options.settings};
   elements.get('directory').webkitdirectory = true;
   class XHR {
     constructor() { this.upload = {}; this.headers = {}; uploads.push(this); }
@@ -233,4 +233,16 @@ test('zero-byte files wait for confirmation and estimates support hours', async 
   slow.select(100);
   assert.equal(slow.text('pct'), '0%');
   assert.equal(slow.text('eta'), '—');
+});
+
+test('the storage check rounds files up to the server allocation unit', () => {
+  const settings = {remainingBytes: '8192', allocationUnit: '4096'};
+  const fits = page(4097, {settings});
+  assert.ok(fits.xhr, 'a file needing two units fits in two units');
+
+  const tooBig = page(8193, {settings});
+  assert.equal(tooBig.xhr, undefined);
+  assert.equal(tooBig.elements.get('btn').disabled, true);
+  assert.equal(tooBig.text('phase'), 'Not enough storage: 12.00 KB needed, 8.00 KB available.');
+  assert.equal(tooBig.text('fileSize'), '8.00 KB', 'the selection still shows its real size');
 });

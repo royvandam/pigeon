@@ -20,13 +20,16 @@ type uploadBatch struct {
 	paths     map[string]bool // true for files, false for their parent directories
 	firstPath string
 	files     int
-	bytes     int64
+	bytes     int64 // file contents received
+	charged   int64 // quota charge for those files and the folders they add
+	remaining int64 // quota available before this batch
+	unit      int64 // minimum charge per file and folder
 	progress  *uploadProgress
 	target    string
 	names     []string
 }
 
-func newUploadBatch(dir, target string) (*uploadBatch, error) {
+func newUploadBatch(dir, target string, remaining, unit int64) (*uploadBatch, error) {
 	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return nil, err
@@ -46,7 +49,8 @@ func newUploadBatch(dir, target string) (*uploadBatch, error) {
 		root.Close()
 		return nil, err
 	}
-	return &uploadBatch{root: root, stage: stage, stageName: name, paths: make(map[string]bool), target: target}, nil
+	return &uploadBatch{root: root, stage: stage, stageName: name, paths: make(map[string]bool), target: target,
+		remaining: remaining, unit: unit}, nil
 }
 
 func (b *uploadBatch) close() {
@@ -76,7 +80,34 @@ func (b *uploadBatch) checkPath(name string) error {
 	return nil
 }
 
-func (b *uploadBatch) add(name string, contents io.Reader, remaining int64) error {
+// newDirectories counts the folders that publishing name would create: parents
+// that neither exist on disk nor belong to an earlier file in this batch.
+func (b *uploadBatch) newDirectories(name string) (int64, error) {
+	var count int64
+	for parent := path.Dir(name); parent != "."; parent = path.Dir(parent) {
+		if _, planned := b.paths[parent]; planned {
+			break
+		}
+		if _, err := storageInfo(b.root, path.Join(b.target, parent)); err == nil {
+			break
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return 0, err
+		}
+		count++
+	}
+	return count, nil
+}
+
+func (b *uploadBatch) add(name string, contents io.Reader) error {
+	folders, err := b.newDirectories(name)
+	if err != nil {
+		return err
+	}
+	// Even an empty file needs one unit. File contents may use whole units only.
+	available := b.remaining - b.charged - folders*b.unit
+	if available < b.unit {
+		return errDiskQuotaExceeded
+	}
 	native := filepath.FromSlash(name)
 	if err := b.stage.MkdirAll(filepath.Dir(native), 0o750); err != nil {
 		return err
@@ -87,7 +118,7 @@ func (b *uploadBatch) add(name string, contents io.Reader, remaining int64) erro
 	}
 	// Never write the byte used to detect an overflow, even when earlier files
 	// in this batch have consumed all of the remaining quota.
-	limited := &io.LimitedReader{R: contents, N: remaining}
+	limited := &io.LimitedReader{R: contents, N: available / b.unit * b.unit}
 	n, copyErr := io.Copy(uploadProgressWriter{Writer: out, progress: b.progress}, limited)
 	if copyErr == nil && limited.N == 0 {
 		var extra [1]byte
@@ -114,6 +145,7 @@ func (b *uploadBatch) add(name string, contents io.Reader, remaining int64) erro
 	}
 	b.files++
 	b.bytes += n
+	b.charged += folders*b.unit + chargedSize(n, b.unit)
 	b.names = append(b.names, name)
 	return nil
 }

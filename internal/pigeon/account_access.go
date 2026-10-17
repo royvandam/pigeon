@@ -24,6 +24,18 @@ func (cfg config) accessAccount(ctx context.Context, u user) (*accountAccess, er
 	return &accountAccess{Files: cfg.filesFor(u), QuotaBytes: quota, release: release}, nil
 }
 
+// requireQuota reports errDiskQuotaExceeded unless n more bytes fit the quota.
+func (access *accountAccess) requireQuota(ctx context.Context, n int64) error {
+	used, err := access.Files.usage(ctx)
+	if err != nil {
+		return err
+	}
+	if remainingQuota(access.QuotaBytes, used) < n {
+		return errDiskQuotaExceeded
+	}
+	return nil
+}
+
 func (access *accountAccess) close() {
 	if access.release != nil {
 		access.release()

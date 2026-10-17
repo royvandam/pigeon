@@ -81,14 +81,14 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	remaining := remainingQuota(quota, used)
 	setQuotaHeaders(w, quota, used)
-	if remaining == 0 {
+	if remaining < files.unit {
 		http.Error(w, "disk quota exhausted", http.StatusRequestEntityTooLarge)
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, remaining+multipartOverhead)
 	defer r.Body.Close()
 	mr := multipart.NewReader(r.Body, boundary)
-	batch, err := newUploadBatch(dir, r.URL.Query().Get("dir"))
+	batch, err := newUploadBatch(dir, r.URL.Query().Get("dir"), remaining, files.unit)
 	if err != nil {
 		writeStorageError(w, err)
 		return
@@ -128,7 +128,7 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 			writeStorageError(w, err)
 			return
 		}
-		if err := batch.add(name, part, remaining-batch.bytes); err != nil {
+		if err := batch.add(name, part); err != nil {
 			if errors.Is(err, errDiskQuotaExceeded) {
 				http.Error(w, fmt.Sprintf("disk quota exceeded (%s available)", humanBytes(remaining)), http.StatusRequestEntityTooLarge)
 			} else {
@@ -161,7 +161,7 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 	progress.setState("complete")
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	setQuotaHeaders(w, quota, used+batch.bytes)
+	setQuotaHeaders(w, quota, used+batch.charged)
 	fmt.Fprintf(w, "ok\nsaved_as=%s\nbytes=%d\n", savedName, batch.bytes)
 	if group {
 		fmt.Fprintf(w, "files=%d\n", batch.files)

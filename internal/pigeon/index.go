@@ -48,6 +48,7 @@ func (cfg config) renderIndex(w http.ResponseWriter, r *http.Request, a authenti
 		UsedHuman      string
 		RemainingHuman string
 		RemainingBytes int64
+		AllocationUnit int64
 		Username       string
 		Admin          bool
 		Message        string
@@ -58,6 +59,7 @@ func (cfg config) renderIndex(w http.ResponseWriter, r *http.Request, a authenti
 		UsedHuman:      humanBytes(used),
 		RemainingHuman: humanBytes(remainingQuota(access.QuotaBytes, used)),
 		RemainingBytes: remainingQuota(access.QuotaBytes, used),
+		AllocationUnit: access.Files.unit,
 		Username:       a.User.Username,
 		Admin:          a.User.Admin,
 		Message:        message,
