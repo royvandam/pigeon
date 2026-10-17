@@ -156,3 +156,26 @@ func TestInitialAdminRequiresCompleteInput(t *testing.T) {
 		t.Fatalf("incomplete setup created an account: %t, %v", exists, err)
 	}
 }
+
+func TestInitialAdminPromptRejectsShortPasswords(t *testing.T) {
+	ctx := context.Background()
+	s, err := openStore(ctx, filepath.Join(t.TempDir(), "setup.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.db.Close()
+	var out bytes.Buffer
+	input := strings.NewReader("Admin\nelevenchars\nelevenchars\nAdmin\n" + testPassword + "\n" + testPassword + "\n")
+	if err := promptInitialAdmin(ctx, s, input, &out, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "at least 12 characters and at most 72 bytes") {
+		t.Fatalf("short password was not explained: %q", out.String())
+	}
+	if _, err := s.authenticate(ctx, "Admin", "elevenchars"); err == nil {
+		t.Fatal("the short password was saved")
+	}
+	if _, err := s.authenticate(ctx, "Admin", testPassword); err != nil {
+		t.Fatalf("retried password: %v", err)
+	}
+}

@@ -41,7 +41,7 @@ func promptInitialAdmin(ctx context.Context, s *store, in io.Reader, out io.Writ
 			fmt.Fprintln(out, err)
 			continue
 		}
-		fmt.Fprint(out, "Admin password (at least 8 characters): ")
+		fmt.Fprint(out, "Admin password (at least 12 characters): ")
 		password, err := passwordLine()
 		if err != nil {
 			return err

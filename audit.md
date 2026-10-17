@@ -24,7 +24,7 @@ Recommended order: A1, A5, A3, A4, A2, A6, then the rest.
 | [A1](#a1-unpinned-third-party-scripts-on-every-page) | High | Unpinned third-party scripts on every page | Fixed in #3 |
 | [A2](#a2-cleartext-credentials-by-default-cookies-not-secure-behind-a-tls-proxy) | Medium | Cleartext credentials by default; cookies not `Secure` behind a TLS proxy | Open |
 | [A3](#a3-quota-does-not-limit-disk-space-or-inodes) | Medium | Quota does not limit disk space or inodes | Fixed in #5 |
-| [A4](#a4-password-checks-have-no-rate-limit) | Medium | Password checks have no rate limit | Open |
+| [A4](#a4-password-checks-have-no-rate-limit) | Medium | Password checks have no rate limit | Fixed in #6 |
 | [A5](#a5-go-1267-has-reachable-standard-library-vulnerabilities) | Medium | Go 1.26.7 has reachable standard-library vulnerabilities | Fixed in #2 |
 | [A6](#a6-no-content-security-policy-or-framing-protection) | Low | No Content Security Policy or framing protection | Fixed in #4 |
 | [A7](#a7-expired-sessions-can-turn-into-stored-basic-credentials) | Low | Expired sessions can turn into stored Basic credentials | Open |
@@ -190,7 +190,7 @@ under.
 
 ## A4. Password checks have no rate limit
 
-**Severity:** Medium · **Status:** Open · *verified*
+**Severity:** Medium · **Status:** Fixed in #6 · *verified*
 
 **Location:** [internal/pigeon/auth.go:43-45](internal/pigeon/auth.go#L43-L45),
 [internal/pigeon/users.go:127-147](internal/pigeon/users.go#L127-L147),
@@ -226,6 +226,30 @@ share one bucket.
 
 **Done when:** repeated failed logins from one IP receive 429 without running
 bcrypt, legitimate logins from other IPs are unaffected, and tests cover both.
+
+**Resolution:** `ratelimit.go` adds a token bucket per client, in its exact
+integer-time form (GCRA), keyed by IPv4
+address or IPv6 /64.
+
+- **Attempts:** 10, with one recovering every 6 seconds. A check takes an
+  attempt before bcrypt runs, and a successful sign-in returns it. Exhausted
+  clients get HTTP 429 with `Retry-After`; the login page explains the wait.
+- **Concurrency:** password checks are capped at one per CPU server-wide. A
+  check canceled while waiting returns its attempt.
+- **Memory:** at most 10,000 clients are tracked. Fully recovered clients are
+  pruned when the table fills; until then, new clients wait.
+- **Proxies:** the new persisted `-trusted-proxies` setting makes the server
+  read `X-Forwarded-For` only from listed addresses, from the right. Clients
+  behind a proxy are therefore limited individually and cannot spoof their
+  address.
+- **Passwords:** new passwords need 12 characters instead of 8. Only the first
+  administrator's password is user-chosen, and existing passwords keep working.
+
+Against a live server, 100 bogus Basic-auth requests from one client cost
+4.5 s of server CPU on `main` and 0.46 s here: 10 received 401 and 90 received
+429 without bcrypt. A valid login from another IP still succeeded. A valid login
+from the throttled IP waits up to 6 seconds; clients sharing a NAT address
+share a limit, which is the trade-off of per-IP limiting.
 
 ---
 

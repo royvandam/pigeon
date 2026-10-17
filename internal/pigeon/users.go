@@ -75,8 +75,8 @@ func normalizeUsername(username string) (display, key, slug string, err error) {
 }
 
 func validatePassword(password string) error {
-	if !utf8.ValidString(password) || utf8.RuneCountInString(password) < 8 || len(password) > 72 {
-		return fmt.Errorf("password must have at least 8 characters and at most 72 bytes")
+	if !utf8.ValidString(password) || utf8.RuneCountInString(password) < 12 || len(password) > 72 {
+		return fmt.Errorf("password must have at least 12 characters and at most 72 bytes")
 	}
 	return nil
 }

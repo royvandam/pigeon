@@ -6,11 +6,15 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/netip"
 	"strings"
 	"time"
 )
 
 type config struct {
+	// trustedProxies may identify clients through X-Forwarded-For.
+	trustedProxies []netip.Prefix
+
 	dir    string
 	listen string
 	store  *store

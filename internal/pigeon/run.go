@@ -18,10 +18,13 @@ func Run(ctx context.Context, args []string) error {
 		database = flags.String("db", "./pigeon.db", "SQLite database for users and server settings")
 		dir      = flags.String("dir", "", "Set and persist the upload directory (initial default: ./uploads)")
 		listen   = flags.String("listen", "", "Set and persist the listen address (initial default: 0.0.0.0:8080)")
+		proxies  = flags.String("trusted-proxies", "", "Set and persist comma-separated reverse proxy addresses or CIDR ranges whose X-Forwarded-For header identifies clients; an empty value clears them")
 	)
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
+	proxiesSet := false
+	flags.Visit(func(f *flag.Flag) { proxiesSet = proxiesSet || f.Name == "trusted-proxies" })
 
 	s, err := openStore(ctx, *database)
 	if err != nil {
@@ -41,6 +44,9 @@ func Run(ctx context.Context, args []string) error {
 	if *listen != "" {
 		settings.listen = *listen
 	}
+	if proxiesSet {
+		settings.trustedProxies = *proxies
+	}
 	if err := s.saveSettings(ctx, settings); err != nil {
 		return fmt.Errorf("save settings: %w", err)
 	}
@@ -58,8 +64,15 @@ func Run(ctx context.Context, args []string) error {
 		return fmt.Errorf("create upload directory: %w", err)
 	}
 
-	cfg := config{dir: settings.dir, listen: settings.listen, store: s}
+	trustedProxies, err := parseTrustedProxies(settings.trustedProxies)
+	if err != nil {
+		return err
+	}
+	cfg := config{dir: settings.dir, listen: settings.listen, store: s, trustedProxies: trustedProxies}
 	log.Printf("listening on http://%s", cfg.listen)
+	if len(trustedProxies) > 0 {
+		log.Printf("trusted proxies: %s", settings.trustedProxies)
+	}
 	log.Printf("upload dir: %s", cfg.dir)
 	log.Printf("default user quota: %s", humanBytes(defaultUserQuota))
 
