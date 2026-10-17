@@ -1,6 +1,9 @@
 (function () {
   const settings = document.getElementById('uploadPanel').dataset;
   let REMAINING_BYTES = Number(settings.remainingBytes);
+  // The server charges each file its size in whole allocation units (at least one) plus
+  // one unit per new folder. Folders are not known here, so this is a minimum.
+  const ALLOCATION_UNIT = Number(settings.allocationUnit) || 4096;
   const CSRF_TOKEN = settings.csrfToken;
   const CURRENT_DIRECTORY = settings.directory;
 
@@ -45,7 +48,7 @@
   }
 
   function setDisabled(disabled) {
-    btn.disabled = disabled || selectedFiles.length === 0 || REMAINING_BYTES === 0 || selectedSize() > REMAINING_BYTES;
+    btn.disabled = disabled || selectedFiles.length === 0 || REMAINING_BYTES < ALLOCATION_UNIT || chargedSize() > REMAINING_BYTES;
     fileInput.disabled = disabled;
     directoryInput.disabled = disabled || !supportsDirectories;
   }
@@ -54,8 +57,12 @@
     return selectedFiles.reduce((total, file) => total + file.size, 0);
   }
 
-  function showQuotaError(size) {
-    phase.textContent = 'Not enough storage: ' + humanBytes(size) + ' selected, ' + humanBytes(REMAINING_BYTES) + ' available.';
+  function chargedSize() {
+    return selectedFiles.reduce((total, file) => total + Math.max(1, Math.ceil(file.size / ALLOCATION_UNIT)) * ALLOCATION_UNIT, 0);
+  }
+
+  function showQuotaError(charged) {
+    phase.textContent = 'Not enough storage: ' + humanBytes(charged) + ' needed, ' + humanBytes(REMAINING_BYTES) + ' available.';
   }
 
   function setProgress(percent) {
@@ -108,8 +115,8 @@
     phase.textContent = 'Idle';
     setDisabled(false);
 
-    if (size > REMAINING_BYTES) {
-      showQuotaError(size);
+    if (chargedSize() > REMAINING_BYTES) {
+      showQuotaError(chargedSize());
     }
   }
 
@@ -122,8 +129,8 @@
 
     if (files.length === 0) { phase.textContent = "Choose files or a directory containing files."; return; }
 
-    if (totalSize > REMAINING_BYTES) {
-      showQuotaError(totalSize);
+    if (chargedSize() > REMAINING_BYTES) {
+      showQuotaError(chargedSize());
       return;
     }
 

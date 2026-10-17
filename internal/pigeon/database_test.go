@@ -23,7 +23,9 @@ func newTestConfig(t *testing.T, quota int64) config {
 	if _, err := s.createUserWithQuota(context.Background(), "Test User", testPassword, false, quota); err != nil {
 		t.Fatal(err)
 	}
-	return config{dir: filepath.Join(root, "uploads"), store: s}
+	// A one-byte allocation unit keeps quota arithmetic in tests exact; tests of
+	// the production unit set allocationUnit explicitly.
+	return config{dir: filepath.Join(root, "uploads"), store: s, allocationUnit: 1}
 }
 
 func readUploadDir(root, slug string) ([]os.DirEntry, error) {

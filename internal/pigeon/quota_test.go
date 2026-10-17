@@ -84,7 +84,8 @@ func TestQuotaCountsExistingFilesAndReclaimsRemovedFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, "original.txt")
-	if err := os.WriteFile(path, []byte("abcdef"), 0o640); err != nil {
+	// The existing folder takes one unit; with this file it uses six of ten bytes.
+	if err := os.WriteFile(path, []byte("abcde"), 0o640); err != nil {
 		t.Fatal(err)
 	}
 	w := httptest.NewRecorder()
@@ -106,7 +107,7 @@ func TestQuotaCountsExistingFilesAndReclaimsRemovedFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	w = httptest.NewRecorder()
-	cfg.handleUpload(w, uploadRequest(t, "reclaimed.txt", "123456"))
+	cfg.handleUpload(w, uploadRequest(t, "reclaimed.txt", "12345"))
 	if w.Code != http.StatusOK || w.Header().Get("X-Quota-Used") != "10" {
 		t.Fatalf("removed files did not free storage: %d, %s", w.Code, w.Body)
 	}
@@ -144,7 +145,7 @@ func TestConcurrentUploadsCannotExceedQuota(t *testing.T) {
 			t.Fatalf("unexpected upload status %d", status)
 		}
 	}
-	used, err := diskUsage(context.Background(), filepath.Join(cfg.dir, "test-user"))
+	used, err := diskUsage(context.Background(), filepath.Join(cfg.dir, "test-user"), 1)
 	files, readErr := readUploadDir(cfg.dir, "test-user")
 	if success != 1 || used != 60 || err != nil || readErr != nil || len(files) != 1 {
 		t.Fatalf("concurrent quota enforcement: success=%d, used=%d, files=%d, errors=%v/%v", success, used, len(files), err, readErr)
@@ -198,7 +199,7 @@ func TestAdminCanAssignAndChangeQuotas(t *testing.T) {
 	if w.Code != http.StatusRequestEntityTooLarge || w.Header().Get("X-Quota-Remaining") != "0" {
 		t.Fatalf("lowered quota still allows uploads: %d, %s", w.Code, w.Body)
 	}
-	used, err := diskUsage(ctx, filepath.Join(cfg.dir, u.Slug))
+	used, err := diskUsage(ctx, filepath.Join(cfg.dir, u.Slug), 1)
 	if err != nil || used != 8 {
 		t.Fatalf("quota reduction removed stored data: %d, %v", used, err)
 	}
@@ -245,5 +246,112 @@ func TestQuotaValidationAndCanceledLock(t *testing.T) {
 	cancel()
 	if _, err := cfg.store.lockUploads(ctx, 1); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled request waited for the quota lock: %v", err)
+	}
+}
+
+func TestChargedSizeRoundsUpToTheAllocationUnit(t *testing.T) {
+	for _, tt := range []struct{ size, want int64 }{
+		{0, 4096}, {1, 4096}, {4096, 4096}, {4097, 8192}, {1 << 20, 1 << 20},
+		{math.MaxInt64, math.MaxInt64},
+	} {
+		if got := chargedSize(tt.size, defaultAllocationUnit); got != tt.want {
+			t.Errorf("chargedSize(%d) = %d, want %d", tt.size, got, tt.want)
+		}
+	}
+}
+
+// productionUnitConfig uses the real 4 KiB allocation unit (audit A3).
+func productionUnitConfig(t *testing.T, quota int64) config {
+	t.Helper()
+	cfg := newTestConfig(t, quota)
+	cfg.allocationUnit = 0
+	return cfg
+}
+
+func TestQuotaChargesEmptyFilesAndFolders(t *testing.T) {
+	cfg := productionUnitConfig(t, 16<<10)
+	cookie, csrf := sessionFor(t, cfg, "Test User")
+	handler := newServer(cfg).Handler
+	page := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.AddCookie(cookie)
+	handler.ServeHTTP(page, r)
+	if !strings.Contains(page.Body.String(), `data-allocation-unit="4096"`) {
+		t.Fatal("the explorer does not tell upload.js the allocation unit")
+	}
+
+	// Two new folders and an empty file each take one 4 KiB unit.
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, uploadFilesRequest(t, uploadFile{"a/b/empty.txt", ""}))
+	if w.Code != http.StatusOK || w.Header().Get("X-Quota-Used") != "12288" || w.Header().Get("X-Quota-Remaining") != "4096" {
+		t.Fatalf("empty file in new folders: %d, %v, %s", w.Code, w.Header(), w.Body)
+	}
+
+	mkdir := func(name string) int {
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, formRequest("/files", url.Values{"action": {"mkdir"}, "name": {name}, "csrf_token": {csrf}}, cookie))
+		return w.Code
+	}
+	if status := mkdir("last"); status != http.StatusSeeOther {
+		t.Fatalf("folder within quota: %d", status)
+	}
+	if status := mkdir("over"); status != http.StatusRequestEntityTooLarge {
+		t.Fatalf("folder beyond quota: %d", status)
+	}
+	if _, err := os.Stat(filepath.Join(cfg.dir, "test-user", "over")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("rejected folder was created: %v", err)
+	}
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, uploadFilesRequest(t, uploadFile{"another-empty.txt", ""}))
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("empty file beyond quota: %d, %s", w.Code, w.Body)
+	}
+	used, err := cfg.filesFor(user{Slug: "test-user"}).usage(context.Background())
+	if err != nil || used != 16<<10 {
+		t.Fatalf("usage = %d, %v; want the full quota", used, err)
+	}
+}
+
+func TestQuotaRoundsFileContentsUpToWholeUnits(t *testing.T) {
+	cfg := productionUnitConfig(t, 8<<10)
+	w := httptest.NewRecorder()
+	cfg.handleUpload(w, uploadRequest(t, "too-big.bin", strings.Repeat("x", 8<<10+1)))
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("file needing three units: %d, %s", w.Code, w.Body)
+	}
+	w = httptest.NewRecorder()
+	cfg.handleUpload(w, uploadRequest(t, "fits.bin", strings.Repeat("x", 4<<10+1)))
+	if w.Code != http.StatusOK || w.Header().Get("X-Quota-Used") != "8192" || uploadResult(t, w, "bytes") != "4097" {
+		t.Fatalf("file needing two units: %d, %v, %s", w.Code, w.Header(), w.Body)
+	}
+}
+
+// The audit reproduction: one small request of empty files in deep folders
+// created 31,001 inodes while usage stayed at zero.
+func TestQuotaBoundsDeepEmptyFileUploads(t *testing.T) {
+	cfg := productionUnitConfig(t, 1<<20)
+	deep := strings.Repeat("x/", 60)
+	var files []uploadFile
+	for i := range 500 {
+		files = append(files, uploadFile{"d" + strconv.Itoa(i) + "/" + deep + "f", ""})
+	}
+	w := httptest.NewRecorder()
+	cfg.handleUpload(w, uploadFilesRequest(t, files...))
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("deep empty files: %d, %s", w.Code, w.Body)
+	}
+	entries, err := readUploadDir(cfg.dir, "test-user")
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("rejected batch left entries: %v, %v", entries, err)
+	}
+	// What fits is bounded by the quota: 1 MiB allows at most 256 entries.
+	var allowed []uploadFile
+	for i := range 4 {
+		allowed = append(allowed, uploadFile{"d" + strconv.Itoa(i) + "/" + deep + "f", ""})
+	}
+	w = httptest.NewRecorder()
+	cfg.handleUpload(w, uploadFilesRequest(t, allowed...))
+	if w.Code != http.StatusOK || w.Header().Get("X-Quota-Used") != strconv.Itoa(4*62*4096) {
+		t.Fatalf("four deep empty files (62 entries each): %d, %v, %s", w.Code, w.Header(), w.Body)
 	}
 }

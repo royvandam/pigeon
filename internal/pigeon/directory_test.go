@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -96,8 +97,18 @@ func TestDirectoryUploadPreservesHierarchyAndNames(t *testing.T) {
 		}
 	}
 	entries, err := readUploadDir(cfg.dir, "test-user")
-	used, usageErr := diskUsage(context.Background(), filepath.Join(cfg.dir, "test-user"))
-	if err != nil || usageErr != nil || len(entries) != 1 || entries[0].Name() != "My project" || used != int64(total) {
+	used, usageErr := diskUsage(context.Background(), filepath.Join(cfg.dir, "test-user"), 1)
+	// Usage charges every file (at least one unit) and every folder created.
+	var charged int64
+	folders := map[string]bool{}
+	for _, file := range files {
+		charged += chargedSize(int64(len(file.contents)), 1)
+		for parent := path.Dir(file.name); parent != "."; parent = path.Dir(parent) {
+			folders[parent] = true
+		}
+	}
+	charged += int64(len(folders))
+	if err != nil || usageErr != nil || len(entries) != 1 || entries[0].Name() != "My project" || used != charged {
 		t.Fatalf("completed batches: entries=%v, used=%d, errors=%v/%v", entries, used, err, usageErr)
 	}
 }
@@ -110,7 +121,7 @@ func TestUploadMultipleFilesAndSingleFileDirectory(t *testing.T) {
 	} {
 		quota := int64(100)
 		if len(files) == 2 && files[1].contents == "" {
-			quota = 4
+			quota = 6 // The folder and the empty file each take one unit.
 		}
 		cfg := newTestConfig(t, quota)
 		w := httptest.NewRecorder()
@@ -146,7 +157,8 @@ func TestDirectoryQuotaFailureRemovesWholeBatch(t *testing.T) {
 		t.Fatalf("failed batch changed existing uploads or left partial data: %v, %v", entries, err)
 	}
 	w = httptest.NewRecorder()
-	cfg.handleUpload(w, uploadFilesRequest(t, uploadFile{"folder/a.txt", "123"}, uploadFile{"folder/b.txt", "456"}))
+	// The new folder takes one unit of the six remaining bytes.
+	cfg.handleUpload(w, uploadFilesRequest(t, uploadFile{"folder/a.txt", "12"}, uploadFile{"folder/b.txt", "345"}))
 	if w.Code != http.StatusOK || w.Header().Get("X-Quota-Remaining") != "0" {
 		t.Fatalf("exact remaining quota: %d, %s", w.Code, w.Body)
 	}
@@ -283,8 +295,9 @@ func TestConcurrentDirectoryUploadsShareQuota(t *testing.T) {
 		}
 	}
 	entries, err := readUploadDir(cfg.dir, "test-user")
-	used, usageErr := diskUsage(context.Background(), filepath.Join(cfg.dir, "test-user"))
-	if success != 1 || len(entries) != 1 || used != 6 || err != nil || usageErr != nil {
+	used, usageErr := diskUsage(context.Background(), filepath.Join(cfg.dir, "test-user"), 1)
+	// One batch fits: its folder (one unit) and two three-byte files.
+	if success != 1 || len(entries) != 1 || used != 7 || err != nil || usageErr != nil {
 		t.Fatalf("concurrent batches exceeded quota or left data: success=%d, entries=%v, used=%d, errors=%v/%v", success, entries, used, err, usageErr)
 	}
 }

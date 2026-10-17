@@ -25,7 +25,9 @@ func writeStoredFile(t *testing.T, cfg config, slug, name, contents string) {
 }
 
 func TestExplorerFileAndFolderLifecycle(t *testing.T) {
-	cfg := newTestConfig(t, 10)
+	// Two created folders, two folders added by the upload, ten file bytes, and
+	// one unit left for the destination folder created later.
+	cfg := newTestConfig(t, 15)
 	cookie, csrf := sessionFor(t, cfg, "Test User")
 	handler := newServer(cfg).Handler
 	action := func(form url.Values) *httptest.ResponseRecorder {
@@ -59,7 +61,7 @@ func TestExplorerFileAndFolderLifecycle(t *testing.T) {
 	r.Header.Set("X-CSRF-Token", csrf)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, r)
-	if w.Code != http.StatusOK || uploadResult(t, w, "saved_as") != "My folder/写真" || w.Header().Get("X-Quota-Remaining") != "0" {
+	if w.Code != http.StatusOK || uploadResult(t, w, "saved_as") != "My folder/写真" || w.Header().Get("X-Quota-Remaining") != "1" {
 		t.Fatalf("upload to selected folder: %d, %s", w.Code, w.Body)
 	}
 	listing := get("/files?" + url.Values{"dir": {"My folder/写真"}}.Encode()).Body.String()
@@ -90,7 +92,8 @@ func TestExplorerFileAndFolderLifecycle(t *testing.T) {
 	}
 	w = httptest.NewRecorder()
 	handler.ServeHTTP(w, uploadRequest(t, "new.txt", "abcde"))
-	if w.Code != http.StatusOK || w.Header().Get("X-Quota-Used") != "10" {
+	// guide.txt, new.txt, and the remaining destination folder.
+	if w.Code != http.StatusOK || w.Header().Get("X-Quota-Used") != "11" {
 		t.Fatalf("recursive deletion should free quota: %d, %s", w.Code, w.Body)
 	}
 	action(url.Values{"action": {"delete"}, "path": {"guide.txt"}})

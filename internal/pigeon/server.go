@@ -14,6 +14,9 @@ type config struct {
 	dir    string
 	listen string
 	store  *store
+	// allocationUnit is the minimum quota charge per file and folder; zero
+	// selects defaultAllocationUnit. Tests use 1 to keep byte arithmetic exact.
+	allocationUnit int64
 }
 
 func newServer(cfg config) *http.Server {

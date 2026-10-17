@@ -49,9 +49,15 @@ func (cfg config) handleFiles(w http.ResponseWriter, r *http.Request) {
 	}
 	action := r.PostForm.Get("action")
 	source := r.PostForm.Get("path")
-	err = manageFile(root, action, directory, source, r.PostForm.Get("name"), r.PostForm.Get("destination"), func() error {
-		return cfg.store.revokePathShares(r.Context(), a.User.ID, source)
-	})
+	if action == "mkdir" {
+		// A folder uses disk space and an inode, so it is charged like a file.
+		err = access.requireQuota(r.Context(), access.Files.unit)
+	}
+	if err == nil {
+		err = manageFile(root, action, directory, source, r.PostForm.Get("name"), r.PostForm.Get("destination"), func() error {
+			return cfg.store.revokePathShares(r.Context(), a.User.ID, source)
+		})
+	}
 	if err != nil {
 		message, status := storageError(err)
 		access.close() // Rendering the error page acquires its own read access.

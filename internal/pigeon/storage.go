@@ -45,10 +45,15 @@ func nativeStoragePath(name string) string {
 type userStorage struct {
 	directory string
 	slug      string
+	unit      int64
 }
 
 func (cfg config) filesFor(u user) userStorage {
-	return userStorage{directory: cfg.dir, slug: u.Slug}
+	unit := cfg.allocationUnit
+	if unit <= 0 {
+		unit = defaultAllocationUnit
+	}
+	return userStorage{directory: cfg.dir, slug: u.Slug, unit: unit}
 }
 
 func (files userStorage) path() (string, error) {
@@ -81,7 +86,7 @@ func (files userStorage) usage(ctx context.Context) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return diskUsage(ctx, dir)
+	return diskUsage(ctx, dir, files.unit)
 }
 
 func (files userStorage) purge() error {

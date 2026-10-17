@@ -71,7 +71,7 @@ func TestUploadRejectsInvalidDestinationsBeforeReadingBody(t *testing.T) {
 func TestUploadPublicationRollbackPreservesExistingFolders(t *testing.T) {
 	cfg := newTestConfig(t, 100)
 	writeStoredFile(t, cfg, "test-user", "destination/project/existing.txt", "keep")
-	batch, err := newUploadBatch(filepath.Join(cfg.dir, "test-user"), "destination")
+	batch, err := newUploadBatch(filepath.Join(cfg.dir, "test-user"), "destination", 100, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestUploadPublicationRollbackPreservesExistingFolders(t *testing.T) {
 		if err := batch.checkPath(name); err != nil {
 			t.Fatal(err)
 		}
-		if err := batch.add(name, strings.NewReader("data"), 100); err != nil {
+		if err := batch.add(name, strings.NewReader("data")); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -96,8 +96,9 @@ func TestUploadPublicationRollbackPreservesExistingFolders(t *testing.T) {
 			t.Errorf("rollback left %s behind: %v", name, err)
 		}
 	}
-	used, err := diskUsage(context.Background(), filepath.Join(cfg.dir, "test-user", "destination"))
-	if err != nil || used != 4 {
+	used, err := diskUsage(context.Background(), filepath.Join(cfg.dir, "test-user", "destination"), 1)
+	// The preserved project folder and its four-byte file, at one byte per entry.
+	if err != nil || used != 5 {
 		t.Fatalf("rollback changed existing data: used=%d, %v", used, err)
 	}
 }

@@ -172,7 +172,8 @@ func TestUploadProgressQueuesAndEndsOnCancellation(t *testing.T) {
 }
 
 func TestUploadProgressQuotaFailureAndIDValidation(t *testing.T) {
-	cfg := newTestConfig(t, 4)
+	// The folder takes one unit, leaving four bytes for file contents.
+	cfg := newTestConfig(t, 5)
 	r := uploadFilesRequest(t, uploadFile{"folder/a.txt", "123"}, uploadFile{"folder/b.txt", "456"})
 	r.Header.Set("X-Upload-ID", testUploadID)
 	w := httptest.NewRecorder()
