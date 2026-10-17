@@ -2,3 +2,5 @@
 /uploader.db-*
 /uploads/
 /.vscode/settings.json
+/bin/
+/uploader

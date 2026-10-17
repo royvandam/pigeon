@@ -8,7 +8,7 @@ Enter the development environment with `nix-shell`. It provides Go 1.26, `gopls`
 also works without Nix.
 
 ```sh
-go run . -listen 127.0.0.1:8080
+go run ./cmd/uploader -listen 127.0.0.1:8080
 ```
 
 On the first run, the terminal asks for the initial administrator's username,
@@ -112,7 +112,7 @@ Use `-dir` or `-listen` to change them. Overrides are saved in SQLite and reused
 on later starts without those flags. The upload directory is stored as an absolute path.
 
 ```sh
-go run . -db ./uploader.db -dir ./uploads -listen 127.0.0.1:8080
+go run ./cmd/uploader -db ./uploader.db -dir ./uploads -listen 127.0.0.1:8080
 ```
 
 ## Disk quotas
@@ -253,6 +253,28 @@ a CSRF token, and browser uploads send it in the `X-CSRF-Token` header. Session
 tokens are stored as hashes. Passwords use bcrypt. Use HTTPS when serving the
 application beyond a trusted local network.
 
+## Project layout
+
+The repository uses the applicable directory conventions from
+[`golang-standards/project-layout`](https://github.com/golang-standards/project-layout):
+
+```text
+cmd/uploader/        Executable entry point and signal handling
+internal/uploader/  Private application code and Go tests
+  wordlists/        Embedded passphrase dictionary and attribution
+web/                Embedded templates and browser assets
+  static/           JavaScript and shared CSS
+  templates/        Server-rendered HTML
+test/browser/       Browser-script regression tests
+scripts/            Development tooling helpers
+```
+
+Go tests stay beside the packages they exercise; additional browser tests live
+under `test/`. The `web` package embeds templates and static files at build time,
+and the application embeds its passphrase word list. A built executable runs
+without the source tree or an asset directory. There is no public Go library;
+application code stays under `internal/`.
+
 ## Development
 
 ### VS Code over SSH
@@ -265,9 +287,9 @@ Palette, then choose **Restart** when prompted, or run **Developer: Reload
 Window**. The workspace must be trusted for Go to use its tool settings.
 
 The extension expands `.vscode/settings.workspace.json` into the local,
-Git-ignored `.vscode/settings.json`. The helper enters this project's
-`shell.nix` on the remote host to discover the absolute paths of `go`, `gopls`,
-and `goimports`. It also supplies the Nix shell's `PATH` through
+Git-ignored `.vscode/settings.json`. The helper in `scripts/vscode-settings.sh`
+enters this project's `shell.nix` on the remote host to discover the absolute
+paths of `go`, `gopls`, and `goimports`. It also supplies the Nix shell's `PATH` through
 `go.toolsEnvVars`, allowing `gopls` to find Go even when the SSH extension host
 started outside `nix-shell`. Opening a Nix shell in the integrated terminal
 alone does not update the running extension host's environment.
@@ -297,7 +319,7 @@ HTTP handlers parse requests and render responses, using shared method,
 authentication, and error helpers. Explorer listing and file mutation rules live
 in `explorer.go` and `file_management.go`. Template loading is in `templates.go`;
 templates reuse CSRF and sign-out controls. Browser code and common styles live
-in `static/` and are embedded into the binary along with the templates.
+in `web/static/` and are embedded into the binary along with the templates.
 `ActionDialog` uses one definition per action and one controller for all dialogs.
 JavaScript tests run the same files served by the application. Rebuild and restart
 after changing templates or assets.
@@ -306,23 +328,26 @@ after changing templates or assets.
 go test ./...
 go test -race ./...
 go vet ./...
-node --test --test-isolation=none tests/*.test.cjs
-go build -o uploader .
+node --test --test-isolation=none test/browser/*.test.cjs
+go build -o bin/uploader ./cmd/uploader
 ```
 
-Run and build the whole package (`.`). The browser loads Tailwind CSS and Font
-Awesome Free from a CDN via `templates/assets.html`. `static/styles.css` sets
-fields, labels, buttons, and links to a consistent 14px font size and 20px line
-height, including file picker buttons. `templates/dialog.html` and
-`templates/shares.html` supply dialog markup; `static/dialog.js` and
-`static/shares.js` handle interaction. `static/validation.js` replaces native
-validation popups across all forms with shared, styled tooltips that do not shift
-the layout, while keeping browser constraints and server-side checks.
+Run and build the command package (`./cmd/uploader`) from the repository root.
+Build output belongs in the ignored `bin/` directory. The browser loads Tailwind
+CSS and Font Awesome Free from a CDN via `web/templates/assets.html`.
+`web/static/styles.css` sets fields, labels, buttons, and links to a consistent
+14px font size and 20px line height, including file picker buttons.
+The dialog and sharing templates supply markup; `web/static/dialog.js` and
+`web/static/shares.js` handle interaction. `web/static/validation.js` replaces
+native validation popups across all forms with shared, styled tooltips that do
+not shift the layout, while keeping browser constraints and server-side checks.
 
-`main.go` handles startup, `database.go` persists settings and the schema,
-`setup.go` handles first-run provisioning, `users.go` manages accounts, and
-`passphrase.go` generates credentials using the embedded EFF word list (see
-[`wordlists/README.md`](wordlists/README.md) for source and license).
+`cmd/uploader/main.go` handles signals and invokes `uploader.Run`.
+Inside `internal/uploader`, `run.go` handles startup, `database.go` persists
+settings and the schema, `setup.go` handles first-run provisioning, and
+`users.go` manages accounts. `passphrase.go` generates credentials using the
+embedded EFF word list. Its source and license are documented in
+[`internal/uploader/wordlists/README.md`](internal/uploader/wordlists/README.md).
 `session.go` and `auth.go` handle authentication. `admin.go`, `index.go`, and
 `upload.go` serve user management, the explorer page, and the upload endpoint.
 `files.go` handles explorer requests, and `download.go` serves files and ZIP
