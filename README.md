@@ -4,9 +4,11 @@ Pigeon moves files and data between devices. It is a Go HTTP server with
 individual user accounts, an administrator management page, and streaming
 uploads stored in a separate folder for each user.
 
-Enter the development environment with `nix-shell`. It provides Go 1.26, `gopls`,
+Enter the development environment with `nix-shell`. It provides Go, `gopls`,
 `goimports`, the SQLite CLI, Node.js for upload-page tests, and the GitHub CLI
-(`gh`). Go 1.26 or newer also works without Nix.
+(`gh`). `go.mod` requires Go 1.26.9 or newer for its security fixes. With Go's
+default `GOTOOLCHAIN=auto`, an older Go, including the Nix shell's, downloads
+that release automatically on first use. Without Nix, install Go 1.26.9 or newer.
 
 ```sh
 go run ./cmd/pigeon -listen 127.0.0.1:8080
@@ -342,6 +344,9 @@ GitHub Actions runs these checks for every pull request and push to `main`, and
 runs `govulncheck` weekly so new advisories surface without code changes. CI
 uses the Go version declared in `go.mod`. Dependabot proposes grouped weekly
 updates for Go modules and the pinned actions once a release is a week old.
+Dependabot does not update Go itself: when `govulncheck` reports a
+standard-library vulnerability, raise the `go` line in `go.mod` to the patch
+release that fixes it.
 
 Run and build the command package (`./cmd/pigeon`) from the repository root.
 Build output belongs in the ignored `bin/` directory. The browser loads Tailwind
@@ -368,3 +373,7 @@ usage. `upload_progress.go` tracks uploads and serves authenticated progress
 snapshots.
 Size and filename helpers remain separate.
 SIGINT and SIGTERM allow active requests up to 10 seconds to finish.
+
+## AI assistance
+
+Pigeon is developed with the help of Claude Code, an AI coding assistant.

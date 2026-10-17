@@ -25,7 +25,7 @@ Recommended order: A1, A5, A3, A4, A2, A6, then the rest.
 | [A2](#a2-cleartext-credentials-by-default-cookies-not-secure-behind-a-tls-proxy) | Medium | Cleartext credentials by default; cookies not `Secure` behind a TLS proxy | Open |
 | [A3](#a3-quota-does-not-limit-disk-space-or-inodes) | Medium | Quota does not limit disk space or inodes | Open |
 | [A4](#a4-password-checks-have-no-rate-limit) | Medium | Password checks have no rate limit | Open |
-| [A5](#a5-go-1267-has-reachable-standard-library-vulnerabilities) | Medium | Go 1.26.7 has reachable standard-library vulnerabilities | Open |
+| [A5](#a5-go-1267-has-reachable-standard-library-vulnerabilities) | Medium | Go 1.26.7 has reachable standard-library vulnerabilities | Fixed in #2 |
 | [A6](#a6-no-content-security-policy-or-framing-protection) | Low | No Content Security Policy or framing protection | Open |
 | [A7](#a7-expired-sessions-can-turn-into-stored-basic-credentials) | Low | Expired sessions can turn into stored Basic credentials | Open |
 | [A8](#a8-request-log-forging-and-share-token-redaction-bypass) | Low | Request log forging and share-token redaction bypass | Open |
@@ -189,7 +189,7 @@ bcrypt, legitimate logins from other IPs are unaffected, and tests cover both.
 
 ## A5. Go 1.26.7 has reachable standard-library vulnerabilities
 
-**Severity:** Medium · **Status:** Open · *verified*
+**Severity:** Medium · **Status:** Fixed in #2 · *verified*
 
 **Location:** [shell.nix](shell.nix) (`go_1_26`), [go.mod](go.mod)
 
@@ -217,9 +217,18 @@ go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 provides 1.26.9 or newer. Add `govulncheck ./...` to the development checks in
 the README (and CI, if added).
 
-**Progress:** `govulncheck` now runs in the README checks and in GitHub Actions
-on every pull request, every push to `main`, and weekly. Until `go.mod` declares
-Go 1.26.9 or newer, that job fails by design.
+**Resolution:** `govulncheck` runs in the README checks and in GitHub Actions on
+every pull request, every push to `main`, and weekly. `go.mod` now requires
+`go 1.26.9` instead of adding a `toolchain` line, because Go treats that line
+only as a suggestion. With the default `GOTOOLCHAIN=auto`, an older Go, such as
+the Nix shell's 1.26.7, downloads 1.26.9 automatically; with
+`GOTOOLCHAIN=local`, an older Go refuses to build instead of producing a
+vulnerable binary. CI installs the same version. Before this change CI used Go
+1.26.0, where `govulncheck` reported 32 reachable vulnerabilities.
+
+`govulncheck` now reports no reachable vulnerabilities. The one remaining
+module-level advisory, GO-2026-5932, marks `golang.org/x/crypto/openpgp` as
+unmaintained; it has no fix, and Pigeon does not import that package.
 
 **Done when:** `govulncheck ./...` reports no reachable vulnerabilities.
 
