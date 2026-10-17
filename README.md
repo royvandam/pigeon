@@ -268,7 +268,8 @@ cmd/pigeon/         Executable entry point and signal handling
 internal/pigeon/    Private application code and Go tests
   wordlists/        Embedded passphrase dictionary and attribution
 web/                Embedded templates and browser assets
-  static/           JavaScript and shared CSS
+  static/           JavaScript, shared and generated CSS
+    fontawesome/    Vendored Font Awesome Free styles, font, and license
   templates/        Server-rendered HTML
 test/browser/       Browser-script regression tests
 scripts/            Development tooling helpers
@@ -349,8 +350,28 @@ standard-library vulnerability, raise the `go` line in `go.mod` to the patch
 release that fixes it.
 
 Run and build the command package (`./cmd/pigeon`) from the repository root.
-Build output belongs in the ignored `bin/` directory. The browser loads Tailwind
-CSS and Font Awesome Free from a CDN via `web/templates/assets.html`.
+Build output belongs in the ignored `bin/` directory.
+
+### Styles and icons
+
+Pages load only assets embedded in the binary; `web/templates/assets.html`
+links them and no page contacts a CDN. `web/static/tailwind.css` is generated
+from the Tailwind classes in `web/templates/` and `web/static/*.js`. After
+adding or changing classes, regenerate and commit it:
+
+```sh
+go generate ./web
+```
+
+This runs `scripts/tailwindcss.sh`, which downloads the pinned Tailwind CSS
+standalone CLI on first use, verifies its SHA-256 checksum, and caches it under
+`~/.cache/pigeon`. Font Awesome Free 7.1.0 is vendored in
+`web/static/fontawesome/`: the core and solid styles, the solid font, and the
+license. `scripts/vendor-fontawesome.sh` recreates these files from the
+checksum-verified npm release. CI reruns both and fails if the committed files
+differ. Dependabot does not track either version; to upgrade, change the version
+and checksums in the script, rerun it, and commit the result.
+
 `web/static/styles.css` sets fields, labels, buttons, and links to a consistent
 14px font size and 20px line height, including file picker buttons.
 The dialog and sharing templates supply markup; `web/static/dialog.js` and
