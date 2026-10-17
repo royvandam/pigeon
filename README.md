@@ -1,14 +1,15 @@
-# Upload
+# Pigeon
 
-A Go HTTP server with individual user accounts, an administrator management page,
-and streaming uploads stored in a separate folder for each user.
+Pigeon moves files and data between devices. It is a Go HTTP server with
+individual user accounts, an administrator management page, and streaming
+uploads stored in a separate folder for each user.
 
 Enter the development environment with `nix-shell`. It provides Go 1.26, `gopls`,
 `goimports`, the SQLite CLI, and Node.js for upload-page tests. Go 1.26 or newer
 also works without Nix.
 
 ```sh
-go run ./cmd/uploader -listen 127.0.0.1:8080
+go run ./cmd/pigeon -listen 127.0.0.1:8080
 ```
 
 On the first run, the terminal asks for the initial administrator's username,
@@ -105,8 +106,8 @@ application's request logs.
 
 ## Configuration
 
-The SQLite database defaults to `./uploader.db`. Select another location with
-`-db /path/to/uploader.db`. The database stores usernames, password hashes,
+The SQLite database defaults to `./pigeon.db`. Select another location with
+`-db /path/to/pigeon.db`. The database stores usernames, password hashes,
 administrator roles, per-user disk quotas, login sessions, share links, and server settings.
 
 On a new database, server settings default to `./uploads` and `0.0.0.0:8080`.
@@ -114,7 +115,7 @@ Use `-dir` or `-listen` to change them. Overrides are saved in SQLite and reused
 on later starts without those flags. The upload directory is stored as an absolute path.
 
 ```sh
-go run ./cmd/uploader -db ./uploader.db -dir ./uploads -listen 127.0.0.1:8080
+go run ./cmd/pigeon -db ./pigeon.db -dir ./uploads -listen 127.0.0.1:8080
 ```
 
 ## Disk quotas
@@ -261,8 +262,8 @@ The repository uses the applicable directory conventions from
 [`golang-standards/project-layout`](https://github.com/golang-standards/project-layout):
 
 ```text
-cmd/uploader/        Executable entry point and signal handling
-internal/uploader/  Private application code and Go tests
+cmd/pigeon/         Executable entry point and signal handling
+internal/pigeon/    Private application code and Go tests
   wordlists/        Embedded passphrase dictionary and attribution
 web/                Embedded templates and browser assets
   static/           JavaScript and shared CSS
@@ -331,10 +332,10 @@ go test ./...
 go test -race ./...
 go vet ./...
 node --test --test-isolation=none test/browser/*.test.cjs
-go build -o bin/uploader ./cmd/uploader
+go build -o bin/pigeon ./cmd/pigeon
 ```
 
-Run and build the command package (`./cmd/uploader`) from the repository root.
+Run and build the command package (`./cmd/pigeon`) from the repository root.
 Build output belongs in the ignored `bin/` directory. The browser loads Tailwind
 CSS and Font Awesome Free from a CDN via `web/templates/assets.html`.
 `web/static/styles.css` sets fields, labels, buttons, and links to a consistent
@@ -344,12 +345,12 @@ The dialog and sharing templates supply markup; `web/static/dialog.js` and
 native validation popups across all forms with shared, styled tooltips that do
 not shift the layout, while keeping browser constraints and server-side checks.
 
-`cmd/uploader/main.go` handles signals and invokes `uploader.Run`.
-Inside `internal/uploader`, `run.go` handles startup, `database.go` persists
+`cmd/pigeon/main.go` handles signals and invokes `pigeon.Run`.
+Inside `internal/pigeon`, `run.go` handles startup, `database.go` persists
 settings and the schema, `setup.go` handles first-run provisioning, and
 `users.go` manages accounts. `passphrase.go` generates credentials using the
 embedded EFF word list. Its source and license are documented in
-[`internal/uploader/wordlists/README.md`](internal/uploader/wordlists/README.md).
+[`internal/pigeon/wordlists/README.md`](internal/pigeon/wordlists/README.md).
 `session.go` and `auth.go` handle authentication. `admin.go`, `index.go`, and
 `upload.go` serve user management, the explorer page, and the upload endpoint.
 `files.go` handles explorer requests, and `download.go` serves files and ZIP

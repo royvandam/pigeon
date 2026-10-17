@@ -1,6 +1,6 @@
-/uploader.db
-/uploader.db-*
+/pigeon.db
+/pigeon.db-*
 /uploads/
 /.vscode/settings.json
 /bin/
-/uploader
+/pigeon

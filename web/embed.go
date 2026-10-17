@@ -1,4 +1,4 @@
-// Package web embeds the uploader's templates and static assets.
+// Package web embeds Pigeon's templates and static assets.
 package web
 
 import "embed"

@@ -1,4 +1,4 @@
-module element42/upload
+module github.com/royvandam/pigeon
 
 go 1.26.0
 
