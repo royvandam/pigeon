@@ -1,0 +1,397 @@
+# Security audit
+
+Reviewed commit `636b71b` on 2026-10-17, built with Go 1.26.7. The review covered
+all Go sources, templates, and browser scripts. Items marked *verified* were
+reproduced against a throwaway local instance; `govulncheck` was run against the
+module. File paths reflect the later rename from `uploader` to Pigeon.
+
+No path traversal, cross-account access, SQL injection, or XSS was found. The
+open issues are third-party scripts, transport security, resource limits, and
+an outdated toolchain.
+
+## How to use this file
+
+Work through the items in the recommended order. When you start one, set its
+status to **In progress**; when it is merged, set it to **Fixed** with the commit
+hash, in both the table and the item. Each item lists a reproduction and a
+"Done when" check; run them again before marking the item fixed. Use **Won't
+fix** with a short reason for accepted risks.
+
+Recommended order: A1, A5, A3, A4, A2, A6, then the rest.
+
+| ID | Severity | Finding | Status |
+| --- | --- | --- | --- |
+| [A1](#a1-unpinned-third-party-scripts-on-every-page) | High | Unpinned third-party scripts on every page | Open |
+| [A2](#a2-cleartext-credentials-by-default-cookies-not-secure-behind-a-tls-proxy) | Medium | Cleartext credentials by default; cookies not `Secure` behind a TLS proxy | Open |
+| [A3](#a3-quota-does-not-limit-disk-space-or-inodes) | Medium | Quota does not limit disk space or inodes | Open |
+| [A4](#a4-password-checks-have-no-rate-limit) | Medium | Password checks have no rate limit | Open |
+| [A5](#a5-go-1267-has-reachable-standard-library-vulnerabilities) | Medium | Go 1.26.7 has reachable standard-library vulnerabilities | Open |
+| [A6](#a6-no-content-security-policy-or-framing-protection) | Low | No Content Security Policy or framing protection | Open |
+| [A7](#a7-expired-sessions-can-turn-into-stored-basic-credentials) | Low | Expired sessions can turn into stored Basic credentials | Open |
+| [A8](#a8-request-log-forging-and-share-token-redaction-bypass) | Low | Request log forging and share-token redaction bypass | Open |
+| [A9](#a9-bidirectional-and-invisible-characters-in-filenames) | Low | Bidirectional and invisible characters in filenames | Open |
+| [A10](#a10-no-body-read-deadline-uploads-hold-the-account-lock-throughout) | Low | No body read deadline; uploads hold the account lock throughout | Open |
+| [A11](#a11-share-tokens-are-stored-in-plaintext) | Info | Share tokens are stored in plaintext | Open |
+
+The reproductions assume a local instance at `http://127.0.0.1:8080` with an
+administrator named `admin`, started from a scratch directory so `uploads/` is
+the upload root.
+
+---
+
+## A1. Unpinned third-party scripts on every page
+
+**Severity:** High · **Status:** Open
+
+**Location:** [web/templates/assets.html:2-3](web/templates/assets.html#L2-L3)
+
+Every page loads `@tailwindcss/browser@4` and Font Awesome from jsDelivr. `@4`
+is a floating version: any new 4.x release is loaded automatically. Neither tag
+has an `integrity` hash, and no Content Security Policy limits what the script
+can do. It runs with full access on:
+
+- `/login`, where it can read typed passwords;
+- `/admin`, where it can read issued passphrases and create administrators;
+- every page, where it can read the CSRF token from `data-csrf-token`.
+
+A compromised npm release or CDN therefore means full account takeover,
+including administrator accounts. Tailwind documents the browser build as a
+development tool, not for production.
+
+**Fix:** compile Tailwind at build time (Tailwind CLI) and add the generated CSS
+and Font Awesome's CSS and fonts to `web/static/`, which is already embedded in
+the binary. Remove the CDN tags. If the CDN must stay temporarily, pin exact
+versions and add `integrity` and `crossorigin="anonymous"` attributes.
+
+**Done when:** no template references an external origin
+(`grep -rn 'https://' web/templates` finds nothing), pages render identically,
+and A6's policy can use `script-src 'self'` and `style-src 'self'`.
+
+---
+
+## A2. Cleartext credentials by default; cookies not `Secure` behind a TLS proxy
+
+**Severity:** Medium · **Status:** Open
+
+**Location:** [internal/pigeon/database.go:140](internal/pigeon/database.go#L140),
+[internal/pigeon/auth.go:100](internal/pigeon/auth.go#L100),
+[internal/pigeon/auth.go:108](internal/pigeon/auth.go#L108)
+
+- The default listen address is `0.0.0.0:8080` over plain HTTP. Login
+  passwords, issued passphrases, and Basic-auth API passwords (sent with every
+  API request) cross the network in cleartext.
+- The session cookie is `Secure` only when `r.TLS != nil`. Behind the usual
+  TLS-terminating reverse proxy, `r.TLS` is nil, so the cookie is never
+  `Secure`. Cookies are not tied to a port, so any `http://` request to the same
+  host, such as a port-80 redirect, sends the session cookie in cleartext.
+- No `Strict-Transport-Security` header is sent.
+
+**Fix:**
+
+- Default the listen address to `127.0.0.1:8080` for new databases.
+- Add a setting, for example `-public-url https://files.example.com`, that forces
+  `Secure` on all cookies and sends HSTS when the URL is HTTPS. Alternatively
+  add built-in `-tls-cert` and `-tls-key` flags.
+- Document reverse-proxy deployment in the README. The proxy must forward the
+  original `Host` header, or `sameOrigin` rejects every browser POST.
+
+**Done when:** a new database listens on loopback by default, and with the HTTPS
+setting enabled the session and login cookies carry `Secure` and responses carry
+HSTS, even when the request arrives over plain HTTP from the proxy. Covered by a
+test in `auth_test.go`.
+
+---
+
+## A3. Quota does not limit disk space or inodes
+
+**Severity:** Medium · **Status:** Open · *verified*
+
+**Location:** [internal/pigeon/storage_usage.go:30-43](internal/pigeon/storage_usage.go#L30-L43),
+[internal/pigeon/upload_files.go:79-118](internal/pigeon/upload_files.go#L79-L118)
+
+Usage counts only the bytes in regular files. Empty files, directories, and
+per-file block overhead are free. During the review, one upload of about 100 KB
+(500 empty files in 60-level-deep paths) created 31,001 inodes and used 120 MB
+of disk while `X-Quota-Used` stayed at 0. Repeating the request lets any regular
+user fill the volume for every account, including the SQLite database if it
+shares the volume.
+
+It also slows the service: `diskUsage` walks the account's whole tree on every
+page load and upload, and `/admin` walks every account's tree. Each upload
+request also keeps every path in an in-memory map, so memory use grows with the
+number of parts.
+
+**Reproduction:**
+
+```sh
+deep=$(printf 'x/%.0s' $(seq 1 60))
+for i in $(seq 1 500); do echo "form = \"file=@/dev/null;filename=d$i/${deep}f\""; done > parts.cfg
+curl -s -u admin -K parts.cfg -D - -o /dev/null http://127.0.0.1:8080/upload | grep -i x-quota-used
+find uploads/admin | wc -l
+du -sh uploads/admin
+```
+
+**Fix:** pick one or more of the following:
+
+- limit the files per upload request (for example 10,000) and the path depth
+  (for example 32 components), rejecting the request before writing;
+- charge each file and directory a minimum allocation (for example 4 KiB)
+  toward the quota;
+- add a per-user limit on the number of files and folders.
+
+Avoid re-walking the full tree for every page view if usage tracking changes.
+
+**Done when:** the reproduction is rejected or charged against the quota, and a
+test in `quota_test.go` or `upload_test.go` covers the limit.
+
+---
+
+## A4. Password checks have no rate limit
+
+**Severity:** Medium · **Status:** Open · *verified*
+
+**Location:** [internal/pigeon/auth.go:43-45](internal/pigeon/auth.go#L43-L45),
+[internal/pigeon/users.go:127-147](internal/pigeon/users.go#L127-L147),
+[internal/pigeon/auth.go:143](internal/pigeon/auth.go#L143)
+
+Every request with an `Authorization: Basic` header runs bcrypt, including
+requests for usernames that do not exist. Each bogus attempt cost about 50 ms of
+CPU during the review, so roughly 20 unauthenticated requests per second keep
+one core busy. `/login` has no throttling either, which allows unlimited online
+guessing. Generated passphrases (~51.7 bits) withstand that, but the first
+administrator's password only needs 8 characters.
+
+**Reproduction:**
+
+```sh
+time (for i in $(seq 5); do curl -s -o /dev/null -u nobody:wrong http://127.0.0.1:8080/download; done)
+```
+
+Expect about 250 ms total, nearly all server-side bcrypt.
+
+**Fix:**
+
+- Rate-limit failed authentication per client IP with a token bucket, checked
+  before bcrypt runs. Return HTTP 429 with `Retry-After` when exceeded. Avoid
+  per-username lockout, which lets an attacker lock users out.
+- Cap the number of bcrypt checks running at once (for example a semaphore sized
+  to the CPU count).
+- Consider a longer minimum length for the initial administrator password.
+
+When the app sits behind a reverse proxy, only trust `X-Forwarded-For` from a
+configured proxy address; otherwise the limit can be bypassed or all clients
+share one bucket.
+
+**Done when:** repeated failed logins from one IP receive 429 without running
+bcrypt, legitimate logins from other IPs are unaffected, and tests cover both.
+
+---
+
+## A5. Go 1.26.7 has reachable standard-library vulnerabilities
+
+**Severity:** Medium · **Status:** Open · *verified*
+
+**Location:** [shell.nix](shell.nix) (`go_1_26`), [go.mod](go.mod)
+
+`govulncheck` reports 11 reachable vulnerabilities, all fixed in Go 1.26.9. The
+most relevant:
+
+- **GO-2026-6609:** unlimited Range header parsing in `net/http`, reachable
+  without authentication through `http.ServeContent` on `/s/<token>`.
+- **GO-2026-6608:** a way around the memory limit when parsing MIME headers in
+  `net/textproto` and `mime/multipart`, reachable through `/upload`.
+
+Others affect `html/template` (GO-2026-6599, GO-2026-6600), `net/http`
+(GO-2026-6613), `crypto/tls` (GO-2026-6607), and `os.Root` on Windows
+(GO-2026-6604). The HTTP/2 issues (GO-2026-6603, -6611, -6612, -6617) do not
+apply while the server only speaks plain HTTP/1.1, but become relevant if TLS is
+added for A2.
+
+**Reproduction:**
+
+```sh
+go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+```
+
+**Fix:** add `toolchain go1.26.9` to `go.mod`, or update nixpkgs so `go_1_26`
+provides 1.26.9 or newer. Add `govulncheck ./...` to the development checks in
+the README (and CI, if added).
+
+**Done when:** `govulncheck ./...` reports no reachable vulnerabilities.
+
+---
+
+## A6. No Content Security Policy or framing protection
+
+**Severity:** Low · **Status:** Open · *verified* · Depends on A1
+
+**Location:** [internal/pigeon/templates.go:31-40](internal/pigeon/templates.go#L31-L40)
+
+HTML responses carry only `Cache-Control`. There is no `Content-Security-Policy`,
+no framing protection, no `Referrer-Policy`, and no `X-Content-Type-Options` on
+pages. Because the session cookie is SameSite=Lax, other sites' iframes receive
+no session, so clickjacking needs an attacker on a sibling subdomain. The
+templates contain no inline scripts or event handlers, so a strict policy is
+straightforward once A1 removes the runtime Tailwind build, which injects
+inline styles.
+
+**Reproduction:** sign in, then `curl -s -D - -o /dev/null -b <cookie jar> http://127.0.0.1:8080/`
+shows no security headers besides `Cache-Control`.
+
+**Fix:** set these in `renderTemplate` (or a middleware for all responses):
+
+```text
+Content-Security-Policy: default-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'none'; object-src 'none'
+Referrer-Policy: same-origin
+X-Content-Type-Options: nosniff
+```
+
+**Done when:** every HTML response carries the headers, the browser console
+shows no CSP violations on the explorer, admin, and login pages, and a test
+asserts the headers.
+
+---
+
+## A7. Expired sessions can turn into stored Basic credentials
+
+**Severity:** Low · **Status:** Open · Partly verified
+
+**Location:** [internal/pigeon/auth.go:68](internal/pigeon/auth.go#L68),
+[internal/pigeon/auth.go:89](internal/pigeon/auth.go#L89)
+
+`/files`, `/upload`, `/upload-progress`, and `/shares` answer unauthenticated
+requests with 401 and `WWW-Authenticate: Basic` (verified). When the explorer's
+background requests hit this after the 12-hour session expires, browsers show
+their own login prompt. If the user fills it in, the browser stores the password
+and sends it with every later request to the site. Those requests skip the CSRF
+token check (`a.Basic`) and rely only on the Origin and Sec-Fetch-Site checks.
+"Sign out" cannot clear them.
+
+The browser behavior is inferred and has not been tested in a browser; confirm
+it first by letting a session expire with the explorer open.
+
+**Reproduction:** `curl -s -D - -o /dev/null http://127.0.0.1:8080/files | grep -i www-authenticate`
+
+**Fix:** omit the Basic challenge when the request has a `Sec-Fetch-Mode`
+header. Browsers send it and curl does not, and `curl --user` sends credentials
+without waiting for a challenge. The explorer already handles a plain 401.
+
+**Done when:** a browser request that fails authentication receives 401 without
+`WWW-Authenticate`, curl clients still authenticate, and a test covers both.
+
+---
+
+## A8. Request log forging and share-token redaction bypass
+
+**Severity:** Low · **Status:** Open · *verified*
+
+**Location:** [internal/pigeon/server.go:64-74](internal/pigeon/server.go#L64-L74)
+
+The request logger prints the decoded path as-is. An unauthenticated request can
+add fake lines to the log, and a share URL with an extra slash is logged before
+the router redirects it, so the token escapes redaction.
+
+**Reproduction:**
+
+```sh
+curl -s -o /dev/null 'http://127.0.0.1:8080/x%0a2026/10/17%2012:00:00%20POST%20/admin%201ms'
+curl -s -o /dev/null 'http://127.0.0.1:8080//s/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+```
+
+The server log shows a forged `POST /admin` line and the unredacted token.
+
+**Fix:** log the path with `%q`, and decide on redaction after `path.Clean`,
+redacting anything whose cleaned path starts with `/s/`.
+
+**Done when:** both reproductions produce a single escaped log line with the
+token redacted, covered by a test in `server_test.go`.
+
+---
+
+## A9. Bidirectional and invisible characters in filenames
+
+**Severity:** Low · **Status:** Open
+
+**Location:** [internal/pigeon/filename.go:16-29](internal/pigeon/filename.go#L16-L29),
+compare [internal/pigeon/users.go:46](internal/pigeon/users.go#L46)
+
+Upload paths reject only control characters (`unicode.IsControl`, category Cc).
+Usernames also reject invisible formatting characters (category Cf). Filenames
+can therefore contain right-to-left override characters: a shared file named
+`invoice‮fdp.exe` displays as `invoiceexe.pdf` to the person downloading it.
+
+**Fix:** reject `unicode.Cf` characters in `validateUploadPath`, or at least the
+bidirectional controls U+202A–U+202E and U+2066–U+2069. The same validation
+covers rename and mkdir through `validateStoragePath`.
+
+**Done when:** uploads, renames, and new folders containing those characters
+return HTTP 400, covered by tests in `upload_test.go` and `files_test.go`.
+Existing files with such names stay accessible.
+
+---
+
+## A10. No body read deadline; uploads hold the account lock throughout
+
+**Severity:** Low · **Status:** Open
+
+**Location:** [internal/pigeon/server.go:33-38](internal/pigeon/server.go#L33-L38),
+[internal/pigeon/upload.go:51-62](internal/pigeon/upload.go#L51-L62)
+
+- The server sets only `ReadHeaderTimeout`. Unauthenticated clients can send
+  `/login` form bodies (up to 64 KB) very slowly and keep many connections open.
+- An upload holds its account's lock from the quota check until publication.
+  While a large or stalled upload runs, that account's share-link downloads,
+  explorer pages, and admin quota changes or purges for the account wait.
+
+**Fix:** set read deadlines per handler with `http.ResponseController`: short
+for form posts, and for uploads a deadline that is extended while data keeps
+arriving. Optionally rework uploads so the lock is held only for the quota check
+and publication, not while streaming.
+
+**Done when:** a slow `/login` body is cut off after the deadline, a stalled
+upload releases the lock, and tests cover both.
+
+---
+
+## A11. Share tokens are stored in plaintext
+
+**Severity:** Informational · **Status:** Open
+
+**Location:** [internal/pigeon/database.go:105-112](internal/pigeon/database.go#L105-L112),
+[internal/pigeon/shares.go:37-54](internal/pigeon/shares.go#L37-L54)
+
+Session tokens are stored as SHA-256 hashes, but share tokens are stored as-is
+so the Share dialog can show an existing link again. A leaked database or backup
+therefore yields working public download links.
+
+**Options:** store only a hash and show the link once at creation, as with
+passphrases; or keep the current behavior and document that database backups
+must be protected like the files themselves.
+
+**Done when:** a decision is recorded here, and the code or the README is
+updated to match.
+
+---
+
+## Controls to preserve
+
+When fixing the items above, keep these properties intact; they are what keeps
+the rest of the application safe:
+
+- All file access goes through `os.Root`, and `storageInfo` rejects symbolic
+  links and special files in every path component.
+- Uploads are staged under `.upload-*` and published all at once or not at all.
+- Downloads are always sent as `attachment` with `application/octet-stream` and
+  `nosniff`, so uploaded HTML cannot run on the site.
+- Templates use `html/template`; browser scripts use `textContent`, and the only
+  `innerHTML` receives server-escaped HTML.
+- POST requests require a CSRF token (compared in constant time) and pass the
+  Origin and Sec-Fetch-Site checks.
+- Session tokens are stored hashed; `auth_version` invalidates sessions on
+  password reset and recycling; `AUTOINCREMENT` prevents reusing a purged
+  account's ID.
+- Login for an unknown username runs bcrypt against a valid cost-10 dummy hash,
+  so its timing matches a wrong password.
+- All SQL uses parameters; share revocation matches path prefixes exactly
+  instead of using `LIKE`.
+- Passphrases come from `crypto/rand` (four words, about 51.7 bits).
