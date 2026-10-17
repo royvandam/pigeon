@@ -328,12 +328,20 @@ JavaScript tests run the same files served by the application. Rebuild and resta
 after changing templates or assets.
 
 ```sh
+gofmt -l .
+go mod tidy -diff
 go test ./...
 go test -race ./...
 go vet ./...
 node --test --test-isolation=none test/browser/*.test.cjs
+go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 go build -o bin/pigeon ./cmd/pigeon
 ```
+
+GitHub Actions runs these checks for every pull request and push to `main`, and
+runs `govulncheck` weekly so new advisories surface without code changes. CI
+uses the Go version declared in `go.mod`. Dependabot proposes grouped weekly
+updates for Go modules and the pinned actions once a release is a week old.
 
 Run and build the command package (`./cmd/pigeon`) from the repository root.
 Build output belongs in the ignored `bin/` directory. The browser loads Tailwind

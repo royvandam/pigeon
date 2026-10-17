@@ -217,6 +217,10 @@ go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 provides 1.26.9 or newer. Add `govulncheck ./...` to the development checks in
 the README (and CI, if added).
 
+**Progress:** `govulncheck` now runs in the README checks and in GitHub Actions
+on every pull request, every push to `main`, and weekly. Until `go.mod` declares
+Go 1.26.9 or newer, that job fails by design.
+
 **Done when:** `govulncheck ./...` reports no reachable vulnerabilities.
 
 ---
