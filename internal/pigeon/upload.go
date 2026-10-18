@@ -48,15 +48,17 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer progress.fail()
 
-	access, err := cfg.accessAccount(r.Context(), a.User)
+	// The account lock is held only to check the quota and to publish, so the
+	// account's pages, share links, and file actions do not wait for the body.
+	// The slot keeps this account's uploads streaming one at a time.
+	releaseSlot, err := cfg.store.lockUploadSlot(r.Context(), a.User.ID)
 	if err != nil {
-		if errors.Is(err, errInvalidCredentials) {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-		} else if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			http.Error(w, "upload canceled", http.StatusRequestTimeout)
-		} else {
-			http.Error(w, "failed to load disk quota", http.StatusInternalServerError)
-		}
+		http.Error(w, "upload canceled", http.StatusRequestTimeout)
+		return
+	}
+	defer releaseSlot()
+	access, ok := cfg.accessUploadAccount(w, r, a.User)
+	if !ok {
 		return
 	}
 	defer access.close()
@@ -85,9 +87,6 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "disk quota exhausted", http.StatusRequestEntityTooLarge)
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, remaining+multipartOverhead)
-	defer r.Body.Close()
-	mr := multipart.NewReader(r.Body, boundary)
 	batch, err := newUploadBatch(dir, r.URL.Query().Get("dir"), remaining, files.unit)
 	if err != nil {
 		writeStorageError(w, err)
@@ -95,6 +94,14 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer batch.close()
 	batch.progress = progress
+	access.close()
+
+	// The deadline stays in place on failure: the server then reads the rest of
+	// a small body before responding, and must not wait for a stalled client.
+	body := newIdleTimeoutReader(w, r.Body, cfg.uploadTimeout())
+	r.Body = http.MaxBytesReader(w, body, remaining+multipartOverhead)
+	defer r.Body.Close()
+	mr := multipart.NewReader(r.Body, boundary)
 	progress.setState("uploading")
 
 	for {
@@ -148,11 +155,35 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing file", http.StatusBadRequest)
 		return
 	}
+	body.clear()
 	if r.Context().Err() != nil {
 		http.Error(w, "upload canceled", http.StatusRequestTimeout)
 		return
 	}
 	progress.setState("finalizing")
+	// The account may have been deleted, its quota lowered, or its storage
+	// filled by file actions while the body streamed.
+	access, ok = cfg.accessUploadAccount(w, r, a.User)
+	if !ok {
+		return
+	}
+	defer access.close()
+	quota = access.QuotaBytes
+	used, err = files.usageExcept(r.Context(), batch.stageName)
+	if err != nil {
+		http.Error(w, "failed to check storage usage", http.StatusInternalServerError)
+		return
+	}
+	charged, err := batch.currentCharge()
+	if err != nil {
+		writeStorageError(w, err)
+		return
+	}
+	setQuotaHeaders(w, quota, used)
+	if remainingQuota(quota, used) < charged {
+		http.Error(w, fmt.Sprintf("disk quota exceeded (%s available)", humanBytes(remainingQuota(quota, used))), http.StatusRequestEntityTooLarge)
+		return
+	}
 	savedName, group, err := batch.publish()
 	if err != nil {
 		writeStorageError(w, err)
@@ -161,17 +192,37 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 	progress.setState("complete")
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	setQuotaHeaders(w, quota, used+batch.charged)
+	setQuotaHeaders(w, quota, used+charged)
 	fmt.Fprintf(w, "ok\nsaved_as=%s\nbytes=%d\n", savedName, batch.bytes)
 	if group {
 		fmt.Fprintf(w, "files=%d\n", batch.files)
 	}
 }
 
+// accessUploadAccount locks the account and loads its quota, answering the
+// request itself when that fails.
+func (cfg config) accessUploadAccount(w http.ResponseWriter, r *http.Request, u user) (*accountAccess, bool) {
+	access, err := cfg.accessAccount(r.Context(), u)
+	if err == nil {
+		return access, true
+	}
+	if errors.Is(err, errInvalidCredentials) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	} else if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		http.Error(w, "upload canceled", http.StatusRequestTimeout)
+	} else {
+		http.Error(w, "failed to load disk quota", http.StatusInternalServerError)
+	}
+	return nil, false
+}
+
 func uploadReadErrorStatus(err error) int {
 	var maxBytesErr *http.MaxBytesError
 	if errors.As(err, &maxBytesErr) {
 		return http.StatusRequestEntityTooLarge
+	}
+	if errors.Is(err, os.ErrDeadlineExceeded) {
+		return http.StatusRequestTimeout
 	}
 	return http.StatusBadRequest
 }

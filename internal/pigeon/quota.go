@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"strconv"
+	"sync"
 )
 
 const defaultUserQuota = int64(1 << 30)
@@ -28,10 +29,35 @@ func parseQuota(value string) (int64, error) {
 }
 
 // Serialize account storage access and lifecycle changes. Uploads hold this lock
-// from the quota check through publication; reads recheck identity while holding
-// it. Different accounts can proceed concurrently.
+// for the quota check and again for publication, but not while streaming; reads
+// recheck identity while holding it. Different accounts can proceed concurrently.
 func (s *store) lockUploads(ctx context.Context, id int64) (func(), error) {
-	value, _ := s.uploadLocks.LoadOrStore(id, make(chan struct{}, 1))
+	return lockAccount(ctx, &s.uploadLocks, id)
+}
+
+// lockUploadSlot lets one upload per account stream at a time, so each starts
+// from the quota the previous one left. Take it before lockUploads.
+func (s *store) lockUploadSlot(ctx context.Context, id int64) (func(), error) {
+	return lockAccount(ctx, &s.uploadSlots, id)
+}
+
+// lockAccountAndUploads waits for a streaming upload as well as for the account
+// lock, so purging or recycling never races with an upload's staging folder.
+func (s *store) lockAccountAndUploads(ctx context.Context, id int64) (func(), error) {
+	releaseSlot, err := s.lockUploadSlot(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	release, err := s.lockUploads(ctx, id)
+	if err != nil {
+		releaseSlot()
+		return nil, err
+	}
+	return func() { release(); releaseSlot() }, nil
+}
+
+func lockAccount(ctx context.Context, locks *sync.Map, id int64) (func(), error) {
+	value, _ := locks.LoadOrStore(id, make(chan struct{}, 1))
 	lock := value.(chan struct{})
 	select {
 	case lock <- struct{}{}:

@@ -89,6 +89,15 @@ func (files userStorage) usage(ctx context.Context) (int64, error) {
 	return diskUsage(ctx, dir, files.unit)
 }
 
+// usageExcept measures usage without the top-level entry skip.
+func (files userStorage) usageExcept(ctx context.Context, skip string) (int64, error) {
+	dir, err := files.path()
+	if err != nil {
+		return 0, err
+	}
+	return diskUsageExcept(ctx, dir, files.unit, skip)
+}
+
 func (files userStorage) purge() error {
 	if _, err := files.path(); err != nil {
 		return err

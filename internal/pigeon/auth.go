@@ -18,12 +18,14 @@ func validCSRF(expected, provided string) bool {
 	return len(expected) == 43 && subtle.ConstantTimeCompare([]byte(expected), []byte(provided)) == 1
 }
 
-func parseForm(w http.ResponseWriter, r *http.Request) bool {
+func (cfg config) parseForm(w http.ResponseWriter, r *http.Request) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, maxFormBytes)
+	clearDeadline := limitBodyRead(w, cfg.formTimeout())
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "invalid form", uploadReadErrorStatus(err))
 		return false
 	}
+	clearDeadline()
 	return true
 }
 
@@ -92,7 +94,7 @@ func (cfg config) requireAuth(w http.ResponseWriter, r *http.Request, options au
 		}
 		csrf := r.Header.Get("X-CSRF-Token")
 		if r.URL.Path != "/upload" {
-			if !parseForm(w, r) {
+			if !cfg.parseForm(w, r) {
 				return authentication{}, false
 			}
 			csrf = r.PostForm.Get("csrf_token")
@@ -140,7 +142,7 @@ func (cfg config) handleLogin(w http.ResponseWriter, r *http.Request) {
 			Secure: cfg.secureCookies(r), SameSite: http.SameSiteStrictMode, MaxAge: 600})
 		renderTemplate(w, loginTmpl, loginPage{CSRFToken: token}, http.StatusOK)
 	case http.MethodPost:
-		if !cfg.sameOrigin(r) || !parseForm(w, r) {
+		if !cfg.sameOrigin(r) || !cfg.parseForm(w, r) {
 			if !cfg.sameOrigin(r) {
 				http.Error(w, "invalid request origin", http.StatusForbidden)
 			}

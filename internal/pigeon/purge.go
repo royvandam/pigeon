@@ -9,7 +9,7 @@ import (
 // Keep the account and its folder reserved until all uploads have been removed.
 // The shared lock also serializes purging with recycling and outstanding uploads.
 func (s *store) purgeUser(ctx context.Context, id int64, removeUploads func(string) error) error {
-	unlock, err := s.lockUploads(ctx, id)
+	unlock, err := s.lockAccountAndUploads(ctx, id)
 	if err != nil {
 		return err
 	}

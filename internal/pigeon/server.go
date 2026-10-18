@@ -25,6 +25,10 @@ type config struct {
 	// allocationUnit is the minimum quota charge per file and folder; zero
 	// selects defaultAllocationUnit. Tests use 1 to keep byte arithmetic exact.
 	allocationUnit int64
+	// formReadTimeout and uploadIdleTimeout limit slow request bodies; zero
+	// selects the defaults in deadline.go.
+	formReadTimeout   time.Duration
+	uploadIdleTimeout time.Duration
 }
 
 func newServer(cfg config) *http.Server {
