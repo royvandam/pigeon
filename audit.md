@@ -28,7 +28,7 @@ Recommended order: A1, A5, A3, A4, A2, A6, then the rest.
 | [A5](#a5-go-1267-has-reachable-standard-library-vulnerabilities) | Medium | Go 1.26.7 has reachable standard-library vulnerabilities | Fixed in #2 |
 | [A6](#a6-no-content-security-policy-or-framing-protection) | Low | No Content Security Policy or framing protection | Fixed in #4 |
 | [A7](#a7-expired-sessions-can-turn-into-stored-basic-credentials) | Low | Expired sessions can turn into stored Basic credentials | Fixed in #8 |
-| [A8](#a8-request-log-forging-and-share-token-redaction-bypass) | Low | Request log forging and share-token redaction bypass | Open |
+| [A8](#a8-request-log-forging-and-share-token-redaction-bypass) | Low | Request log forging and share-token redaction bypass | Fixed in #9 |
 | [A9](#a9-bidirectional-and-invisible-characters-in-filenames) | Low | Bidirectional and invisible characters in filenames | Open |
 | [A10](#a10-no-body-read-deadline-uploads-hold-the-account-lock-throughout) | Low | No body read deadline; uploads hold the account lock throughout | Open |
 | [A11](#a11-share-tokens-are-stored-in-plaintext) | Info | Share tokens are stored in plaintext | Open |
@@ -442,7 +442,7 @@ them until it is restarted.
 
 ## A8. Request log forging and share-token redaction bypass
 
-**Severity:** Low · **Status:** Open · *verified*
+**Severity:** Low · **Status:** Fixed in #9 · *verified*
 
 **Location:** [internal/pigeon/server.go:64-74](internal/pigeon/server.go#L64-L74)
 
@@ -464,6 +464,32 @@ redacting anything whose cleaned path starts with `/s/`.
 
 **Done when:** both reproductions produce a single escaped log line with the
 token redacted, covered by a test in `server_test.go`.
+
+**Resolution:** the request logger quotes the path with `%q` and redacts
+everything after the first `/s/` in it.
+
+- **Quoting:** newlines, carriage returns, escape sequences, and invisible or
+  bidirectional characters are escaped, so each request produces exactly one
+  log line. Every logged path is now in double quotes, for example
+  `GET "/files" 3ms`.
+- **Redaction:** the logger looks for an `s` segment anywhere in the decoded
+  path rather than at the start of `path.Clean`'s result. This covers
+  everything the suggested check does, plus paths such as
+  `/s/<token>/../../x`, where cleaning removes the `s` segment but leaves the
+  token in the logged path. Pigeon never puts file names in URL paths, so only
+  share links are affected.
+
+The request method needs no escaping, because Go's server rejects methods that
+are not valid tokens. Other log lines contain only errors and settings.
+
+`TestRequestLogEscapesPathsAndRedactsShareTokens` replaces the earlier
+share-only test. It runs requests through the full handler and checks newline,
+carriage-return, escape-sequence, and bidirectional-character paths, plus seven
+share-token variants. Against a live server, both reproductions plus
+`/x/../s/<token>` (`curl --path-as-is`), `/%73/<token>`, `/s%2F<token>`, and a
+trailing slash each logged one quoted line with the token redacted. Before the
+fix, the first reproduction forged a `POST /admin` line, and `//s/<token>` and
+`/x/../s/<token>` logged the token.
 
 ---
 

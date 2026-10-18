@@ -95,10 +95,19 @@ func logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		next.ServeHTTP(w, r)
-		requestPath := r.URL.Path
-		if strings.HasPrefix(requestPath, "/s/") {
-			requestPath = "/s/[redacted]" // Share tokens grant access to private files.
-		}
-		log.Printf("%s %s %s", r.Method, requestPath, time.Since(start).Truncate(time.Millisecond))
+		// %q keeps a decoded newline or other control character from starting a
+		// forged log line.
+		log.Printf("%s %q %s", r.Method, redactShareToken(r.URL.Path), time.Since(start).Truncate(time.Millisecond))
 	})
+}
+
+// redactShareToken hides everything after the first "s" path segment, because
+// share tokens grant access to private files. Looking for the segment anywhere
+// also covers paths such as //s/<token> and /x/../s/<token>, which the router
+// redirects to the share route only after this request is logged.
+func redactShareToken(requestPath string) string {
+	if i := strings.Index(requestPath, "/s/"); i >= 0 {
+		return requestPath[:i] + "/s/[redacted]"
+	}
+	return requestPath
 }

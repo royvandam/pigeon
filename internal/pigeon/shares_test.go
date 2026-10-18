@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"log"
 	"mime"
 	"net/http"
 	"net/http/httptest"
@@ -374,18 +373,5 @@ func TestPublicDownloadsRecheckRevocationAfterWaitingForStorageLock(t *testing.T
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("public download did not finish after unlock")
-	}
-}
-
-func TestShareTokensAreRedactedFromRequestLogs(t *testing.T) {
-	var output bytes.Buffer
-	old := log.Writer()
-	log.SetOutput(&output)
-	defer log.SetOutput(old)
-	handler := logRequests(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNotFound) }))
-	token := strings.Repeat("x", 43)
-	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/s/"+token, nil))
-	if strings.Contains(output.String(), token) || !strings.Contains(output.String(), "/s/[redacted]") {
-		t.Fatalf("logs expose share tokens: %s", output.String())
 	}
 }

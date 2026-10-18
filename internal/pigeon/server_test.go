@@ -5,6 +5,7 @@ import (
 	"context"
 	"html"
 	"io/fs"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -130,6 +131,37 @@ func TestTemplatesContainNoInlineScriptsOrStyles(t *testing.T) {
 		}
 		if match := inline.Find(content); match != nil {
 			t.Errorf("%s contains inline code or styles blocked by the CSP: %s", name, match)
+		}
+	}
+}
+
+func TestRequestLogEscapesPathsAndRedactsShareTokens(t *testing.T) {
+	var output bytes.Buffer
+	old := log.Writer()
+	log.SetOutput(&output)
+	defer log.SetOutput(old)
+	handler := newServer(newTestConfig(t, 100)).Handler
+	token := strings.Repeat("A", 43)
+	for _, test := range []struct{ path, logged string }{
+		{"/files", `"/files"`},
+		{"/x\n2026/10/17 12:00:00 POST /admin 1ms", `"/x\n2026/10/17 12:00:00 POST /admin 1ms"`},
+		{"/x\r\x1b[2K", `"/x\r\x1b[2K"`},
+		{"/invoice\u202efdp.exe", `"/invoice\u202efdp.exe"`},
+		{"/s/" + token, `"/s/[redacted]"`},
+		{"/s/" + token + "/", `"/s/[redacted]"`},
+		{"//s/" + token, `"//s/[redacted]"`},
+		{"/s//" + token, `"/s/[redacted]"`},
+		{"/x/../s/" + token, `"/x/../s/[redacted]"`},
+		{"/s/" + token + "/../../x", `"/s/[redacted]"`},
+		{"/s/" + token + "\nGET /forged", `"/s/[redacted]"`},
+	} {
+		output.Reset()
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.URL.Path = test.path // As decoded from the request line, such as %0a or //.
+		handler.ServeHTTP(httptest.NewRecorder(), r)
+		line := output.String()
+		if strings.Count(line, "\n") != 1 || !strings.Contains(line, " GET "+test.logged+" ") || strings.Contains(line, token) {
+			t.Errorf("request for %q logged %q; want one line with %s", test.path, line, test.logged)
 		}
 	}
 }
