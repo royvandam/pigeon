@@ -279,6 +279,71 @@ func TestSessionExpirationAndCrossOriginRequests(t *testing.T) {
 	}
 }
 
+func TestOnlyAPIClientsReceiveABasicChallenge(t *testing.T) {
+	cfg := newTestConfig(t, 100)
+	handler := newServer(cfg).Handler
+	expired, _ := sessionFor(t, cfg, "Test User")
+	if _, err := cfg.store.db.Exec(`UPDATE sessions SET expires_at = 1`); err != nil {
+		t.Fatal(err)
+	}
+	clients := []struct {
+		name     string
+		headers  map[string]string
+		navigate bool
+	}{
+		{name: "API client"},
+		{name: "script over HTTPS", headers: map[string]string{"Sec-Fetch-Mode": "cors", "Sec-Fetch-Site": "same-origin"}},
+		{name: "explorer script over HTTP", headers: map[string]string{"X-Requested-With": "XMLHttpRequest"}},
+		{name: "navigation over HTTPS", headers: map[string]string{"Sec-Fetch-Mode": "navigate"}, navigate: true},
+		{name: "navigation over HTTP", headers: map[string]string{"Upgrade-Insecure-Requests": "1"}, navigate: true},
+	}
+	endpoints := []struct{ method, target string }{
+		{http.MethodGet, "/files?dir="},
+		{http.MethodGet, "/download?path="},
+		{http.MethodGet, "/upload-progress?id=0123456789abcdef0123456789abcdef"},
+		{http.MethodGet, "/shares?path=file.txt"},
+		{http.MethodPost, "/upload"},
+		{http.MethodPost, "/shares"},
+	}
+	for _, client := range clients {
+		for _, endpoint := range endpoints {
+			for _, session := range []bool{false, true} {
+				r := httptest.NewRequest(endpoint.method, endpoint.target, nil)
+				for name, value := range client.headers {
+					r.Header.Set(name, value)
+				}
+				if session {
+					r.AddCookie(expired)
+				}
+				w := serve(handler, r)
+				challenge := w.Header().Get("WWW-Authenticate")
+				where := client.name + " " + endpoint.method + " " + endpoint.target
+				switch {
+				case client.navigate && endpoint.method == http.MethodGet:
+					if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/login" || challenge != "" {
+						t.Errorf("%s (session %v) = %d to %q, challenge %q; want redirect to /login", where, session, w.Code, w.Header().Get("Location"), challenge)
+					}
+				case client.headers == nil:
+					if w.Code != http.StatusUnauthorized || !strings.HasPrefix(challenge, "Basic ") {
+						t.Errorf("%s (session %v) = %d, challenge %q; want 401 with a Basic challenge", where, session, w.Code, challenge)
+					}
+				default:
+					if w.Code != http.StatusUnauthorized || challenge != "" {
+						t.Errorf("%s (session %v) = %d, challenge %q; want 401 without a challenge", where, session, w.Code, challenge)
+					}
+				}
+			}
+		}
+	}
+
+	// API clients that send credentials, as curl --user does, still authenticate.
+	r := httptest.NewRequest(http.MethodGet, "/files?dir=", nil)
+	r.SetBasicAuth("Test User", testPassword)
+	if w := serve(handler, r); w.Code != http.StatusOK {
+		t.Fatalf("Basic-authenticated file list = %d: %s", w.Code, w.Body)
+	}
+}
+
 func TestNewDatabasesListenOnLoopback(t *testing.T) {
 	s, err := openStore(context.Background(), filepath.Join(t.TempDir(), "new.db"))
 	if err != nil {

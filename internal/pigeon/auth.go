@@ -39,6 +39,20 @@ func (cfg config) requestAuthentication(r *http.Request) (authentication, error)
 	return cfg.store.session(r.Context(), cookie.Value)
 }
 
+// navigation reports whether r loads a page in a browser tab. Browsers send
+// Fetch Metadata only to HTTPS and loopback origins, but send
+// Upgrade-Insecure-Requests with every navigation.
+func navigation(r *http.Request) bool {
+	return r.Header.Get("Sec-Fetch-Mode") == "navigate" || r.Header.Get("Upgrade-Insecure-Requests") == "1"
+}
+
+// browserRequest reports whether r comes from a browser rather than an API
+// client. Scripts on plain HTTP origins send no Fetch Metadata, so the
+// explorer's scripts mark their requests with X-Requested-With.
+func browserRequest(r *http.Request) bool {
+	return navigation(r) || r.Header.Get("Sec-Fetch-Mode") != "" || r.Header.Get("X-Requested-With") == "XMLHttpRequest"
+}
+
 type authOptions struct {
 	Administrator bool
 	Browser       bool
@@ -54,10 +68,15 @@ func (cfg config) requireAuth(w http.ResponseWriter, r *http.Request, options au
 		} else if !errors.Is(err, errInvalidCredentials) {
 			log.Printf("authenticate: %v", err)
 			http.Error(w, "authentication unavailable", http.StatusInternalServerError)
-		} else if options.Browser {
+		} else if options.Browser || (r.Method == http.MethodGet && navigation(r)) {
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
 		} else {
-			w.Header().Set("WWW-Authenticate", `Basic realm="Pigeon", charset="UTF-8"`)
+			// Browsers answer a Basic challenge with their own sign-in prompt and
+			// then send the password with every request, which skips the CSRF
+			// check and outlives Sign out. Only API clients are challenged.
+			if !browserRequest(r) {
+				w.Header().Set("WWW-Authenticate", `Basic realm="Pigeon", charset="UTF-8"`)
+			}
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 		}
 		return authentication{}, false

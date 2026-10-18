@@ -51,7 +51,8 @@ function page(size = 10000, options = {}) {
     fetch(url, fetchOptions) {
       if (url.startsWith('/files?')) {
         refreshes.push({url, options: fetchOptions});
-        return Promise.resolve({ok: !options.refreshFails, async text() { return '<table><tr><td>test.bin</td></tr></table>'; }});
+        const status = options.refreshStatus || (options.refreshFails ? 500 : 200);
+        return Promise.resolve({ok: status === 200, status, async text() { return '<table><tr><td>test.bin</td></tr></table>'; }});
       }
       return new Promise((resolve, reject) => { requests.push({url, options: fetchOptions, resolve, reject}); });
     }
@@ -81,9 +82,9 @@ function page(size = 10000, options = {}) {
     timer[1].callback();
     await settle();
   }
-  function finish(status = 200) {
+  function finish(status = 200, responseText = 'disk quota exceeded') {
     xhr.status = status;
-    xhr.responseText = status === 200 ? 'ok\nsaved_as=test.bin\nbytes=' + size : 'disk quota exceeded';
+    xhr.responseText = status === 200 ? 'ok\nsaved_as=test.bin\nbytes=' + size : responseText;
     xhr.onload();
   }
   return {text, elements, xhr, requests, timers, reply, poll, finish, settle, select, refreshes};
@@ -96,6 +97,8 @@ test('browser send completion does not advance server progress to 100%', async (
   assert.equal(p.xhr.headers['X-CSRF-Token'], 'a'.repeat(43));
   assert.match(p.requests[0].url, /^\/upload-progress\?id=[a-f0-9]{32}$/);
   assert.equal(p.requests[0].options.credentials, 'same-origin');
+  assert.equal(p.xhr.headers['X-Requested-With'], 'XMLHttpRequest');
+  assert.equal(p.requests[0].options.headers['X-Requested-With'], 'XMLHttpRequest');
   p.xhr.upload.onprogress?.({lengthComputable: true, loaded: 10200, total: 10200});
   p.xhr.upload.onload();
   assert.equal(p.text('pct'), '0%');
@@ -121,7 +124,20 @@ test('browser send completion does not advance server progress to 100%', async (
   await p.settle();
   assert.match(p.elements.get('fileList').innerHTML, /test.bin/);
   assert.equal(p.refreshes[0].url, '/files?dir=My%20folder%2Fdocs');
+  assert.equal(p.refreshes[0].options.headers['X-Requested-With'], 'XMLHttpRequest');
   assert.equal(p.timers.size, 0);
+});
+
+test('expired sessions ask for a reload instead of showing the server response', async () => {
+  const rejected = page();
+  rejected.finish(401, 'unauthorized');
+  assert.equal(rejected.text('phase'), 'Upload failed: Your session has expired. Reload the page to sign in again.');
+
+  const refreshed = page(10000, {refreshStatus: 401});
+  refreshed.finish();
+  await refreshed.settle();
+  assert.equal(refreshed.text('phase'), 'Done');
+  assert.equal(refreshed.text('explorerMessage'), 'Your session has expired. Reload the page to sign in again.');
 });
 
 test('a failed explorer refresh keeps a successful upload complete and asks for a reload', async () => {

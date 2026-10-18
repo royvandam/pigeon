@@ -320,8 +320,9 @@ test('late sharing responses cannot overwrite a newly opened item or edit dialog
 test('share request failures keep the dialog usable and explain expired sessions', async () => {
   const p = page();
   p.open('share');
+  assert.equal(p.requests[0].options.headers['X-Requested-With'], 'XMLHttpRequest');
   await p.reply(0, '', 401);
-  assert.match(p.elements.get('shareStatus').textContent, /session has expired/);
+  assert.equal(p.elements.get('shareStatus').textContent, 'Your session has expired. Reload the page to sign in again.');
   assert.equal(p.elements.get('shareCreate').disabled, false);
   assert.equal(p.elements.get('shareCopy').disabled, true);
 });
