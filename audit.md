@@ -27,7 +27,7 @@ Recommended order: A1, A5, A3, A4, A2, A6, then the rest.
 | [A4](#a4-password-checks-have-no-rate-limit) | Medium | Password checks have no rate limit | Fixed in #6 |
 | [A5](#a5-go-1267-has-reachable-standard-library-vulnerabilities) | Medium | Go 1.26.7 has reachable standard-library vulnerabilities | Fixed in #2 |
 | [A6](#a6-no-content-security-policy-or-framing-protection) | Low | No Content Security Policy or framing protection | Fixed in #4 |
-| [A7](#a7-expired-sessions-can-turn-into-stored-basic-credentials) | Low | Expired sessions can turn into stored Basic credentials | Open |
+| [A7](#a7-expired-sessions-can-turn-into-stored-basic-credentials) | Low | Expired sessions can turn into stored Basic credentials | Fixed in #8 |
 | [A8](#a8-request-log-forging-and-share-token-redaction-bypass) | Low | Request log forging and share-token redaction bypass | Open |
 | [A9](#a9-bidirectional-and-invisible-characters-in-filenames) | Low | Bidirectional and invisible characters in filenames | Open |
 | [A10](#a10-no-body-read-deadline-uploads-hold-the-account-lock-throughout) | Low | No body read deadline; uploads hold the account lock throughout | Open |
@@ -374,7 +374,7 @@ states are pixel-identical to the build without these headers.
 
 ## A7. Expired sessions can turn into stored Basic credentials
 
-**Severity:** Low · **Status:** Open · Partly verified
+**Severity:** Low · **Status:** Fixed in #8 · *verified*
 
 **Location:** [internal/pigeon/auth.go:68](internal/pigeon/auth.go#L68),
 [internal/pigeon/auth.go:89](internal/pigeon/auth.go#L89)
@@ -398,6 +398,45 @@ without waiting for a challenge. The explorer already handles a plain 401.
 
 **Done when:** a browser request that fails authentication receives 401 without
 `WWW-Authenticate`, curl clients still authenticate, and a test covers both.
+
+**Resolution:** only API clients receive the Basic challenge.
+
+Headless Chromium 153 confirmed the finding and showed it was worse than
+described. With the explorer open after its session expired, a background
+request raised the browser's own sign-in prompt. Once it was answered, the
+browser sent the password with every request. A `POST /files` without a CSRF
+token created a folder, and Sign out returned straight to the explorer, because
+`/login` accepted the stored credentials.
+
+The proposed `Sec-Fetch-Mode` check alone was not enough. Chromium sends Fetch
+Metadata only to HTTPS and loopback origins, so over plain HTTP on a LAN
+address, navigations, `fetch`, and `XMLHttpRequest` all arrived without it. A
+request now counts as a browser's if it has any of the following:
+
+- a `Sec-Fetch-Mode` header;
+- `Upgrade-Insecure-Requests: 1`, which browsers send with every navigation;
+- `X-Requested-With: XMLHttpRequest`, which the explorer's scripts now send.
+  Spring Security uses the same convention to suppress its Basic challenge.
+
+Browser page loads are redirected to `/login`; other browser requests get 401
+without `WWW-Authenticate`. The upload panel, file list refresh, and Share
+dialog say the session has expired and ask for a reload.
+
+- `TestOnlyAPIClientsReceiveABasicChallenge` covers every endpoint that accepts
+  Basic credentials, with and without an expired session cookie, for API
+  clients, scripts, and navigations over HTTPS and HTTP. It also checks that
+  Basic credentials still work.
+- The browser-script tests check the header and the expired-session messages.
+
+Against a live server, in headless Chromium on both `127.0.0.1` and a LAN
+address, the Share dialog, an upload, and a download link after expiry raised
+no sign-in prompts and sent no `Authorization` headers. The upload was rejected,
+and the download link opened the sign-in page. On `main` over the LAN address,
+the same steps raised a prompt, and the upload succeeded with the stored
+password.
+
+A browser that already stored credentials before this change keeps sending
+them until it is restarted.
 
 ---
 

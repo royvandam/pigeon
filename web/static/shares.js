@@ -26,7 +26,7 @@
     updateControls(true);
     status.textContent = method === 'GET' ? 'Loading link…' : (action === 'create' ? 'Creating link…' : 'Revoking link…');
     try {
-      const options = {method, credentials: 'same-origin', signal: controller.signal, cache: 'no-store'};
+      const options = {method, credentials: 'same-origin', signal: controller.signal, cache: 'no-store', headers: {'X-Requested-With': 'XMLHttpRequest'}};
       let endpoint = '/shares?path=' + encodeURIComponent(path);
       if (method === 'POST') {
         endpoint = '/shares';
@@ -34,7 +34,7 @@
       }
       const response = await fetch(endpoint, options);
       if (!response.ok) {
-        if (response.status === 401) throw new Error('Your session has expired. Sign in and try again.');
+        if (response.status === 401) throw new Error('Your session has expired. Reload the page to sign in again.');
         throw new Error((await response.text()).trim() || 'Could not update the share link. Try again.');
       }
       const data = await response.json();

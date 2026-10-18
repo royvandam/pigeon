@@ -7,16 +7,22 @@
   const CSRF_TOKEN = settings.csrfToken;
   const CURRENT_DIRECTORY = settings.directory;
 
+  // Marks requests as coming from the browser, so an expired session gets a plain
+  // 401 instead of a Basic challenge and the browser's own sign-in prompt.
+  const BROWSER_HEADERS = {'X-Requested-With': 'XMLHttpRequest'};
+  const SESSION_EXPIRED = 'Your session has expired. Reload the page to sign in again.';
+
   const fileList = document.getElementById('fileList');
   const explorerMessage = document.getElementById('explorerMessage');
   async function refreshFiles() {
     try {
-      const response = await fetch('/files?dir=' + encodeURIComponent(CURRENT_DIRECTORY), {credentials: 'same-origin', cache: 'no-store'});
+      const response = await fetch('/files?dir=' + encodeURIComponent(CURRENT_DIRECTORY), {credentials: 'same-origin', cache: 'no-store', headers: BROWSER_HEADERS});
+      if (response.status === 401) throw new Error(SESSION_EXPIRED);
       if (!response.ok) throw new Error('file list unavailable');
       fileList.innerHTML = await response.text();
       explorerMessage.textContent = '';
     } catch (error) {
-      explorerMessage.textContent = 'The file list could not be refreshed. Reload the page to see your files.';
+      explorerMessage.textContent = error.message === SESSION_EXPIRED ? SESSION_EXPIRED : 'The file list could not be refreshed. Reload the page to see your files.';
     }
   }
 
@@ -153,6 +159,7 @@
     xhr.open("POST", "/upload?dir=" + encodeURIComponent(CURRENT_DIRECTORY), true);
 
     xhr.setRequestHeader("X-CSRF-Token", CSRF_TOKEN);
+    xhr.setRequestHeader("X-Requested-With", BROWSER_HEADERS['X-Requested-With']);
     // getRandomValues also works on local HTTP; randomUUID requires HTTPS.
     const uploadID = Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
     xhr.setRequestHeader("X-Upload-ID", uploadID);
@@ -222,7 +229,7 @@
       let terminal = false;
       try {
         const response = await fetch('/upload-progress?id=' + encodeURIComponent(uploadID), {
-          credentials: 'same-origin', cache: 'no-store', signal: controller.signal
+          credentials: 'same-origin', cache: 'no-store', signal: controller.signal, headers: BROWSER_HEADERS
         });
         if (stopped) return;
         if (response.ok) {
@@ -270,7 +277,7 @@
       } else {
         eta.textContent = "—";
         spd.textContent = "—";
-        phase.textContent = 'Upload failed: ' + (xhr.responseText.trim() || 'Please try again.');
+        phase.textContent = 'Upload failed: ' + (xhr.status === 401 ? SESSION_EXPIRED : (xhr.responseText.trim() || 'Please try again.'));
       }
 
       setDisabled(false);

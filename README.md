@@ -275,7 +275,15 @@ Authenticate using HTTP Basic authentication with a username and password:
 curl --user 'Roy Van Dijk' --form 'file=@document.pdf' http://127.0.0.1:8080/upload
 ```
 
-Curl prompts for the password. To preserve a directory hierarchy, set each part's
+Curl prompts for the password and sends it with the first request. Requests
+without valid credentials receive HTTP 401 with a Basic challenge, unless they
+identify as coming from a browser through Fetch Metadata headers,
+`Upgrade-Insecure-Requests`, or `X-Requested-With: XMLHttpRequest`. A browser
+would answer the challenge with its own sign-in prompt and then send that
+password with every request, bypassing the CSRF check and Sign out. Browsers
+instead get a plain 401, and page loads are redirected to the sign-in page.
+
+To preserve a directory hierarchy, set each part's
 filename to its slash-separated relative path:
 
 ```sh
