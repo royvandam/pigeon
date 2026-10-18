@@ -63,6 +63,10 @@ func (b *uploadBatch) checkPath(name string) error {
 	if err := validateStoragePath(name, false); err != nil {
 		return err
 	}
+	// Only the uploaded path is new; the destination folder may be older.
+	if err := validateNewName(name); err != nil {
+		return err
+	}
 	if _, exists := b.paths[name]; exists {
 		return fmt.Errorf("%w: duplicate or conflicting file path", errStoragePath)
 	}
