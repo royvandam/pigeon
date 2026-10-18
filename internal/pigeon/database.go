@@ -17,6 +17,8 @@ import (
 type store struct {
 	db          *sql.DB
 	uploadLocks sync.Map
+	// uploadSlots lets one upload per account stream at a time; see lockUploadSlot.
+	uploadSlots sync.Map
 	progress    sync.Map
 	authLimiter *authLimiter
 }

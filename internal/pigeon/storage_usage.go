@@ -30,9 +30,18 @@ func chargedSize(size, unit int64) int64 {
 // Measure stored entries on disk so existing files, removals, and restarts are
 // reflected without a separate database usage counter.
 func diskUsage(ctx context.Context, dir string, unit int64) (int64, error) {
+	return diskUsageExcept(ctx, dir, unit, "")
+}
+
+// diskUsageExcept leaves out the top-level entry skip, such as an upload's own
+// staging folder; an empty skip counts everything.
+func diskUsageExcept(ctx context.Context, dir string, unit int64, skip string) (int64, error) {
 	var used int64
+	skipped := filepath.Join(dir, skip)
 	err := filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
-		if errors.Is(err, os.ErrNotExist) && path == dir {
+		// Uploads stream into their staging folders without the account lock, so
+		// a failed upload may remove entries during the walk; they no longer count.
+		if errors.Is(err, os.ErrNotExist) {
 			return nil
 		}
 		if err != nil {
@@ -40,6 +49,12 @@ func diskUsage(ctx context.Context, dir string, unit int64) (int64, error) {
 		}
 		if err := ctx.Err(); err != nil {
 			return err
+		}
+		if skip != "" && path == skipped {
+			if entry.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
 		}
 		if entry.Type()&os.ModeSymlink != 0 {
 			return fmt.Errorf("upload folders cannot contain symbolic links")
@@ -51,6 +66,9 @@ func diskUsage(ctx context.Context, dir string, unit int64) (int64, error) {
 			}
 		} else {
 			info, err := entry.Info()
+			if errors.Is(err, os.ErrNotExist) {
+				return nil
+			}
 			if err != nil {
 				return err
 			}

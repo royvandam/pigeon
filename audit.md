@@ -30,7 +30,7 @@ Recommended order: A1, A5, A3, A4, A2, A6, then the rest.
 | [A7](#a7-expired-sessions-can-turn-into-stored-basic-credentials) | Low | Expired sessions can turn into stored Basic credentials | Fixed in #8 |
 | [A8](#a8-request-log-forging-and-share-token-redaction-bypass) | Low | Request log forging and share-token redaction bypass | Fixed in #9 |
 | [A9](#a9-bidirectional-and-invisible-characters-in-filenames) | Low | Bidirectional and invisible characters in filenames | Fixed in #10 |
-| [A10](#a10-no-body-read-deadline-uploads-hold-the-account-lock-throughout) | Low | No body read deadline; uploads hold the account lock throughout | Open |
+| [A10](#a10-no-body-read-deadline-uploads-hold-the-account-lock-throughout) | Low | No body read deadline; uploads hold the account lock throughout | Fixed in #11 |
 | [A11](#a11-share-tokens-are-stored-in-plaintext) | Info | Share tokens are stored in plaintext | Open |
 
 The reproductions assume a local instance at `http://127.0.0.1:8080` with an
@@ -550,7 +550,7 @@ shared, and its anonymous download suggested `invoicefdp.exe`.
 
 ## A10. No body read deadline; uploads hold the account lock throughout
 
-**Severity:** Low · **Status:** Open
+**Severity:** Low · **Status:** Fixed in #11 · *verified*
 
 **Location:** [internal/pigeon/server.go:33-38](internal/pigeon/server.go#L33-L38),
 [internal/pigeon/upload.go:51-62](internal/pigeon/upload.go#L51-L62)
@@ -568,6 +568,55 @@ and publication, not while streaming.
 
 **Done when:** a slow `/login` body is cut off after the deadline, a stalled
 upload releases the lock, and tests cover both.
+
+**Resolution:** request bodies have read deadlines, and uploads no longer hold
+the account lock while streaming.
+
+- **Forms:** every form body, including `/login`, must arrive within 30
+  seconds, or the request fails with HTTP 408.
+- **Uploads:** the read deadline is pushed back while data arrives, so long
+  uploads continue, but an upload that receives nothing for 60 seconds fails
+  with HTTP 408.
+- **Deadline cleanup:** deadlines are removed only after a body has been read
+  successfully. Testing showed why. After a failed request, Go's server reads
+  the rest of a small unread body before responding. With the deadline already
+  removed, that read waited forever for a stalled client, which also affected
+  uploads rejected for other reasons, such as quota.
+- **Locking:** the optional rework is done. An upload takes the account lock
+  only to check the quota and create its staging folder, and again to publish.
+  While the body streams into the private staging folder, it holds a new
+  per-account upload slot instead. The slot keeps an account's uploads one at
+  a time, so quota checks work as before. Purging and recycling take the slot
+  too, so they still wait for an upload and never race with its staging folder.
+- **Publishing:** before publishing, the upload rechecks what may have changed
+  meanwhile: the account (deleted or recycled gives 401), its quota, and its
+  usage without the upload's own staging folder (both give 413). The folder
+  charge is recomputed, and the destination is checked as before. The usage
+  walk now skips entries that vanish during the walk, because a failed upload
+  may remove its staging folder without the account lock.
+
+Tests:
+
+- `TestSlowRequestBodiesAreCutOff` uses real connections. It checks that a
+  stalled sign-in form and a stalled upload get 408, that the next upload
+  proceeds without leftover staging, and that a slow upload that keeps sending
+  data outlasts the idle timeout.
+- `TestAccountRequestsDoNotWaitForUploadBodies` replaces
+  `TestFileActionsWaitForActiveUpload`, which asserted the old lock. While an
+  upload body is pending, the explorer, a share link, and deleting the upload's
+  destination all proceed. The upload then fails with 404 without recreating
+  the folder.
+- `TestUploadsRecheckAccountAndQuotaBeforePublishing` lowers the quota,
+  creates folders, or deletes the account while an upload is pending.
+- The existing concurrent-quota, purge, and recycle tests pass unchanged.
+
+Against a live server:
+
+| | Before | After |
+| --- | --- | --- |
+| Same account's explorer page during a 5-second upload | 4.0 s | 11 ms |
+| Stalled `/login` body | no response after 90 s | 408 after 30 s |
+| Stalled upload | no response after 90 s | 408 after 60 s |
 
 ---
 

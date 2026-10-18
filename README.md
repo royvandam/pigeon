@@ -311,6 +311,12 @@ without these characters.
 Duplicate or conflicting paths within a request return HTTP 400. Conflicts with
 existing files or folders return HTTP 409 without saving any of the batch.
 
+An upload fails with HTTP 408 when no data arrives for 60 seconds; form
+submissions, including sign-in, must arrive within 30 seconds. An account's
+uploads are received one at a time, but its pages, share links, and file actions
+do not wait for them. The quota, destination folder, and account are checked
+again before an upload is published, so changes made meanwhile are respected.
+
 `GET /?dir=Archive/docs` opens the explorer. `GET /files?dir=Archive/docs`
 returns its HTML file-list fragment. `GET /download?path=Archive/docs/report.pdf`
 downloads a file; a directory path returns a ZIP, and an empty path downloads
@@ -439,7 +445,10 @@ Account changes are coordinated by `accountManager` in `accounts.go`; the SQLite
 store owns persistence and transactions. `userStorage` owns account filesystem
 paths, usage checks, and removal. `accountAccess` locks an account and rechecks
 its identity before both reads and writes; download handles release that lock
-before streaming.
+before streaming. Uploads hold the lock only to check the quota and to publish:
+while the body streams into the staging folder they hold the account's upload
+slot instead, which keeps uploads to one account one at a time. Purging and
+recycling take the slot as well. Request body deadlines live in `deadline.go`.
 
 HTTP handlers parse requests and render responses, using shared method,
 authentication, and error helpers. Explorer listing and file mutation rules live

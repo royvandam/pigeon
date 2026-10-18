@@ -187,7 +187,7 @@ func (s *store) recycleUser(ctx context.Context, id int64, password string) (use
 		return user{}, err
 	}
 	// Finish any work started before deletion before restoring this account.
-	unlock, err := s.lockUploads(ctx, id)
+	unlock, err := s.lockAccountAndUploads(ctx, id)
 	if err != nil {
 		return user{}, err
 	}

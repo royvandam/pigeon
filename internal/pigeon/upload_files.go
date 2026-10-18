@@ -22,6 +22,7 @@ type uploadBatch struct {
 	files     int
 	bytes     int64 // file contents received
 	charged   int64 // quota charge for those files and the folders they add
+	folders   int64 // folders included in charged
 	remaining int64 // quota available before this batch
 	unit      int64 // minimum charge per file and folder
 	progress  *uploadProgress
@@ -150,8 +151,29 @@ func (b *uploadBatch) add(name string, contents io.Reader) error {
 	b.files++
 	b.bytes += n
 	b.charged += folders*b.unit + chargedSize(n, b.unit)
+	b.folders += folders
 	b.names = append(b.names, name)
 	return nil
+}
+
+// currentCharge recomputes the batch's charge against the destination as it is
+// now. Uploads stream without the account lock, so folders may have been
+// created or removed since the files were added.
+func (b *uploadBatch) currentCharge() (int64, error) {
+	planned := map[string]bool{}
+	var folders int64
+	for _, name := range b.names {
+		for parent := path.Dir(name); parent != "." && !planned[parent]; parent = path.Dir(parent) {
+			planned[parent] = true
+			if _, err := storageInfo(b.root, path.Join(b.target, parent)); err == nil {
+				break
+			} else if !errors.Is(err, os.ErrNotExist) {
+				return 0, err
+			}
+			folders++
+		}
+	}
+	return b.charged + (folders-b.folders)*b.unit, nil
 }
 
 func (b *uploadBatch) publish() (string, bool, error) {
