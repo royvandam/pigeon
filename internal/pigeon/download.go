@@ -102,16 +102,17 @@ func (d *storedDownload) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	if d.folder != nil {
 		w.Header().Set("Content-Type", "application/zip")
-		w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": d.filename + ".zip"}))
+		name := downloadName(d.filename)
+		w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": name + ".zip"}))
 		if r.Method != http.MethodHead {
-			if err := writeFolderZip(r.Context(), w, d.folder, d.filename); err != nil {
+			if err := writeFolderZip(r.Context(), w, d.folder, name); err != nil {
 				log.Printf("folder download failed: %v", err)
 			}
 		}
 		return
 	}
 	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": d.filename}))
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": downloadName(d.filename)}))
 	http.ServeContent(w, r, d.filename, d.info.ModTime(), d.file)
 }
 

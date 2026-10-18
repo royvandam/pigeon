@@ -302,6 +302,12 @@ saved. Paths must be relative, use `/` separators, and contain no empty, `.` or
 `..` components, backslashes, Windows drive prefixes, or control characters. File and directory
 components may contain at most 255 bytes; full paths at most 4095 bytes. Names
 starting with `.upload-` are reserved for private staging and cannot be accessed.
+Uploaded paths, new folders, and renames also cannot contain invisible
+formatting characters (Unicode category Cf), such as right-to-left overrides
+that make `invoice`, U+202E, `fdp.exe` display as `invoiceexe.pdf`. Zero-width joiners and
+non-joiners are allowed, because some scripts and emoji need them. Items stored
+earlier with such names remain accessible, and downloads suggest their names
+without these characters.
 Duplicate or conflicting paths within a request return HTTP 400. Conflicts with
 existing files or folders return HTTP 409 without saving any of the batch.
 

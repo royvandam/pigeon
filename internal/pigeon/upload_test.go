@@ -8,6 +8,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -200,5 +201,51 @@ func TestSharedPasswordHeaderNoLongerAuthenticates(t *testing.T) {
 	cfg.handleUpload(w, r)
 	if w.Code != http.StatusUnauthorized || body.read {
 		t.Fatalf("legacy password header accepted: status %d, body read %t", w.Code, body.read)
+	}
+}
+
+func TestUploadsRejectHiddenFormatCharactersInNewNames(t *testing.T) {
+	cfg := newTestConfig(t, 1000)
+	rightToLeftOverride := string(rune(0x202E))
+	writeStoredFile(t, cfg, "test-user", "old"+rightToLeftOverride+"txt.folder/kept.txt", "older upload")
+	upload := func(filename, directory string) *httptest.ResponseRecorder {
+		t.Helper()
+		r := uploadRequest(t, filename, "data")
+		r.URL.RawQuery = url.Values{"dir": {directory}}.Encode()
+		w := httptest.NewRecorder()
+		cfg.handleUpload(w, r)
+		return w
+	}
+	for _, name := range []string{
+		"invoice" + rightToLeftOverride + "fdp.exe",
+		"folder" + string(rune(0x2066)) + "/file.txt", // Left-to-right isolate.
+		"report" + string(rune(0x200B)) + ".pdf",      // Zero-width space.
+		string(rune(0xFEFF)) + "notes.txt",            // Byte order mark.
+		"tag" + string(rune(0xE0041)) + ".txt",        // Tag character.
+	} {
+		if w := upload(name, ""); w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "invisible formatting characters") {
+			t.Errorf("upload %q: %d %s; want 400", name, w.Code, w.Body)
+		}
+	}
+	files, err := readUploadDir(cfg.dir, "test-user")
+	if err != nil || len(files) != 1 {
+		t.Fatalf("rejected uploads stored files: %v, %v", files, err)
+	}
+
+	// Scripts and emoji that need zero-width (non-)joiners still work, as do
+	// uploads into a folder created before the rule existed.
+	persian := "نیم" + string(rune(0x200C)) + "فاصله.txt"
+	family := "👨" + string(rune(0x200D)) + "👩" + string(rune(0x200D)) + "👧.txt"
+	for _, tt := range []struct{ name, directory string }{
+		{persian, ""},
+		{family, ""},
+		{"new.txt", "old" + rightToLeftOverride + "txt.folder"},
+	} {
+		if w := upload(tt.name, tt.directory); w.Code != http.StatusOK {
+			t.Errorf("upload %q into %q: %d %s", tt.name, tt.directory, w.Code, w.Body)
+		}
+		if _, err := os.Stat(filepath.Join(cfg.dir, "test-user", tt.directory, tt.name)); err != nil {
+			t.Errorf("upload %q was not stored: %v", tt.name, err)
+		}
 	}
 }

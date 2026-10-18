@@ -1,8 +1,11 @@
 package pigeon
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"errors"
+	"mime"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -228,5 +231,83 @@ func TestExplorerAccountIsolationAndCSRF(t *testing.T) {
 	}
 	if data, err := os.ReadFile(filepath.Join(cfg.dir, "test-user", "visible.txt")); err != nil || string(data) != "mine" {
 		t.Fatalf("rejected deletion changed file: %q, %v", data, err)
+	}
+}
+
+func TestNewNamesRejectHiddenFormatCharactersAndOlderNamesStayAccessible(t *testing.T) {
+	cfg := newTestConfig(t, 1000)
+	cookie, csrf := sessionFor(t, cfg, "Test User")
+	handler := newServer(cfg).Handler
+	rightToLeftOverride := string(rune(0x202E))
+	spoofed := "invoice" + rightToLeftOverride + "fdp.exe" // Displays as invoiceexe.pdf.
+	folder := "old" + rightToLeftOverride + "redlof"
+	writeStoredFile(t, cfg, "test-user", spoofed, "older upload")
+	writeStoredFile(t, cfg, "test-user", folder+"/inside.txt", "inside")
+	writeStoredFile(t, cfg, "test-user", "plain.txt", "plain")
+	action := func(form url.Values) *httptest.ResponseRecorder {
+		t.Helper()
+		form.Set("csrf_token", csrf)
+		return serve(handler, formRequest("/files", form, cookie))
+	}
+	get := func(target string) *httptest.ResponseRecorder {
+		t.Helper()
+		r := httptest.NewRequest(http.MethodGet, target, nil)
+		r.AddCookie(cookie)
+		return serve(handler, r)
+	}
+
+	for _, form := range []url.Values{
+		{"action": {"mkdir"}, "name": {"new" + rightToLeftOverride + "folder"}},
+		{"action": {"mkdir"}, "name": {"isolate" + string(rune(0x2067))}},
+		{"action": {"mkdir"}, "name": {"zero" + string(rune(0x200B)) + "width"}},
+		{"action": {"rename"}, "path": {"plain.txt"}, "name": {"plain" + rightToLeftOverride + "txt.exe"}},
+		{"action": {"rename"}, "path": {spoofed}, "name": {spoofed + "2"}},
+	} {
+		if w := action(form); w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "invisible formatting characters") {
+			t.Errorf("action %q: %d %s; want 400", form, w.Code, w.Body)
+		}
+	}
+	for _, name := range []string{"نیم" + string(rune(0x200C)) + "فاصله", "👩" + string(rune(0x200D)) + "💻"} {
+		if w := action(url.Values{"action": {"mkdir"}, "name": {name}}); w.Code != http.StatusSeeOther {
+			t.Errorf("mkdir %q: %d %s", name, w.Code, w.Body)
+		}
+	}
+
+	// Files stored before the rule are listed, downloaded under a cleaned name,
+	// shared, and can be moved, renamed to a safe name, or deleted.
+	if w := get("/files"); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), spoofed) {
+		t.Fatalf("listing older names: %d", w.Code)
+	}
+	w := get("/download?" + url.Values{"path": {spoofed}}.Encode())
+	_, params, err := mime.ParseMediaType(w.Header().Get("Content-Disposition"))
+	if w.Code != http.StatusOK || w.Body.String() != "older upload" || params["filename"] != "invoicefdp.exe" || err != nil {
+		t.Fatalf("download of an older name: %d, %q, %v", w.Code, w.Header().Get("Content-Disposition"), err)
+	}
+	w = get("/download?" + url.Values{"path": {folder}}.Encode())
+	_, params, err = mime.ParseMediaType(w.Header().Get("Content-Disposition"))
+	if w.Code != http.StatusOK || params["filename"] != "oldredlof.zip" || err != nil {
+		t.Fatalf("folder download of an older name: %d, %q, %v", w.Code, w.Header().Get("Content-Disposition"), err)
+	}
+	archive, err := zip.NewReader(bytes.NewReader(w.Body.Bytes()), int64(w.Body.Len()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range archive.File {
+		if strings.ContainsRune(file.Name, 0x202E) {
+			t.Errorf("folder archive entry keeps the override: %q", file.Name)
+		}
+	}
+	if w := get("/shares?" + url.Values{"path": {spoofed}}.Encode()); w.Code != http.StatusOK {
+		t.Fatalf("share lookup for an older name: %d %s", w.Code, w.Body)
+	}
+	for _, form := range []url.Values{
+		{"action": {"mkdir"}, "dir": {folder}, "name": {"sub"}},
+		{"action": {"move"}, "path": {spoofed}, "destination": {folder}},
+		{"action": {"rename"}, "path": {folder + "/" + spoofed}, "name": {"invoice.exe"}},
+		{"action": {"delete"}, "path": {folder}},
+	} {
+		if w := action(form); w.Code != http.StatusSeeOther {
+			t.Errorf("action %q on an older name: %d %s", form, w.Code, w.Body)
+		}
 	}
 }

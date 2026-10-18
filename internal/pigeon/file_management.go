@@ -13,7 +13,10 @@ func validateEntryName(name string) error {
 	if strings.ContainsRune(name, '/') {
 		return fmt.Errorf("%w: enter a name without folder separators", errStoragePath)
 	}
-	return validateStoragePath(name, false)
+	if err := validateStoragePath(name, false); err != nil {
+		return err
+	}
+	return validateNewName(name)
 }
 
 func manageFile(root *os.Root, action, directory, source, name, destination string, beforeMutation func() error) error {

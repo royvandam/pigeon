@@ -29,7 +29,7 @@ Recommended order: A1, A5, A3, A4, A2, A6, then the rest.
 | [A6](#a6-no-content-security-policy-or-framing-protection) | Low | No Content Security Policy or framing protection | Fixed in #4 |
 | [A7](#a7-expired-sessions-can-turn-into-stored-basic-credentials) | Low | Expired sessions can turn into stored Basic credentials | Fixed in #8 |
 | [A8](#a8-request-log-forging-and-share-token-redaction-bypass) | Low | Request log forging and share-token redaction bypass | Fixed in #9 |
-| [A9](#a9-bidirectional-and-invisible-characters-in-filenames) | Low | Bidirectional and invisible characters in filenames | Open |
+| [A9](#a9-bidirectional-and-invisible-characters-in-filenames) | Low | Bidirectional and invisible characters in filenames | Fixed in #10 |
 | [A10](#a10-no-body-read-deadline-uploads-hold-the-account-lock-throughout) | Low | No body read deadline; uploads hold the account lock throughout | Open |
 | [A11](#a11-share-tokens-are-stored-in-plaintext) | Info | Share tokens are stored in plaintext | Open |
 
@@ -495,7 +495,7 @@ fix, the first reproduction forged a `POST /admin` line, and `//s/<token>` and
 
 ## A9. Bidirectional and invisible characters in filenames
 
-**Severity:** Low · **Status:** Open
+**Severity:** Low · **Status:** Fixed in #10 · *verified*
 
 **Location:** [internal/pigeon/filename.go:16-29](internal/pigeon/filename.go#L16-L29),
 compare [internal/pigeon/users.go:46](internal/pigeon/users.go#L46)
@@ -503,7 +503,7 @@ compare [internal/pigeon/users.go:46](internal/pigeon/users.go#L46)
 Upload paths reject only control characters (`unicode.IsControl`, category Cc).
 Usernames also reject invisible formatting characters (category Cf). Filenames
 can therefore contain right-to-left override characters: a shared file named
-`invoice‮fdp.exe` displays as `invoiceexe.pdf` to the person downloading it.
+`invoice`, U+202E, `fdp.exe` displays as `invoiceexe.pdf` to the person downloading it.
 
 **Fix:** reject `unicode.Cf` characters in `validateUploadPath`, or at least the
 bidirectional controls U+202A–U+202E and U+2066–U+2069. The same validation
@@ -512,6 +512,39 @@ covers rename and mkdir through `validateStoragePath`.
 **Done when:** uploads, renames, and new folders containing those characters
 return HTTP 400, covered by tests in `upload_test.go` and `files_test.go`.
 Existing files with such names stay accessible.
+
+**Resolution:** new names reject category Cf characters, except the zero-width
+non-joiner (U+200C) and joiner (U+200D).
+
+- **Where:** the check applies to names being created: upload paths, new
+  folders, and renames. It does not go in `validateUploadPath` or
+  `validateStoragePath` as suggested, because those also validate paths to
+  existing items for downloads, shares, moves, deletes, and upload
+  destinations. Placing it there would have made older files unreachable.
+- **Which characters:** besides the bidirectional controls, Cf includes other
+  invisible characters, such as the zero-width space, byte order mark, and tag
+  characters. Persian and Indic scripts need U+200C and U+200D to render words
+  correctly, and emoji sequences need U+200D, so those two stay allowed.
+- **Older files:** downloads, including share links and folder ZIPs, now
+  suggest the name without these characters. A file stored earlier as
+  `invoice`, U+202E, `fdp.exe` therefore downloads as `invoicefdp.exe`, which
+  closes the spoof for files uploaded before this change. Names inside a folder
+  ZIP are kept as stored, because removing characters could make two entries
+  collide.
+
+Tests in `upload_test.go` and `files_test.go` cover:
+
+- rejected uploads (including a folder component), new folders, and renames,
+  for a right-to-left override, an isolate, a zero-width space, a byte order
+  mark, and a tag character;
+- accepted Persian and emoji names;
+- older items that are listed, downloaded under the cleaned name (file and
+  folder ZIP), shared, uploaded into, moved, renamed to a safe name, and
+  deleted.
+
+Against a live server, an upload named `invoice`, U+202E, `fdp.exe` was
+rejected with HTTP 400. The same name placed directly on disk could still be
+shared, and its anonymous download suggested `invoicefdp.exe`.
 
 ---
 
