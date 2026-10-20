@@ -9,6 +9,15 @@
     line-height: inherit;
   }
 
+  .login-logo {
+    display: block;
+    width: 15rem;
+    max-width: 100%;
+    height: auto;
+    margin: 0 auto 1.5rem;
+    border-radius: 0.75rem;
+  }
+
   .nav-link {
     color: #a1a1aa;
     cursor: pointer;

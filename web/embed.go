@@ -9,5 +9,5 @@ import "embed"
 
 // Assets contains the templates and browser assets included in the executable.
 //
-//go:embed templates/*.html static/*.js static/*.css static/fontawesome
+//go:embed templates/*.html static/*.js static/*.css static/*.webp static/fontawesome
 var Assets embed.FS
