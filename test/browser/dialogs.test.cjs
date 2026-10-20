@@ -62,8 +62,8 @@ function page(options = {}) {
     fields() { return Object.fromEntries(elements.get('actionDialogFields').children.map(field => [field.name, field.value])); },
     focused() { return focused; },
     cancel() { elements.get('actionDialogCancel').dispatch('click'); },
-    async reply(index, url = '', status = 200) {
-      requests[index].resolve({ok: status === 200, status, async json() { return {url}; }, async text() { return 'Operation failed'; }});
+    async reply(index, url = '', status = 200, active = Boolean(url)) {
+      requests[index].resolve({ok: status === 200, status, async json() { return {url, active}; }, async text() { return 'Operation failed'; }});
       for (let i = 0; i < 10; i++) await Promise.resolve();
     },
     submit() { const event = {prevented: false, preventDefault() {this.prevented = true;}}; elements.get('actionDialogForm').dispatch('submit', event); return event; }
@@ -271,7 +271,9 @@ test('sharing explicitly creates, copies and revokes a link in the existing dial
   assert.equal(p.requests[1].options.body.get('csrf_token'), 'a'.repeat(43));
   await p.reply(1, '/s/secret-token');
   assert.equal(p.elements.get('shareURL').value, 'https://uploads.example/s/secret-token');
+  assert.match(p.elements.get('shareStatus').textContent, /will not be shown again/);
   assert.equal(p.elements.get('shareCreate').hidden, true);
+  assert.equal(p.elements.get('shareReplace').hidden, true);
   assert.equal(p.elements.get('shareRevoke').hidden, false);
   await p.elements.get('shareCopy').dispatch('click');
   assert.deepEqual(p.clipboard, ['https://uploads.example/s/secret-token']);
@@ -280,6 +282,8 @@ test('sharing explicitly creates, copies and revokes a link in the existing dial
   await p.reply(2);
   assert.equal(p.elements.get('shareURL').value, '');
   assert.equal(p.elements.get('shareCopy').disabled, true);
+  assert.equal(p.elements.get('shareCreate').hidden, false);
+  assert.equal(p.elements.get('shareRevoke').hidden, true);
   assert.match(p.elements.get('shareStatus').textContent, /no longer works/);
   p.cancel();
   p.open('rename');
@@ -288,15 +292,29 @@ test('sharing explicitly creates, copies and revokes a link in the existing dial
   assert.equal(p.submit().prevented, false);
 });
 
-test('existing shares are reused and clipboard failures select the link for manual copying', async () => {
+test('existing links stay hidden, can be replaced, and clipboard failures select the new link', async () => {
   const p = page({clipboardBlocked: true});
   p.open('share', {directory: 'true'});
   assert.match(p.elements.get('actionDialogDescription').textContent, /ZIP, including files added later/);
-  await p.reply(0, '/s/existing-token');
+  await p.reply(0, '', 200, true);
+  assert.equal(p.elements.get('shareURL').value, '');
+  assert.equal(p.elements.get('shareURL').placeholder, 'Hidden after creation');
+  assert.match(p.elements.get('shareStatus').textContent, /current one will stop working/);
+  assert.equal(p.elements.get('shareCopy').disabled, true);
+  assert.equal(p.elements.get('shareCreate').hidden, true);
+  assert.equal(p.elements.get('shareReplace').hidden, false);
+  assert.equal(p.elements.get('shareRevoke').hidden, false);
+  p.elements.get('shareReplace').dispatch('click');
+  assert.equal(p.elements.get('shareStatus').textContent, 'Replacing link…');
+  assert.equal(p.requests[1].options.body.get('action'), 'create');
+  await p.reply(1, '/s/replacement-token');
+  assert.equal(p.elements.get('shareURL').value, 'https://uploads.example/s/replacement-token');
+  assert.equal(p.elements.get('shareURL').placeholder, '');
+  assert.equal(p.elements.get('shareReplace').hidden, true);
   await p.elements.get('shareCopy').dispatch('click');
   assert.equal(p.elements.get('shareURL').selected, true);
   assert.match(p.elements.get('shareStatus').textContent, /Copy it from the field/);
-  assert.equal(p.requests.length, 1);
+  assert.equal(p.requests.length, 2);
 });
 
 test('late sharing responses cannot overwrite a newly opened item or edit dialog', async () => {

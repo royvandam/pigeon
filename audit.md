@@ -31,7 +31,7 @@ Recommended order: A1, A5, A3, A4, A2, A6, then the rest.
 | [A8](#a8-request-log-forging-and-share-token-redaction-bypass) | Low | Request log forging and share-token redaction bypass | Fixed in #9 |
 | [A9](#a9-bidirectional-and-invisible-characters-in-filenames) | Low | Bidirectional and invisible characters in filenames | Fixed in #10 |
 | [A10](#a10-no-body-read-deadline-uploads-hold-the-account-lock-throughout) | Low | No body read deadline; uploads hold the account lock throughout | Fixed in #11 |
-| [A11](#a11-share-tokens-are-stored-in-plaintext) | Info | Share tokens are stored in plaintext | Open |
+| [A11](#a11-share-tokens-are-stored-in-plaintext) | Info | Share tokens are stored in plaintext | Fixed in #12 |
 
 The reproductions assume a local instance at `http://127.0.0.1:8080` with an
 administrator named `admin`, started from a scratch directory so `uploads/` is
@@ -622,7 +622,7 @@ Against a live server:
 
 ## A11. Share tokens are stored in plaintext
 
-**Severity:** Informational · **Status:** Open
+**Severity:** Informational · **Status:** Fixed in #12 · *verified*
 
 **Location:** [internal/pigeon/database.go:105-112](internal/pigeon/database.go#L105-L112),
 [internal/pigeon/shares.go:37-54](internal/pigeon/shares.go#L37-L54)
@@ -637,6 +637,45 @@ must be protected like the files themselves.
 
 **Done when:** a decision is recorded here, and the code or the README is
 updated to match.
+
+**Decision:** store only a hash, and show the link once at creation.
+
+**Resolution:**
+
+- **Storage:** the `shares` table stores `token_hash`, a SHA-256 hash computed
+  with the same `tokenHash` as sessions. Public downloads hash the presented
+  token before looking it up.
+- **Upgrade:** on start, an older database has each plaintext token replaced by
+  its hash and the column renamed, in the same transaction as the other schema
+  migrations. Existing links keep working.
+- **Share dialog:** the URL is shown once, right after **Create link**, with a
+  note to copy it then. Reopening the dialog shows that a link is active, with
+  the field reading "Hidden after creation", and offers a new **Replace link**
+  button or **Revoke link**. Replacing issues a new URL and disables the old
+  one.
+- **API:** `GET /shares` returns `{"url":"","active":true|false}`.
+  `POST action=create` returns the new URL and replaces any existing link for
+  the item, where it used to return the existing URL. The README documents the
+  change.
+
+Tests:
+
+- `shares_test.go` checks that the database holds only the hash, that the
+  status reports an active link without its URL, and that creating again
+  replaces the link and disables the old URL.
+- `TestPlaintextShareTokensAreHashedOnUpgrade` builds the old table with a
+  plaintext token and checks that after the upgrade, and after a second start,
+  the stored value is the hash and the old link still downloads.
+- The purge, recycle, and browser-script tests were updated for the new column
+  and dialog states.
+
+Against a live server:
+
+- In headless Chromium, creating a link showed its URL once. Reopening the
+  dialog offered **Replace link** and **Revoke link**. After replacing, the old
+  URL returned 404 and the new one 200. Only a 64-character hash was stored.
+- A link created by the previous release on the same database still downloaded
+  after starting this version, and its row now holds the hash.
 
 ---
 
@@ -654,9 +693,9 @@ the rest of the application safe:
   `innerHTML` receives server-escaped HTML.
 - POST requests require a CSRF token (compared in constant time) and pass the
   Origin and Sec-Fetch-Site checks.
-- Session tokens are stored hashed; `auth_version` invalidates sessions on
-  password reset and recycling; `AUTOINCREMENT` prevents reusing a purged
-  account's ID.
+- Session and share tokens are stored hashed; `auth_version` invalidates
+  sessions on password reset and recycling; `AUTOINCREMENT` prevents reusing a
+  purged account's ID.
 - Login for an unknown username runs bcrypt against a valid cost-10 dummy hash,
   so its timing matches a wrong password.
 - All SQL uses parameters; share revocation matches path prefixes exactly

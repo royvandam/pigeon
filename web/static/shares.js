@@ -4,27 +4,39 @@
   const input = document.getElementById('shareURL');
   const status = document.getElementById('shareStatus');
   const create = document.getElementById('shareCreate');
+  const replace = document.getElementById('shareReplace');
   const revoke = document.getElementById('shareRevoke');
   const copy = document.getElementById('shareCopy');
   const csrf = dialog.dataset.csrfToken;
   let path = '';
+  // The server stores only a hash of each link, so an existing link's URL is
+  // known only in the response that created it.
+  let active = false;
   let version = 0;
   let controller;
 
   function updateControls(busy) {
-    const shared = input.value !== '';
-    create.hidden = shared;
-    revoke.hidden = !shared;
-    create.disabled = revoke.disabled = busy;
-    copy.disabled = busy || !shared;
+    const shown = input.value !== '';
+    create.hidden = active;
+    replace.hidden = !active || shown;
+    revoke.hidden = !active;
+    create.disabled = replace.disabled = revoke.disabled = busy;
+    copy.disabled = busy || !shown;
   }
 
-  async function request(method, action = '') {
+  function describe(action) {
+    if (input.value) return 'Copy this link now; it will not be shown again. Anyone with it can download without signing in.';
+    if (active) return 'A link is active. Its URL was shown only when it was created. Replace it to get a new URL; the current one will stop working.';
+    if (action === 'revoke') return 'Link revoked. The previous URL no longer works.';
+    return 'No active link. Choose Create link to enable sharing.';
+  }
+
+  async function request(method, action = '', progress = '') {
     controller?.abort();
     controller = new AbortController();
     const current = ++version;
     updateControls(true);
-    status.textContent = method === 'GET' ? 'Loading link…' : (action === 'create' ? 'Creating link…' : 'Revoking link…');
+    status.textContent = progress || (method === 'GET' ? 'Loading link…' : (action === 'create' ? 'Creating link…' : 'Revoking link…'));
     try {
       const options = {method, credentials: 'same-origin', signal: controller.signal, cache: 'no-store', headers: {'X-Requested-With': 'XMLHttpRequest'}};
       let endpoint = '/shares?path=' + encodeURIComponent(path);
@@ -39,8 +51,10 @@
       }
       const data = await response.json();
       if (current !== version || !dialog.open || panel.hidden) return;
+      active = Boolean(data.active || data.url);
       input.value = data.url ? new URL(data.url, window.location.origin).href : '';
-      status.textContent = input.value ? 'Anyone with this link can download without signing in.' : (action === 'revoke' ? 'Link revoked. The previous URL no longer works.' : 'No active link. Choose Create link to enable sharing.');
+      input.placeholder = active && !input.value ? 'Hidden after creation' : '';
+      status.textContent = describe(action);
       if (action === 'create') {
         input.focus();
         input.select();
@@ -54,7 +68,8 @@
 
   dialog.addEventListener('share', event => {
     path = event.detail.path;
-    input.value = '';
+    active = false;
+    input.value = input.placeholder = '';
     request('GET');
   });
   dialog.addEventListener('close', () => {
@@ -63,6 +78,7 @@
     controller?.abort();
   });
   create.addEventListener('click', () => request('POST', 'create'));
+  replace.addEventListener('click', () => request('POST', 'create', 'Replacing link…'));
   revoke.addEventListener('click', () => request('POST', 'revoke'));
   copy.addEventListener('click', async () => {
     const current = version;

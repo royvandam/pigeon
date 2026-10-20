@@ -93,11 +93,15 @@ as attachments; folders download as ZIPs containing their current contents,
 including files added after the link was created. Opening the Share dialog does
 not enable sharing until you choose **Create link**.
 
-Each item has one reusable link. Links are stored in SQLite, survive restarts,
-and do not expire automatically. Open **Share** again to copy the existing link
-or choose **Revoke link**. Creating another link after revocation generates a
-different URL; the old URL remains disabled. If clipboard access is unavailable,
-the dialog selects the URL so you can copy it manually.
+Each item has at most one link. Links survive restarts and do not expire
+automatically. Only a SHA-256 hash of each link's token is stored, like session
+tokens, so a leaked database or backup does not reveal working links. The URL
+is therefore shown only once, right after **Create link**; copy it then.
+Opening **Share** again shows that a link is active and offers **Replace link**,
+which creates a new URL and disables the old one, or **Revoke link**. If
+clipboard access is unavailable, the dialog selects the URL so you can copy it
+manually. Databases from earlier versions are upgraded on start: their links
+keep working, and their tokens are replaced by hashes.
 
 Renaming, moving, or deleting an item revokes links to that item and its
 descendants, so recreating an old path cannot expose replacement files. Deleting
@@ -323,11 +327,13 @@ downloads a file; a directory path returns a ZIP, and an empty path downloads
 the entire user folder. These endpoints require authentication and can only
 access the authenticated user's files. Symbolic links are rejected.
 
-`GET /shares?path=Archive/docs/report.pdf` returns `{"url":"/s/<token>"}`
-for an existing link or `{"url":""}` when sharing is disabled.
-`POST /shares` accepts URL-encoded `action=create` or `action=revoke`, plus
-`path`. Both endpoints require authentication and manage only the signed-in
-user's links. Session-authenticated POSTs also require `csrf_token`, like other
+`GET /shares?path=Archive/docs/report.pdf` returns `{"url":"","active":true}`
+when the item has a link, or `"active":false` when it does not; the URL of an
+existing link is not stored and cannot be returned. `POST /shares` accepts
+URL-encoded `action=create` or `action=revoke`, plus `path`. `create` returns
+`{"url":"/s/<token>","active":true}` with a new link, replacing any existing
+link for that item. Both endpoints require authentication and manage only the
+signed-in user's links. Session-authenticated POSTs also require `csrf_token`, like other
 file operations. The path must name a file or folder; sharing the account root
 is not supported.
 

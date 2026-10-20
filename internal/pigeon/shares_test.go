@@ -34,6 +34,22 @@ func shareRequest(t *testing.T, cfg config, cookie *http.Cookie, csrf, action, n
 	return response.URL
 }
 
+// shareStatus returns what the Share dialog loads for name.
+func shareStatus(t *testing.T, cfg config, cookie *http.Cookie, name string) (string, bool) {
+	t.Helper()
+	r := httptest.NewRequest(http.MethodGet, "/shares?"+url.Values{"path": {name}}.Encode(), nil)
+	r.AddCookie(cookie)
+	w := serve(newServer(cfg).Handler, r)
+	var response struct {
+		URL    string `json:"url"`
+		Active bool   `json:"active"`
+	}
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &response) != nil {
+		t.Fatalf("share status %q: %d, %s", name, w.Code, w.Body)
+	}
+	return response.URL, response.Active
+}
+
 func publicDownload(cfg config, method, link string) *httptest.ResponseRecorder {
 	w := httptest.NewRecorder()
 	newServer(cfg).Handler.ServeHTTP(w, httptest.NewRequest(method, link, nil))
@@ -50,9 +66,23 @@ func TestShareFileLifecycleAndAnonymousDownload(t *testing.T) {
 	if !strings.HasPrefix(link, "/s/") || len(strings.TrimPrefix(link, "/s/")) != 43 || strings.Contains(link, "résumé") {
 		t.Fatalf("share link does not contain a random token: %q", link)
 	}
-	if got := shareRequest(t, cfg, cookie, csrf, "create", filename); got != link {
-		t.Fatalf("repeated create changed the link: %s != %s", got, link)
+	// Only a hash is stored, so the URL is not shown again; creating a link
+	// again replaces it, and the previous URL stops working.
+	var stored string
+	if err := cfg.store.db.QueryRow(`SELECT token_hash FROM shares`).Scan(&stored); err != nil || stored != tokenHash(strings.TrimPrefix(link, "/s/")) {
+		t.Fatalf("stored share token = %q, %v; want its hash", stored, err)
 	}
+	if got, active := shareStatus(t, cfg, cookie, filename); got != "" || !active {
+		t.Fatalf("share status after creation = %q, %v; want an active link without its URL", got, active)
+	}
+	replaced := shareRequest(t, cfg, cookie, csrf, "create", filename)
+	if replaced == link || !strings.HasPrefix(replaced, "/s/") {
+		t.Fatalf("creating again did not replace the link: %s", replaced)
+	}
+	if got := publicDownload(cfg, http.MethodGet, link).Code; got != http.StatusNotFound {
+		t.Fatalf("replaced link still works: %d", got)
+	}
+	link = replaced
 	for _, method := range []string{http.MethodGet, http.MethodHead} {
 		w := publicDownload(cfg, method, link+"?path=private.txt&user_id=999")
 		kind, params, err := mime.ParseMediaType(w.Header().Get("Content-Disposition"))
@@ -76,6 +106,9 @@ func TestShareFileLifecycleAndAnonymousDownload(t *testing.T) {
 	}
 	if got := shareRequest(t, cfg, cookie, csrf, "revoke", filename); got != "" {
 		t.Fatalf("revoke left an active link: %q", got)
+	}
+	if _, active := shareStatus(t, cfg, cookie, filename); active {
+		t.Fatal("share status after revoking reports an active link")
 	}
 	if got := publicDownload(cfg, http.MethodGet, link).Code; got != http.StatusNotFound {
 		t.Fatalf("revoked link still works: %d", got)
@@ -267,8 +300,62 @@ func TestSharesSurviveRestartAndOlderDatabasesGainTheTable(t *testing.T) {
 	if w := publicDownload(cfg, http.MethodGet, link); w.Code != http.StatusOK || w.Body.String() != "shared" {
 		t.Fatalf("restart invalidated a share: %d, %s", w.Code, w.Body)
 	}
-	if got := shareRequest(t, cfg, cookie, csrf, "create", "readme.txt"); got != link {
-		t.Fatalf("restart changed a share URL: %s", got)
+	if got, active := shareStatus(t, cfg, cookie, "readme.txt"); got != "" || !active {
+		t.Fatalf("share status after restart = %q, %v", got, active)
+	}
+}
+
+func TestPlaintextShareTokensAreHashedOnUpgrade(t *testing.T) {
+	cfg := newTestConfig(t, 100)
+	cookie, _ := sessionFor(t, cfg, "Test User")
+	writeStoredFile(t, cfg, "test-user", "readme.txt", "shared")
+	ctx := context.Background()
+	var dbPath string
+	if err := cfg.store.db.QueryRow(`SELECT file FROM pragma_database_list WHERE name = 'main'`).Scan(&dbPath); err != nil {
+		t.Fatal(err)
+	}
+	// Recreate the table as older versions stored it, with a plaintext token.
+	token := strings.Repeat("Q", 43)
+	for _, statement := range []string{
+		`DROP TABLE shares`,
+		`CREATE TABLE shares (token TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  path TEXT NOT NULL, is_directory INTEGER NOT NULL CHECK (is_directory IN (0, 1)), created_at INTEGER NOT NULL, UNIQUE (user_id, path))`,
+		`INSERT INTO shares (token, user_id, path, is_directory, created_at) SELECT '` + token + `', id, 'readme.txt', 0, 0 FROM users`,
+	} {
+		if _, err := cfg.store.db.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := cfg.store.db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err := openStore(ctx, dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.db.Close()
+	cfg.store = s
+	var stored string
+	if err := s.db.QueryRow(`SELECT token_hash FROM shares`).Scan(&stored); err != nil || stored != tokenHash(token) {
+		t.Fatalf("upgraded share token = %q, %v; want its hash", stored, err)
+	}
+	if w := publicDownload(cfg, http.MethodGet, "/s/"+token); w.Code != http.StatusOK || w.Body.String() != "shared" {
+		t.Fatalf("upgrade broke an existing link: %d, %s", w.Code, w.Body)
+	}
+	if got, active := shareStatus(t, cfg, cookie, "readme.txt"); got != "" || !active {
+		t.Fatalf("share status after upgrade = %q, %v", got, active)
+	}
+	// Opening the upgraded database again leaves the hashes alone.
+	if err := s.db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if s, err = openStore(ctx, dbPath); err != nil {
+		t.Fatal(err)
+	}
+	defer s.db.Close()
+	cfg.store = s
+	if w := publicDownload(cfg, http.MethodGet, "/s/"+token); w.Code != http.StatusOK {
+		t.Fatalf("second start broke an upgraded link: %d", w.Code)
 	}
 }
 
