@@ -15,6 +15,7 @@ var assetContentTypes = map[string]string{
 	".css":   "text/css; charset=utf-8",
 	".js":    "text/javascript; charset=utf-8",
 	".txt":   "text/plain; charset=utf-8",
+	".webp":  "image/webp",
 	".woff2": "font/woff2",
 }
 

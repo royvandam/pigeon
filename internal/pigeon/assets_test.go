@@ -16,6 +16,7 @@ func TestAssetsServeEmbeddedCodeWithoutAuthentication(t *testing.T) {
 		"dialog.js": "text/javascript; charset=utf-8", "shares.js": "text/javascript; charset=utf-8",
 		"validation.js": "text/javascript; charset=utf-8", "upload.js": "text/javascript; charset=utf-8",
 		"styles.css": "text/css; charset=utf-8", "tailwind.css": "text/css; charset=utf-8",
+		"logo.webp":                               "image/webp",
 		"fontawesome/css/fontawesome.min.css":     "text/css; charset=utf-8",
 		"fontawesome/css/solid.min.css":           "text/css; charset=utf-8",
 		"fontawesome/webfonts/fa-solid-900.woff2": "font/woff2",
