@@ -22,6 +22,7 @@ type store struct {
 	uploadSlots sync.Map
 	progress    sync.Map
 	authLimiter *authLimiter
+	passwords   passwordHasher
 }
 
 type settings struct {
@@ -49,8 +50,14 @@ func (s settings) validate() error {
 	return err
 }
 
-func openStore(ctx context.Context, path string) (*store, error) {
-	path, err := filepath.Abs(path)
+// openStore opens or creates the database. passwordCost is the bcrypt cost for
+// passwords stored from now on; existing hashes keep the cost they were made with.
+func openStore(ctx context.Context, path string, passwordCost int) (*store, error) {
+	passwords, err := newPasswordHasher(passwordCost)
+	if err != nil {
+		return nil, err
+	}
+	path, err = filepath.Abs(path)
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +79,7 @@ func openStore(ctx context.Context, path string) (*store, error) {
 	}
 	// A single connection serializes account changes and their transactions.
 	db.SetMaxOpenConns(1)
-	s := &store{db: db, authLimiter: newAuthLimiter()}
+	s := &store{db: db, authLimiter: newAuthLimiter(), passwords: passwords}
 	if err := s.initialize(ctx); err != nil {
 		db.Close()
 		return nil, err

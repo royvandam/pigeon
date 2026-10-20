@@ -12,6 +12,7 @@ import (
 )
 
 func TestAssetsServeEmbeddedCodeWithoutAuthentication(t *testing.T) {
+	t.Parallel()
 	for name, kind := range map[string]string{
 		"dialog.js": "text/javascript; charset=utf-8", "shares.js": "text/javascript; charset=utf-8",
 		"validation.js": "text/javascript; charset=utf-8", "upload.js": "text/javascript; charset=utf-8",
@@ -41,6 +42,7 @@ func TestAssetsServeEmbeddedCodeWithoutAuthentication(t *testing.T) {
 }
 
 func TestAssetsRevalidateUnchangedContent(t *testing.T) {
+	t.Parallel()
 	handler := newServer(config{}).Handler
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/assets/tailwind.css", nil))
@@ -65,6 +67,7 @@ func TestAssetsRevalidateUnchangedContent(t *testing.T) {
 }
 
 func TestAssetPathsCannotExposeTemplatesOrLocalFiles(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{"", "missing.js", "../templates/admin.html", "../../go.mod", "uploads/private.txt", "pigeon.db",
 		"fontawesome", "fontawesome/css", "../tailwind.input.css", "../embed.go"} {
 		w := httptest.NewRecorder()
@@ -78,6 +81,7 @@ func TestAssetPathsCannotExposeTemplatesOrLocalFiles(t *testing.T) {
 
 // Pages must not load code, styles, or fonts from other origins (audit A1).
 func TestTemplatesReferenceOnlyLocalAssets(t *testing.T) {
+	t.Parallel()
 	external := regexp.MustCompile(`(?i)(https?:)?//[a-z0-9.-]+\.[a-z]{2,}`)
 	templates, err := fs.Glob(applicationAssets, "templates/*.html")
 	if err != nil || len(templates) == 0 {
@@ -95,6 +99,7 @@ func TestTemplatesReferenceOnlyLocalAssets(t *testing.T) {
 }
 
 func TestPageStylesheetsAndFontsResolve(t *testing.T) {
+	t.Parallel()
 	handler := newServer(config{}).Handler
 	page, err := applicationAssets.ReadFile("templates/assets.html")
 	if err != nil {

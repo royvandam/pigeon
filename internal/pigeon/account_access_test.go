@@ -12,6 +12,7 @@ import (
 )
 
 func TestReadsRejectOldIdentityAfterPurgeAndUsernameReuse(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	ctx := context.Background()
 	old, err := cfg.store.authenticate(ctx, "Test User", testPassword)
@@ -50,6 +51,7 @@ func TestReadsRejectOldIdentityAfterPurgeAndUsernameReuse(t *testing.T) {
 }
 
 func TestReadAccessRechecksIdentityAfterWaiting(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	ctx := context.Background()
 	u, err := cfg.store.authenticate(ctx, "Test User", testPassword)
@@ -84,6 +86,7 @@ func TestReadAccessRechecksIdentityAfterWaiting(t *testing.T) {
 }
 
 func TestPrivateDownloadReleasesAccessBeforeStreaming(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	ctx := context.Background()
 	u, err := cfg.store.authenticate(ctx, "Test User", testPassword)

@@ -12,6 +12,7 @@ import (
 )
 
 func TestRecycleUserPreservesAccountAndRevokesPreviousAccess(t *testing.T) {
+	t.Parallel()
 	for _, administrator := range []bool{false, true} {
 		name := "user"
 		if administrator {
@@ -88,6 +89,7 @@ func TestRecycleUserPreservesAccountAndRevokesPreviousAccess(t *testing.T) {
 }
 
 func TestRecycleUserRejectsActiveMissingAndRepeatedAccounts(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	ctx := context.Background()
 	u, err := cfg.store.authenticate(ctx, "Test User", testPassword)
@@ -142,6 +144,7 @@ func TestRecycleUserRejectsActiveMissingAndRepeatedAccounts(t *testing.T) {
 }
 
 func TestRecycleUserWaitsForUploadsAndRollsBackCleanupFailures(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	ctx := context.Background()
 	cookie, csrf := sessionFor(t, cfg, "Test User")

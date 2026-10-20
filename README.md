@@ -465,6 +465,11 @@ in `web/static/` and are embedded into the binary along with the templates.
 JavaScript tests run the same files served by the application. Rebuild and restart
 after changing templates or assets.
 
+Go tests run in parallel and hash passwords at bcrypt's minimum cost, so the
+suite takes seconds; only a test that replaces the global log output stays
+serial. Helpers shared by several test files live in
+`internal/pigeon/helpers_test.go`.
+
 ```sh
 gofmt -l .
 go mod tidy -diff

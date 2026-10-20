@@ -16,6 +16,7 @@ import (
 )
 
 func TestDefaultQuotaAndDatabaseMigration(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	ctx := context.Background()
 	u, err := cfg.store.authenticate(ctx, "Test User", testPassword)
@@ -39,7 +40,7 @@ ALTER TABLE settings ADD COLUMN max_bytes INTEGER NOT NULL DEFAULT 209715200 CHE
 		t.Fatal(err)
 	}
 	path := filepath.Join(filepath.Dir(cfg.dir), "app.db")
-	s, err := openStore(ctx, path)
+	s, err := openStore(ctx, path, testPasswordCost)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +67,7 @@ ALTER TABLE settings ADD COLUMN max_bytes INTEGER NOT NULL DEFAULT 209715200 CHE
 	if err := s.db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	s, err = openStore(ctx, path)
+	s, err = openStore(ctx, path, testPasswordCost)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,6 +79,7 @@ ALTER TABLE settings ADD COLUMN max_bytes INTEGER NOT NULL DEFAULT 209715200 CHE
 }
 
 func TestQuotaCountsExistingFilesAndReclaimsRemovedFiles(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 10)
 	dir := filepath.Join(cfg.dir, "test-user", "existing")
 	if err := os.MkdirAll(dir, 0o750); err != nil {
@@ -114,6 +116,7 @@ func TestQuotaCountsExistingFilesAndReclaimsRemovedFiles(t *testing.T) {
 }
 
 func TestConcurrentUploadsCannotExceedQuota(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	cookie, csrf := sessionFor(t, cfg, "Test User")
 	const count = 8
@@ -153,6 +156,7 @@ func TestConcurrentUploadsCannotExceedQuota(t *testing.T) {
 }
 
 func TestAdminCanAssignAndChangeQuotas(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 10)
 	ctx := context.Background()
 	if _, err := cfg.store.createUser(ctx, "Admin", testPassword, true); err != nil {
@@ -231,6 +235,7 @@ func TestAdminCanAssignAndChangeQuotas(t *testing.T) {
 }
 
 func TestQuotaValidationAndCanceledLock(t *testing.T) {
+	t.Parallel()
 	for _, quota := range []int64{0, -1, math.MaxInt64} {
 		if err := validateQuota(quota); err == nil {
 			t.Errorf("accepted quota %d", quota)
@@ -250,6 +255,7 @@ func TestQuotaValidationAndCanceledLock(t *testing.T) {
 }
 
 func TestChargedSizeRoundsUpToTheAllocationUnit(t *testing.T) {
+	t.Parallel()
 	for _, tt := range []struct{ size, want int64 }{
 		{0, 4096}, {1, 4096}, {4096, 4096}, {4097, 8192}, {1 << 20, 1 << 20},
 		{math.MaxInt64, math.MaxInt64},
@@ -269,6 +275,7 @@ func productionUnitConfig(t *testing.T, quota int64) config {
 }
 
 func TestQuotaChargesEmptyFilesAndFolders(t *testing.T) {
+	t.Parallel()
 	cfg := productionUnitConfig(t, 16<<10)
 	cookie, csrf := sessionFor(t, cfg, "Test User")
 	handler := newServer(cfg).Handler
@@ -313,6 +320,7 @@ func TestQuotaChargesEmptyFilesAndFolders(t *testing.T) {
 }
 
 func TestQuotaRoundsFileContentsUpToWholeUnits(t *testing.T) {
+	t.Parallel()
 	cfg := productionUnitConfig(t, 8<<10)
 	w := httptest.NewRecorder()
 	cfg.handleUpload(w, uploadRequest(t, "too-big.bin", strings.Repeat("x", 8<<10+1)))
@@ -329,6 +337,7 @@ func TestQuotaRoundsFileContentsUpToWholeUnits(t *testing.T) {
 // The audit reproduction: one small request of empty files in deep folders
 // created 31,001 inodes while usage stayed at zero.
 func TestQuotaBoundsDeepEmptyFileUploads(t *testing.T) {
+	t.Parallel()
 	cfg := productionUnitConfig(t, 1<<20)
 	deep := strings.Repeat("x/", 60)
 	var files []uploadFile

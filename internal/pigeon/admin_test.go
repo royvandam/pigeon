@@ -7,22 +7,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"regexp"
 	"strconv"
 	"strings"
 	"testing"
 )
 
-func displayedPassphrase(t *testing.T, w *httptest.ResponseRecorder) string {
-	t.Helper()
-	match := regexp.MustCompile(`<code id="issuedPassphrase"[^>]*>([^<]+)</code>`).FindStringSubmatch(w.Body.String())
-	if len(match) != 2 || len(strings.Split(match[1], "-")) != 4 {
-		t.Fatal("credential response did not display a four-word passphrase")
-	}
-	return match[1]
-}
-
 func TestAdminUserRecycling(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	ctx := context.Background()
 	admin, err := cfg.store.createUser(ctx, "Admin", testPassword, true)
@@ -88,6 +79,7 @@ func TestAdminUserRecycling(t *testing.T) {
 }
 
 func TestAdminRecyclingRequiresPermissionAndExplicitPOST(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	ctx := context.Background()
 	admin, err := cfg.store.createUser(ctx, "Admin", testPassword, true)
@@ -139,6 +131,7 @@ func TestAdminRecyclingRequiresPermissionAndExplicitPOST(t *testing.T) {
 }
 
 func TestAdminGeneratesUserCredentials(t *testing.T) {
+	t.Parallel()
 	for _, tt := range []struct {
 		name, quota string
 		admin       bool
@@ -211,6 +204,7 @@ func TestAdminGeneratesUserCredentials(t *testing.T) {
 }
 
 func TestAdminInvalidCreationDoesNotDisplayCredentials(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	if _, err := cfg.store.createUser(context.Background(), "Admin", testPassword, true); err != nil {
 		t.Fatal(err)

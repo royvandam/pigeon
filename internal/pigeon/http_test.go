@@ -12,6 +12,7 @@ import (
 )
 
 func TestStorageErrorResponses(t *testing.T) {
+	t.Parallel()
 	for _, tt := range []struct {
 		err    error
 		status int
@@ -34,6 +35,7 @@ func TestStorageErrorResponses(t *testing.T) {
 }
 
 func TestRoutesRejectUnsupportedMethodsConsistently(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	for route, allow := range map[string]string{
 		"/": "GET", "/files": "GET, POST", "/admin": "GET, POST",

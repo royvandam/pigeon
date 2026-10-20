@@ -58,6 +58,7 @@ func multipartUpload(t *testing.T, name string, contents []byte) ([]byte, string
 }
 
 func TestSlowRequestBodiesAreCutOff(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 1<<20)
 	cfg.formReadTimeout = 300 * time.Millisecond
 	cfg.uploadIdleTimeout = 500 * time.Millisecond

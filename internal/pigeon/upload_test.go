@@ -1,11 +1,8 @@
 package pigeon
 
 import (
-	"bytes"
 	"context"
-	"errors"
 	"io"
-	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -16,30 +13,8 @@ import (
 	"testing"
 )
 
-func uploadRequest(t *testing.T, filename, contents string) *http.Request {
-	t.Helper()
-	var body bytes.Buffer
-	mw := multipart.NewWriter(&body)
-	if err := mw.WriteField("note", "metadata before the file"); err != nil {
-		t.Fatal(err)
-	}
-	part, err := mw.CreateFormFile("file", filename)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := io.WriteString(part, contents); err != nil {
-		t.Fatal(err)
-	}
-	if err := mw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	r := httptest.NewRequest(http.MethodPost, "/upload", &body)
-	r.Header.Set("Content-Type", mw.FormDataContentType())
-	r.SetBasicAuth("Test User", testPassword)
-	return r
-}
-
 func TestUploadSizeBoundaryAndCleanup(t *testing.T) {
+	t.Parallel()
 	for _, tt := range []struct {
 		name       string
 		contents   string
@@ -86,18 +61,8 @@ func TestUploadSizeBoundaryAndCleanup(t *testing.T) {
 	}
 }
 
-type readTrackingBody struct {
-	read bool
-}
-
-func (b *readTrackingBody) Read([]byte) (int, error) {
-	b.read = true
-	return 0, errors.New("unexpected body read")
-}
-
-func (*readTrackingBody) Close() error { return nil }
-
 func TestUploadAuthenticatesBeforeReadingBody(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 4)
 	body := &readTrackingBody{}
 	r := httptest.NewRequest(http.MethodPost, "/upload", nil)
@@ -111,6 +76,7 @@ func TestUploadAuthenticatesBeforeReadingBody(t *testing.T) {
 }
 
 func TestUploadRejectsInvalidMultipart(t *testing.T) {
+	t.Parallel()
 	for _, tt := range []struct {
 		name        string
 		contentType string
@@ -140,6 +106,7 @@ func TestUploadRejectsInvalidMultipart(t *testing.T) {
 }
 
 func TestUploadCapsFieldsBeforeFile(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 4)
 	body := io.MultiReader(
 		strings.NewReader("--test\r\nContent-Disposition: form-data; name=\"note\"\r\n\r\n"),
@@ -157,6 +124,7 @@ func TestUploadCapsFieldsBeforeFile(t *testing.T) {
 }
 
 func TestUploadsAreIsolatedAndPreservedOnDeletion(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	u, err := cfg.store.createUser(context.Background(), "Other User", testPassword, false)
 	if err != nil {
@@ -192,6 +160,7 @@ func TestUploadsAreIsolatedAndPreservedOnDeletion(t *testing.T) {
 }
 
 func TestSharedPasswordHeaderNoLongerAuthenticates(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	body := &readTrackingBody{}
 	r := httptest.NewRequest(http.MethodPost, "/upload", nil)
@@ -205,6 +174,7 @@ func TestSharedPasswordHeaderNoLongerAuthenticates(t *testing.T) {
 }
 
 func TestUploadsRejectHiddenFormatCharactersInNewNames(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 1000)
 	rightToLeftOverride := string(rune(0x202E))
 	writeStoredFile(t, cfg, "test-user", "old"+rightToLeftOverride+"txt.folder/kept.txt", "older upload")
