@@ -16,6 +16,7 @@ import (
 )
 
 func TestFileDownloadAttachmentRangeAndHead(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	cookie, _ := sessionFor(t, cfg, "Test User")
 	filename := `résumé "<tag>".html`
@@ -44,6 +45,7 @@ func TestFileDownloadAttachmentRangeAndHead(t *testing.T) {
 }
 
 func TestDirectoryDownloadIncludesHierarchyAndEmptyFolders(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	cookie, _ := sessionFor(t, cfg, "Test User")
 	writeStoredFile(t, cfg, "test-user", "project/readme.txt", "root")
@@ -95,6 +97,7 @@ func TestDirectoryDownloadIncludesHierarchyAndEmptyFolders(t *testing.T) {
 }
 
 func TestPrivateStagingAndSymlinksCannotBeAccessed(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	cookie, csrf := sessionFor(t, cfg, "Test User")
 	writeStoredFile(t, cfg, "test-user", ".upload-active/secret.txt", "in progress")

@@ -16,6 +16,7 @@ import (
 )
 
 func TestUploadMergesFoldersAndRejectsExistingFiles(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	writeStoredFile(t, cfg, "test-user", "destination/project/existing.txt", "keep")
 	for _, tt := range []struct {
@@ -51,6 +52,7 @@ func TestUploadMergesFoldersAndRejectsExistingFiles(t *testing.T) {
 }
 
 func TestUploadRejectsInvalidDestinationsBeforeReadingBody(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	cookie, csrf := sessionFor(t, cfg, "Test User")
 	writeStoredFile(t, cfg, "test-user", "file.txt", "file")
@@ -70,6 +72,7 @@ func TestUploadRejectsInvalidDestinationsBeforeReadingBody(t *testing.T) {
 }
 
 func TestUploadPublicationRollbackPreservesExistingFolders(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	writeStoredFile(t, cfg, "test-user", "destination/project/existing.txt", "keep")
 	batch, err := newUploadBatch(filepath.Join(cfg.dir, "test-user"), "destination", 100, 1)
@@ -151,16 +154,8 @@ func startGatedUpload(t *testing.T, cfg config, cookie *http.Cookie, csrf, direc
 	return finish
 }
 
-func stagingFolders(t *testing.T, cfg config) []string {
-	t.Helper()
-	matches, err := filepath.Glob(filepath.Join(cfg.dir, "test-user", stagingPrefix+"*"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return matches
-}
-
 func TestAccountRequestsDoNotWaitForUploadBodies(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	cookie, csrf := sessionFor(t, cfg, "Test User")
 	handler := newServer(cfg).Handler
@@ -204,6 +199,7 @@ func TestAccountRequestsDoNotWaitForUploadBodies(t *testing.T) {
 }
 
 func TestUploadsRecheckAccountAndQuotaBeforePublishing(t *testing.T) {
+	t.Parallel()
 	for _, tt := range []struct {
 		name   string
 		change func(t *testing.T, cfg config, u user, cookie *http.Cookie, csrf string)

@@ -16,18 +16,8 @@ import (
 	"testing"
 )
 
-func writeStoredFile(t *testing.T, cfg config, slug, name, contents string) {
-	t.Helper()
-	filename := filepath.Join(cfg.dir, slug, filepath.FromSlash(name))
-	if err := os.MkdirAll(filepath.Dir(filename), 0o750); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filename, []byte(contents), 0o640); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestExplorerFileAndFolderLifecycle(t *testing.T) {
+	t.Parallel()
 	// Two created folders, two folders added by the upload, ten file bytes, and
 	// one unit left for the destination folder created later.
 	cfg := newTestConfig(t, 15)
@@ -106,6 +96,7 @@ func TestExplorerFileAndFolderLifecycle(t *testing.T) {
 }
 
 func TestExplorerActionsRequireDialogConfirmation(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	cookie, _ := sessionFor(t, cfg, "Test User")
 	writeStoredFile(t, cfg, "test-user", "original.txt", "keep")
@@ -140,6 +131,7 @@ func TestExplorerActionsRequireDialogConfirmation(t *testing.T) {
 }
 
 func TestFileActionsRejectUnsafePathsAndConflicts(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	cookie, csrf := sessionFor(t, cfg, "Test User")
 	writeStoredFile(t, cfg, "test-user", "folder/sub/a.txt", "original")
@@ -186,6 +178,7 @@ func TestFileActionsRejectUnsafePathsAndConflicts(t *testing.T) {
 }
 
 func TestExplorerAccountIsolationAndCSRF(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	other, err := cfg.store.createUser(context.Background(), "Other User", testPassword, false)
 	if err != nil {
@@ -235,6 +228,7 @@ func TestExplorerAccountIsolationAndCSRF(t *testing.T) {
 }
 
 func TestNewNamesRejectHiddenFormatCharactersAndOlderNamesStayAccessible(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 1000)
 	cookie, csrf := sessionFor(t, cfg, "Test User")
 	handler := newServer(cfg).Handler

@@ -6,6 +6,7 @@ import (
 )
 
 func TestParseSize(t *testing.T) {
+	t.Parallel()
 	for _, tt := range []struct {
 		input string
 		want  int64
@@ -26,6 +27,7 @@ func TestParseSize(t *testing.T) {
 }
 
 func TestParseSizeRejectsInvalidAndOverflowingSizes(t *testing.T) {
+	t.Parallel()
 	for _, input := range []string{
 		"", "10", "-1MB", "1.5GB", "10XB",
 		"9223372036854775808B", "8388608TB", "16777217TB",

@@ -17,23 +17,6 @@ import (
 	"time"
 )
 
-func shareRequest(t *testing.T, cfg config, cookie *http.Cookie, csrf, action, name string) string {
-	t.Helper()
-	w := httptest.NewRecorder()
-	r := formRequest("/shares", url.Values{"action": {action}, "path": {name}, "csrf_token": {csrf}}, cookie)
-	newServer(cfg).Handler.ServeHTTP(w, r)
-	if w.Code != http.StatusOK {
-		t.Fatalf("share %s %q: %d, %s", action, name, w.Code, w.Body)
-	}
-	var response struct {
-		URL string `json:"url"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
-		t.Fatal(err)
-	}
-	return response.URL
-}
-
 // shareStatus returns what the Share dialog loads for name.
 func shareStatus(t *testing.T, cfg config, cookie *http.Cookie, name string) (string, bool) {
 	t.Helper()
@@ -50,13 +33,8 @@ func shareStatus(t *testing.T, cfg config, cookie *http.Cookie, name string) (st
 	return response.URL, response.Active
 }
 
-func publicDownload(cfg config, method, link string) *httptest.ResponseRecorder {
-	w := httptest.NewRecorder()
-	newServer(cfg).Handler.ServeHTTP(w, httptest.NewRequest(method, link, nil))
-	return w
-}
-
 func TestShareFileLifecycleAndAnonymousDownload(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	cookie, csrf := sessionFor(t, cfg, "Test User")
 	filename := `résumé "<tag>".html`
@@ -119,6 +97,7 @@ func TestShareFileLifecycleAndAnonymousDownload(t *testing.T) {
 }
 
 func TestSharedFolderZipIsScopedAndIncludesCurrentContents(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	cookie, csrf := sessionFor(t, cfg, "Test User")
 	writeStoredFile(t, cfg, "test-user", "project/docs/readme.txt", "shared")
@@ -165,6 +144,7 @@ func TestSharedFolderZipIsScopedAndIncludesCurrentContents(t *testing.T) {
 }
 
 func TestShareManagementAuthenticationCSRFAndAccountIsolation(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	cookie, csrf := sessionFor(t, cfg, "Test User")
 	writeStoredFile(t, cfg, "test-user", "same.txt", "first user")
@@ -222,6 +202,7 @@ func TestShareManagementAuthenticationCSRFAndAccountIsolation(t *testing.T) {
 }
 
 func TestFileMutationsRevokeSharesBeforePathsCanBeReused(t *testing.T) {
+	t.Parallel()
 	for _, action := range []string{"rename", "move", "delete"} {
 		t.Run(action, func(t *testing.T) {
 			cfg := newTestConfig(t, 100)
@@ -253,6 +234,7 @@ func TestFileMutationsRevokeSharesBeforePathsCanBeReused(t *testing.T) {
 }
 
 func TestRejectedAndNoOpFileChangesKeepShareLinks(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	cookie, csrf := sessionFor(t, cfg, "Test User")
 	writeStoredFile(t, cfg, "test-user", "readme.txt", "shared")
@@ -268,6 +250,7 @@ func TestRejectedAndNoOpFileChangesKeepShareLinks(t *testing.T) {
 }
 
 func TestSharesSurviveRestartAndOlderDatabasesGainTheTable(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	cookie, csrf := sessionFor(t, cfg, "Test User")
 	writeStoredFile(t, cfg, "test-user", "readme.txt", "shared")
@@ -282,7 +265,7 @@ func TestSharesSurviveRestartAndOlderDatabasesGainTheTable(t *testing.T) {
 	if err := cfg.store.db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	s, err := openStore(ctx, dbPath)
+	s, err := openStore(ctx, dbPath, testPasswordCost)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,7 +274,7 @@ func TestSharesSurviveRestartAndOlderDatabasesGainTheTable(t *testing.T) {
 	if err := s.db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	s, err = openStore(ctx, dbPath)
+	s, err = openStore(ctx, dbPath, testPasswordCost)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -306,6 +289,7 @@ func TestSharesSurviveRestartAndOlderDatabasesGainTheTable(t *testing.T) {
 }
 
 func TestPlaintextShareTokensAreHashedOnUpgrade(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	cookie, _ := sessionFor(t, cfg, "Test User")
 	writeStoredFile(t, cfg, "test-user", "readme.txt", "shared")
@@ -329,7 +313,7 @@ func TestPlaintextShareTokensAreHashedOnUpgrade(t *testing.T) {
 	if err := cfg.store.db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	s, err := openStore(ctx, dbPath)
+	s, err := openStore(ctx, dbPath, testPasswordCost)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -349,7 +333,7 @@ func TestPlaintextShareTokensAreHashedOnUpgrade(t *testing.T) {
 	if err := s.db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if s, err = openStore(ctx, dbPath); err != nil {
+	if s, err = openStore(ctx, dbPath, testPasswordCost); err != nil {
 		t.Fatal(err)
 	}
 	defer s.db.Close()
@@ -360,6 +344,7 @@ func TestPlaintextShareTokensAreHashedOnUpgrade(t *testing.T) {
 }
 
 func TestDeletedUsersLosePublicAccessWhileUploadsArePreserved(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	cookie, csrf := sessionFor(t, cfg, "Test User")
 	writeStoredFile(t, cfg, "test-user", "readme.txt", "preserved")
@@ -390,6 +375,7 @@ func TestDeletedUsersLosePublicAccessWhileUploadsArePreserved(t *testing.T) {
 }
 
 func TestPublicSharesRejectMissingTokensSymlinksAndTypeChanges(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	cookie, csrf := sessionFor(t, cfg, "Test User")
 	writeStoredFile(t, cfg, "test-user", "readme.txt", "shared")
@@ -427,6 +413,7 @@ func TestPublicSharesRejectMissingTokensSymlinksAndTypeChanges(t *testing.T) {
 }
 
 func TestPublicDownloadsRecheckRevocationAfterWaitingForStorageLock(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	cookie, csrf := sessionFor(t, cfg, "Test User")
 	writeStoredFile(t, cfg, "test-user", "readme.txt", "shared")

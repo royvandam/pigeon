@@ -14,6 +14,7 @@ import (
 )
 
 func TestAdminGeneratesResetCredentials(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	ctx := context.Background()
 	if _, err := cfg.store.createUser(ctx, "Admin", testPassword, true); err != nil {
@@ -100,6 +101,7 @@ func TestAdminGeneratesResetCredentials(t *testing.T) {
 }
 
 func TestAdminSelfResetShowsCredentialsAfterSigningOut(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	ctx := context.Background()
 	admin, err := cfg.store.createUser(ctx, "Admin", testPassword, true)
@@ -159,6 +161,7 @@ func TestAdminSelfResetShowsCredentialsAfterSigningOut(t *testing.T) {
 }
 
 func TestAdminRejectedResetsDoNotChangeOrDisplayCredentials(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	ctx := context.Background()
 	admin, err := cfg.store.createUser(ctx, "Admin", testPassword, true)

@@ -28,7 +28,7 @@ func Run(ctx context.Context, args []string) error {
 	set := map[string]bool{}
 	flags.Visit(func(f *flag.Flag) { set[f.Name] = true })
 
-	s, err := openStore(ctx, *database)
+	s, err := openStore(ctx, *database, defaultPasswordCost)
 	if err != nil {
 		return fmt.Errorf("open database: %w", err)
 	}

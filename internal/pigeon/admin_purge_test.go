@@ -15,6 +15,7 @@ import (
 )
 
 func TestAdminPurgeAndRecreateAccount(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	ctx := context.Background()
 	if _, err := cfg.store.createUser(ctx, "Admin", testPassword, true); err != nil {
@@ -66,6 +67,7 @@ func TestAdminPurgeAndRecreateAccount(t *testing.T) {
 }
 
 func TestAdminPurgeRequiresPermissionAndExplicitPOST(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	ctx := context.Background()
 	admin, err := cfg.store.createUser(ctx, "Admin", testPassword, true)
@@ -114,6 +116,7 @@ func TestAdminPurgeRequiresPermissionAndExplicitPOST(t *testing.T) {
 }
 
 func TestAdminPurgeFailureKeepsAccountReserved(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	ctx := context.Background()
 	if _, err := cfg.store.createUser(ctx, "Admin", testPassword, true); err != nil {
