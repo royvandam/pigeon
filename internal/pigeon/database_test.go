@@ -4,42 +4,18 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
-const testPassword = "test-password"
-
-func newTestConfig(t *testing.T, quota int64) config {
-	t.Helper()
-	root := t.TempDir()
-	s, err := openStore(context.Background(), filepath.Join(root, "app.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { s.db.Close() })
-	if _, err := s.createUserWithQuota(context.Background(), "Test User", testPassword, false, quota); err != nil {
-		t.Fatal(err)
-	}
-	// A one-byte allocation unit keeps quota arithmetic in tests exact; tests of
-	// the production unit set allocationUnit explicitly.
-	return config{dir: filepath.Join(root, "uploads"), store: s, allocationUnit: 1}
-}
-
-func readUploadDir(root, slug string) ([]os.DirEntry, error) {
-	files, err := os.ReadDir(filepath.Join(root, slug))
-	if errors.Is(err, os.ErrNotExist) {
-		err = nil
-	}
-	return files, err
-}
-
 func TestSettingsAndUsersSurviveRestart(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "config.db")
-	s, err := openStore(ctx, path)
+	s, err := openStore(ctx, path, testPasswordCost)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +36,7 @@ func TestSettingsAndUsersSurviveRestart(t *testing.T) {
 	if err := s.db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	s, err = openStore(ctx, path)
+	s, err = openStore(ctx, path, testPasswordCost)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,6 +52,7 @@ func TestSettingsAndUsersSurviveRestart(t *testing.T) {
 }
 
 func TestUsernameNormalization(t *testing.T) {
+	t.Parallel()
 	for _, tt := range []struct{ username, slug string }{
 		{" Roy Van Dijk ", "roy-van-dijk"},
 		{"Élise_Müller", "elise-muller"},
@@ -97,6 +74,7 @@ func TestUsernameNormalization(t *testing.T) {
 }
 
 func TestUsernameAndFolderCollisionsStayReserved(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	ctx := context.Background()
 	u, err := cfg.store.createUser(ctx, "Élise Smith", testPassword, false)
@@ -117,8 +95,9 @@ func TestUsernameAndFolderCollisionsStayReserved(t *testing.T) {
 }
 
 func TestInitialAdminPromptOnlyRunsOnce(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	s, err := openStore(ctx, filepath.Join(t.TempDir(), "setup.db"))
+	s, err := openStore(ctx, filepath.Join(t.TempDir(), "setup.db"), testPasswordCost)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +121,8 @@ func TestInitialAdminPromptOnlyRunsOnce(t *testing.T) {
 }
 
 func TestInitialAdminRequiresCompleteInput(t *testing.T) {
-	s, err := openStore(context.Background(), filepath.Join(t.TempDir(), "setup.db"))
+	t.Parallel()
+	s, err := openStore(context.Background(), filepath.Join(t.TempDir(), "setup.db"), testPasswordCost)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,8 +138,9 @@ func TestInitialAdminRequiresCompleteInput(t *testing.T) {
 }
 
 func TestInitialAdminPromptRejectsShortPasswords(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	s, err := openStore(ctx, filepath.Join(t.TempDir(), "setup.db"))
+	s, err := openStore(ctx, filepath.Join(t.TempDir(), "setup.db"), testPasswordCost)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,5 +158,39 @@ func TestInitialAdminPromptRejectsShortPasswords(t *testing.T) {
 	}
 	if _, err := s.authenticate(ctx, "Admin", testPassword); err != nil {
 		t.Fatalf("retried password: %v", err)
+	}
+}
+
+func TestUnknownUsernamesCheckAHashOfTheConfiguredCost(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	if defaultPasswordCost != bcrypt.DefaultCost {
+		t.Fatalf("production password cost = %d, want bcrypt's default %d", defaultPasswordCost, bcrypt.DefaultCost)
+	}
+	for _, cost := range []int{bcrypt.MinCost, bcrypt.MinCost + 1} {
+		s, err := openStore(ctx, filepath.Join(t.TempDir(), "cost.db"), cost)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer s.db.Close()
+		if _, err := s.createUser(ctx, "Test User", testPassword, false); err != nil {
+			t.Fatal(err)
+		}
+		var stored []byte
+		if err := s.db.QueryRow(`SELECT password_hash FROM users`).Scan(&stored); err != nil {
+			t.Fatal(err)
+		}
+		// Equal costs make a wrong password and an unknown username take as long.
+		storedCost, storedErr := bcrypt.Cost(stored)
+		dummyCost, dummyErr := bcrypt.Cost(s.passwords.dummy)
+		if storedErr != nil || dummyErr != nil || storedCost != cost || dummyCost != cost {
+			t.Fatalf("cost %d: stored hash cost %d (%v), dummy hash cost %d (%v)", cost, storedCost, storedErr, dummyCost, dummyErr)
+		}
+		if _, err := s.authenticate(ctx, "Nobody", testPassword); !errors.Is(err, errInvalidCredentials) {
+			t.Fatalf("unknown username authenticated: %v", err)
+		}
+		if _, err := s.authenticate(ctx, "Test User", testPassword); err != nil {
+			t.Fatalf("known username: %v", err)
+		}
 	}
 }

@@ -31,13 +31,8 @@ func limitedConfig(t *testing.T) config {
 	return cfg
 }
 
-func serve(handler http.Handler, r *http.Request) *httptest.ResponseRecorder {
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, r)
-	return w
-}
-
 func TestFailedPasswordChecksAreLimitedPerClient(t *testing.T) {
+	t.Parallel()
 	cfg := limitedConfig(t)
 	handler := newServer(cfg).Handler
 	attacker := "198.51.100.7:4000"
@@ -60,6 +55,7 @@ func TestFailedPasswordChecksAreLimitedPerClient(t *testing.T) {
 }
 
 func TestSuccessfulPasswordChecksAreNotLimited(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	handler := newServer(cfg).Handler
 	for i := range authAttemptBurst + 2 {
@@ -73,6 +69,7 @@ func TestSuccessfulPasswordChecksAreNotLimited(t *testing.T) {
 }
 
 func TestPasswordAttemptsRecoverOverTime(t *testing.T) {
+	t.Parallel()
 	limiter := newAuthLimiter()
 	now := time.Unix(1_000_000, 0)
 	limiter.now = func() time.Time { return now }
@@ -105,6 +102,7 @@ func TestPasswordAttemptsRecoverOverTime(t *testing.T) {
 }
 
 func TestLimiterRefusesNewClientsWhenFull(t *testing.T) {
+	t.Parallel()
 	limiter := newAuthLimiter()
 	now := time.Unix(1_000_000, 0)
 	limiter.now = func() time.Time { return now }
@@ -122,6 +120,7 @@ func TestLimiterRefusesNewClientsWhenFull(t *testing.T) {
 }
 
 func TestLoginFormIsLimited(t *testing.T) {
+	t.Parallel()
 	cfg := limitedConfig(t)
 	handler := newServer(cfg).Handler
 	page := serve(handler, httptest.NewRequest(http.MethodGet, "/login", nil))
@@ -152,6 +151,7 @@ func TestLoginFormIsLimited(t *testing.T) {
 }
 
 func TestPasswordCheckWaitsForCapacityAndReturnsAttemptOnCancel(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	limiter := cfg.store.authLimiter
 	for range cap(limiter.checks) {
@@ -169,6 +169,7 @@ func TestPasswordCheckWaitsForCapacityAndReturnsAttemptOnCancel(t *testing.T) {
 }
 
 func TestClientAddressUsesForwardedForOnlyFromTrustedProxies(t *testing.T) {
+	t.Parallel()
 	trusted, err := parseTrustedProxies("10.0.0.0/8, ::1")
 	if err != nil {
 		t.Fatal(err)
@@ -198,6 +199,7 @@ func TestClientAddressUsesForwardedForOnlyFromTrustedProxies(t *testing.T) {
 }
 
 func TestForwardedClientsBehindTrustedProxyAreLimitedSeparately(t *testing.T) {
+	t.Parallel()
 	cfg := limitedConfig(t)
 	cfg.trustedProxies, _ = parseTrustedProxies("10.0.0.1")
 	handler := newServer(cfg).Handler
@@ -218,6 +220,7 @@ func TestForwardedClientsBehindTrustedProxyAreLimitedSeparately(t *testing.T) {
 }
 
 func TestIPv6ClientsShareTheirSlash64Limit(t *testing.T) {
+	t.Parallel()
 	cfg := limitedConfig(t)
 	handler := newServer(cfg).Handler
 	for i := range authAttemptBurst {
@@ -233,6 +236,7 @@ func TestIPv6ClientsShareTheirSlash64Limit(t *testing.T) {
 }
 
 func TestTrustedProxiesSettingIsValidatedAndPersisted(t *testing.T) {
+	t.Parallel()
 	for _, value := range []string{"proxy.example", "10.0.0.0/33", "fe80::1%eth0", "10.0.0.1,"} {
 		_, err := parseTrustedProxies(value)
 		if value == "10.0.0.1," {
@@ -264,7 +268,7 @@ func TestTrustedProxiesSettingIsValidatedAndPersisted(t *testing.T) {
 	if err := cfg.store.db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	s, err := openStore(ctx, filepath.Join(filepath.Dir(cfg.dir), "app.db"))
+	s, err := openStore(ctx, filepath.Join(filepath.Dir(cfg.dir), "app.db"), testPasswordCost)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,6 +279,7 @@ func TestTrustedProxiesSettingIsValidatedAndPersisted(t *testing.T) {
 }
 
 func TestNewPasswordsNeedTwelveCharacters(t *testing.T) {
+	t.Parallel()
 	if err := validatePassword("elevenchars"); err == nil {
 		t.Fatal("an 11-character password was accepted")
 	}

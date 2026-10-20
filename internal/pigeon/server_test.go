@@ -15,6 +15,7 @@ import (
 )
 
 func TestRoutesAndEmbeddedPage(t *testing.T) {
+	t.Parallel()
 	handler := newServer(newTestConfig(t, 1024)).Handler
 	for _, tt := range []struct {
 		method string
@@ -49,6 +50,7 @@ func TestRoutesAndEmbeddedPage(t *testing.T) {
 }
 
 func TestUploadSettingsAreEscapedAsHTMLData(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 1024)
 	cookie, csrf := sessionFor(t, cfg, "Test User")
 	directory := `Quotes "' <tag> & spaces`
@@ -67,6 +69,7 @@ func TestUploadSettingsAreEscapedAsHTMLData(t *testing.T) {
 }
 
 func TestRunServerReportsListenErrors(t *testing.T) {
+	t.Parallel()
 	err := runServer(context.Background(), &http.Server{Addr: "invalid-address"})
 	if err == nil {
 		t.Fatal("expected a listen error")
@@ -74,6 +77,7 @@ func TestRunServerReportsListenErrors(t *testing.T) {
 }
 
 func TestResponsesCarrySecurityHeaders(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 1024)
 	if _, err := cfg.store.createUser(context.Background(), "Admin", testPassword, true); err != nil {
 		t.Fatal(err)
@@ -113,6 +117,7 @@ func TestResponsesCarrySecurityHeaders(t *testing.T) {
 
 // The Content-Security-Policy blocks inline code and styles; keep templates free of them.
 func TestTemplatesContainNoInlineScriptsOrStyles(t *testing.T) {
+	t.Parallel()
 	scripts := regexp.MustCompile(`(?is)<script([^>]*)>(.*?)</script>`)
 	inline := regexp.MustCompile(`(?i)<style|\sstyle=|\son[a-z]+=|javascript:`)
 	templates, err := fs.Glob(applicationAssets, "templates/*.html")
@@ -135,6 +140,9 @@ func TestTemplatesContainNoInlineScriptsOrStyles(t *testing.T) {
 	}
 }
 
+// This test replaces the global log output, so it must not call t.Parallel:
+// Go runs it before the parallel tests start, so their requests are not
+// logged into its buffer.
 func TestRequestLogEscapesPathsAndRedactsShareTokens(t *testing.T) {
 	var output bytes.Buffer
 	old := log.Writer()

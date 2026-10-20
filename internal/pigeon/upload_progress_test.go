@@ -30,6 +30,7 @@ func waitForUploadProgress(t *testing.T, s *store, state string, minimumBytes in
 }
 
 func TestUploadProgressTracksServerWritesAndUserOwnership(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 1<<20)
 	cookie, csrf := sessionFor(t, cfg, "Test User")
 	if _, err := cfg.store.createUser(context.Background(), "Other User", testPassword, false); err != nil {
@@ -135,6 +136,7 @@ func TestUploadProgressTracksServerWritesAndUserOwnership(t *testing.T) {
 }
 
 func TestUploadProgressQueuesAndEndsOnCancellation(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	cookie, csrf := sessionFor(t, cfg, "Test User")
 	unlock, err := cfg.store.lockUploads(context.Background(), 1)
@@ -172,6 +174,7 @@ func TestUploadProgressQueuesAndEndsOnCancellation(t *testing.T) {
 }
 
 func TestUploadProgressQuotaFailureAndIDValidation(t *testing.T) {
+	t.Parallel()
 	// The folder takes one unit, leaving four bytes for file contents.
 	cfg := newTestConfig(t, 5)
 	r := uploadFilesRequest(t, uploadFile{"folder/a.txt", "123"}, uploadFile{"folder/b.txt", "456"})
@@ -197,6 +200,7 @@ func TestUploadProgressQuotaFailureAndIDValidation(t *testing.T) {
 }
 
 func TestUploadProgressExpiration(t *testing.T) {
+	t.Parallel()
 	var s store
 	p, err := s.beginUploadProgress(1, testUploadID)
 	if err != nil {

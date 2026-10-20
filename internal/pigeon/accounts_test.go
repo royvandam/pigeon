@@ -7,6 +7,7 @@ import (
 )
 
 func TestAccountManagerRequiresAdministrator(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	ctx := context.Background()
 	u, err := cfg.store.authenticate(ctx, "Test User", testPassword)

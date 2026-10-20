@@ -13,38 +13,8 @@ import (
 	"testing"
 )
 
-func sessionFor(t *testing.T, cfg config, username string) (*http.Cookie, string) {
-	t.Helper()
-	return sessionForPassword(t, cfg, username, testPassword)
-}
-
-func sessionForPassword(t *testing.T, cfg config, username, password string) (*http.Cookie, string) {
-	t.Helper()
-	u, err := cfg.store.authenticate(context.Background(), username, password)
-	if err != nil {
-		t.Fatal(err)
-	}
-	token, err := cfg.store.createSession(context.Background(), u)
-	if err != nil {
-		t.Fatal(err)
-	}
-	a, err := cfg.store.session(context.Background(), token)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return &http.Cookie{Name: sessionCookieName, Value: token}, a.CSRFToken
-}
-
-func formRequest(path string, form url.Values, cookie *http.Cookie) *http.Request {
-	r := httptest.NewRequest(http.MethodPost, path, strings.NewReader(form.Encode()))
-	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	if cookie != nil {
-		r.AddCookie(cookie)
-	}
-	return r
-}
-
 func TestAdminUsesSharedAccountDialogs(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	admin, err := cfg.store.createUser(context.Background(), "Admin", testPassword, true)
 	if err != nil {
@@ -83,6 +53,7 @@ func TestAdminUsesSharedAccountDialogs(t *testing.T) {
 }
 
 func TestBrowserLoginLogout(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	w := httptest.NewRecorder()
 	cfg.handleIndex(w, httptest.NewRequest(http.MethodGet, "/", nil))
@@ -139,6 +110,7 @@ func TestBrowserLoginLogout(t *testing.T) {
 }
 
 func TestUploadRejectsMissingCSRFBeforeReadingBody(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	cookie, csrf := sessionFor(t, cfg, "Test User")
 	for _, token := range []string{"", "wrong-token"} {
@@ -165,6 +137,7 @@ func TestUploadRejectsMissingCSRFBeforeReadingBody(t *testing.T) {
 }
 
 func TestAdminPermissionsCSRFAndUserLifecycle(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	ctx := context.Background()
 	admin, err := cfg.store.createUser(ctx, "Admin", testPassword, true)
@@ -259,6 +232,7 @@ func TestAdminPermissionsCSRFAndUserLifecycle(t *testing.T) {
 }
 
 func TestSessionExpirationAndCrossOriginRequests(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	cookie, csrf := sessionFor(t, cfg, "Test User")
 	r := uploadRequest(t, "file.txt", "data")
@@ -280,6 +254,7 @@ func TestSessionExpirationAndCrossOriginRequests(t *testing.T) {
 }
 
 func TestOnlyAPIClientsReceiveABasicChallenge(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	handler := newServer(cfg).Handler
 	expired, _ := sessionFor(t, cfg, "Test User")
@@ -345,7 +320,8 @@ func TestOnlyAPIClientsReceiveABasicChallenge(t *testing.T) {
 }
 
 func TestNewDatabasesListenOnLoopback(t *testing.T) {
-	s, err := openStore(context.Background(), filepath.Join(t.TempDir(), "new.db"))
+	t.Parallel()
+	s, err := openStore(context.Background(), filepath.Join(t.TempDir(), "new.db"), testPasswordCost)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -368,6 +344,7 @@ func cookieNamed(w *httptest.ResponseRecorder, name string) *http.Cookie {
 // A TLS-terminating proxy forwards plain HTTP and rewrites Host, as some
 // proxies do; the browser still talks HTTPS to the public origin.
 func TestHTTPSPublicURLSecuresCookiesAndEnablesHSTS(t *testing.T) {
+	t.Parallel()
 	for _, tt := range []struct {
 		publicURL string
 		secure    bool
@@ -429,6 +406,7 @@ func TestHTTPSPublicURLSecuresCookiesAndEnablesHSTS(t *testing.T) {
 }
 
 func TestOriginCheckAcceptsThePublicURLBehindARewritingProxy(t *testing.T) {
+	t.Parallel()
 	publicURL, err := parsePublicURL("https://files.example.com")
 	if err != nil {
 		t.Fatal(err)
@@ -463,6 +441,7 @@ func TestOriginCheckAcceptsThePublicURLBehindARewritingProxy(t *testing.T) {
 }
 
 func TestPublicURLIsValidatedNormalizedAndPersisted(t *testing.T) {
+	t.Parallel()
 	for value, want := range map[string]string{
 		"https://Files.Example.com/": "https://files.example.com",
 		"http://192.168.1.10:8080":   "http://192.168.1.10:8080",
@@ -498,7 +477,7 @@ func TestPublicURLIsValidatedNormalizedAndPersisted(t *testing.T) {
 	if err := cfg.store.db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	s, err := openStore(ctx, filepath.Join(filepath.Dir(cfg.dir), "app.db"))
+	s, err := openStore(ctx, filepath.Join(filepath.Dir(cfg.dir), "app.db"), testPasswordCost)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -509,6 +488,7 @@ func TestPublicURLIsValidatedNormalizedAndPersisted(t *testing.T) {
 }
 
 func TestPlainHTTPOnTheNetworkIsWarnedAbout(t *testing.T) {
+	t.Parallel()
 	https, _ := parsePublicURL("https://files.example.com")
 	plain, _ := parsePublicURL("http://files.example.com")
 	for _, tt := range []struct {

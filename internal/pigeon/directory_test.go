@@ -1,10 +1,8 @@
 package pigeon
 
 import (
-	"bytes"
 	"context"
 	"io"
-	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,45 +14,8 @@ import (
 	"testing"
 )
 
-type uploadFile struct {
-	name     string
-	contents string
-}
-
-func uploadFilesRequest(t *testing.T, files ...uploadFile) *http.Request {
-	t.Helper()
-	var body bytes.Buffer
-	mw := multipart.NewWriter(&body)
-	for _, file := range files {
-		part, err := mw.CreateFormFile("file", file.name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := io.WriteString(part, file.contents); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := mw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	r := httptest.NewRequest(http.MethodPost, "/upload", &body)
-	r.Header.Set("Content-Type", mw.FormDataContentType())
-	r.SetBasicAuth("Test User", testPassword)
-	return r
-}
-
-func uploadResult(t *testing.T, w *httptest.ResponseRecorder, key string) string {
-	t.Helper()
-	for _, line := range strings.Split(w.Body.String(), "\n") {
-		if value, ok := strings.CutPrefix(line, key+"="); ok {
-			return value
-		}
-	}
-	t.Fatalf("missing %s in upload response: %s", key, w.Body)
-	return ""
-}
-
 func TestDirectoryUploadPreservesHierarchyAndNames(t *testing.T) {
+	t.Parallel()
 	files := []uploadFile{
 		{"My project/readme.txt", "root"},
 		{"My project/docs/readme.txt", "nested"},
@@ -114,6 +75,7 @@ func TestDirectoryUploadPreservesHierarchyAndNames(t *testing.T) {
 }
 
 func TestUploadMultipleFilesAndSingleFileDirectory(t *testing.T) {
+	t.Parallel()
 	for _, files := range [][]uploadFile{
 		{{"first.txt", "one"}, {"second.txt", "two"}},
 		{{"project/subdir/only.txt", "lone file"}},
@@ -140,6 +102,7 @@ func TestUploadMultipleFilesAndSingleFileDirectory(t *testing.T) {
 }
 
 func TestDirectoryQuotaFailureRemovesWholeBatch(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 10)
 	w := httptest.NewRecorder()
 	cfg.handleUpload(w, uploadRequest(t, "existing.txt", "1234"))
@@ -165,6 +128,7 @@ func TestDirectoryQuotaFailureRemovesWholeBatch(t *testing.T) {
 }
 
 func TestDirectoryRejectsUnsafeAndConflictingPaths(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{
 		"../outside.txt", "folder/../../outside.txt", "/absolute.txt",
 		`folder\..\outside.txt`, "C:/outside.txt", "C:outside.txt", "folder//file.txt",
@@ -200,6 +164,7 @@ func TestDirectoryRejectsUnsafeAndConflictingPaths(t *testing.T) {
 }
 
 func TestDirectoryTruncatedMultipartRemovesEarlierFiles(t *testing.T) {
+	t.Parallel()
 	for _, tail := range []string{
 		"--test\r\nContent-Disposition: form-data; name=\"file\"; filename=\"folder/b.txt\"\r\n\r\ntruncated",
 		"--test\r\nContent-Disposition: form-data; name=\"note\"\r\n\r\ntruncated",
@@ -220,6 +185,7 @@ func TestDirectoryTruncatedMultipartRemovesEarlierFiles(t *testing.T) {
 }
 
 func TestDirectoryCapsFieldsAfterFiles(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 4)
 	body := io.MultiReader(
 		strings.NewReader("--test\r\nContent-Disposition: form-data; name=\"file\"; filename=\"folder/a.txt\"\r\n\r\nabc\r\n--test\r\nContent-Disposition: form-data; name=\"note\"\r\n\r\n"),
@@ -249,6 +215,7 @@ func (b cancelingUploadBody) Read(data []byte) (int, error) {
 }
 
 func TestDirectoryCancellationDoesNotPublishBatch(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	r := uploadFilesRequest(t, uploadFile{"folder/a.txt", "first"}, uploadFile{"folder/b.txt", "second"})
 	ctx, cancel := context.WithCancel(r.Context())
@@ -264,6 +231,7 @@ func TestDirectoryCancellationDoesNotPublishBatch(t *testing.T) {
 }
 
 func TestConcurrentDirectoryUploadsShareQuota(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 10)
 	cookie, csrf := sessionFor(t, cfg, "Test User")
 	const count = 4

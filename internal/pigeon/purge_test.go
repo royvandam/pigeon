@@ -10,19 +10,8 @@ import (
 	"time"
 )
 
-func deletedPurgeAccount(t *testing.T, cfg config) user {
-	t.Helper()
-	u, err := cfg.store.createUser(context.Background(), "Retired User", testPassword, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := cfg.store.deleteUser(context.Background(), u.ID, 999); err != nil {
-		t.Fatal(err)
-	}
-	return u
-}
-
 func TestPurgeRemovesUploadsAndCredentialsAndReleasesUsername(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	ctx := context.Background()
 	u := deletedPurgeAccount(t, cfg)
@@ -80,6 +69,7 @@ func TestPurgeRemovesUploadsAndCredentialsAndReleasesUsername(t *testing.T) {
 }
 
 func TestPurgeRejectsActiveAccountsAndHandlesMissingUploads(t *testing.T) {
+	t.Parallel()
 	for _, state := range []string{"active", "no uploads directory", "no user directory"} {
 		t.Run(state, func(t *testing.T) {
 			cfg := newTestConfig(t, 100)
@@ -118,6 +108,7 @@ func TestPurgeRejectsActiveAccountsAndHandlesMissingUploads(t *testing.T) {
 }
 
 func TestPurgeFailuresKeepDeletedAccountReserved(t *testing.T) {
+	t.Parallel()
 	for _, failure := range []string{"database", "storage", "unsafe slug"} {
 		t.Run(failure, func(t *testing.T) {
 			cfg := newTestConfig(t, 100)
@@ -168,6 +159,7 @@ func TestPurgeFailuresKeepDeletedAccountReserved(t *testing.T) {
 }
 
 func TestPurgeDoesNotFollowSymbolicLinks(t *testing.T) {
+	t.Parallel()
 	for _, linkedAccountRoot := range []bool{false, true} {
 		name := "nested link"
 		if linkedAccountRoot {
@@ -196,6 +188,7 @@ func TestPurgeDoesNotFollowSymbolicLinks(t *testing.T) {
 }
 
 func TestPurgeFileRemovalFailureCanBeRetried(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip("root bypasses the directory permissions needed for this test")
 	}
@@ -226,6 +219,7 @@ func TestPurgeFileRemovalFailureCanBeRetried(t *testing.T) {
 }
 
 func TestPurgeWaitsForUploadsAndSerializesRecycling(t *testing.T) {
+	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	ctx := context.Background()
 	u := deletedPurgeAccount(t, cfg)

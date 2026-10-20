@@ -7,6 +7,7 @@ import (
 )
 
 func TestPassphraseWordList(t *testing.T) {
+	t.Parallel()
 	if len(strings.Fields(passphraseWordList)) != 7776 || len(passphraseWords) != 7772 {
 		t.Fatalf("passphrase dictionary has %d eligible entries; want 7,772 after excluding the four compound words", len(passphraseWords))
 	}
@@ -21,6 +22,7 @@ func TestPassphraseWordList(t *testing.T) {
 }
 
 func TestGeneratedPassphrasesAreFourWordsAndValidPasswords(t *testing.T) {
+	t.Parallel()
 	dictionary := make(map[string]bool)
 	for _, word := range passphraseWords {
 		dictionary[word] = true

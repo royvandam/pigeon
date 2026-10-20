@@ -81,11 +81,45 @@ func validatePassword(password string) error {
 	return nil
 }
 
-func hashPassword(password string) ([]byte, error) {
+// defaultPasswordCost is the bcrypt cost for stored passwords. Tests use
+// bcrypt.MinCost, because every fixture hashes passwords.
+const defaultPasswordCost = bcrypt.DefaultCost
+
+// passwordHasher hashes and checks passwords with bcrypt at one cost. Checking
+// an unknown username compares against a dummy hash of the same cost, so it
+// takes as long as a wrong password for an existing account.
+type passwordHasher struct {
+	cost  int
+	dummy []byte
+}
+
+func newPasswordHasher(cost int) (passwordHasher, error) {
+	secret, err := randomToken()
+	if err != nil {
+		return passwordHasher{}, err
+	}
+	dummy, err := bcrypt.GenerateFromPassword([]byte(secret), cost)
+	if err != nil {
+		return passwordHasher{}, err
+	}
+	return passwordHasher{cost: cost, dummy: dummy}, nil
+}
+
+func (h passwordHasher) hash(password string) ([]byte, error) {
 	if err := validatePassword(password); err != nil {
 		return nil, err
 	}
-	return bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	return bcrypt.GenerateFromPassword([]byte(password), h.cost)
+}
+
+// matches reports whether password matches hash. A nil hash, for an unknown
+// username, is checked against the dummy hash and never matches.
+func (h passwordHasher) matches(hash []byte, password string) bool {
+	if hash == nil {
+		bcrypt.CompareHashAndPassword(h.dummy, []byte(password))
+		return false
+	}
+	return bcrypt.CompareHashAndPassword(hash, []byte(password)) == nil
 }
 
 func (s *store) hasUsers(ctx context.Context) (bool, error) {
@@ -106,7 +140,7 @@ func (s *store) createUserWithQuota(ctx context.Context, username, password stri
 	if err != nil {
 		return user{}, err
 	}
-	hash, err := hashPassword(password)
+	hash, err := s.passwords.hash(password)
 	if err != nil {
 		return user{}, err
 	}
@@ -135,12 +169,11 @@ func (s *store) authenticate(ctx context.Context, username, password string) (us
 		`SELECT id, username, slug, is_admin, auth_version, quota_bytes, password_hash FROM users WHERE username_key = ? AND deleted_at IS NULL`, key).
 		Scan(&u.ID, &u.Username, &u.Slug, &u.Admin, &u.Version, &u.QuotaBytes, &hash)
 	if errors.Is(err, sql.ErrNoRows) {
-		// Match the work performed for an existing user's incorrect password.
-		hash = []byte("$2a$10$7EqJtq98hPqEX7fNZaFWoO5uZRxBxgGhK8DckbuZuODGVdLmRMaeW")
+		hash = nil // Still spend the time of a wrong password.
 	} else if err != nil {
 		return user{}, err
 	}
-	if bcrypt.CompareHashAndPassword(hash, []byte(password)) != nil || u.ID == 0 {
+	if !s.passwords.matches(hash, password) {
 		return user{}, errInvalidCredentials
 	}
 	return u, nil
@@ -182,7 +215,7 @@ func (s *store) deletedUserIDForUsername(ctx context.Context, username string) (
 }
 
 func (s *store) recycleUser(ctx context.Context, id int64, password string) (user, error) {
-	hash, err := hashPassword(password)
+	hash, err := s.passwords.hash(password)
 	if err != nil {
 		return user{}, err
 	}
@@ -221,7 +254,7 @@ RETURNING id, username, slug, is_admin, auth_version, quota_bytes`, hash, id).
 }
 
 func (s *store) resetPassword(ctx context.Context, id int64, password string) (user, error) {
-	hash, err := hashPassword(password)
+	hash, err := s.passwords.hash(password)
 	if err != nil {
 		return user{}, err
 	}
