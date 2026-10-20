@@ -63,39 +63,49 @@ func (files userStorage) path() (string, error) {
 	return filepath.Join(files.directory, files.slug), nil
 }
 
+// open opens the account's folder, creating it on first use.
 func (files userStorage) open() (*os.Root, error) {
+	root, err := files.openExisting()
+	if root != nil || err != nil {
+		return root, err
+	}
+	dir, err := files.path()
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return nil, err
+	}
+	return os.OpenRoot(dir)
+}
+
+// openExisting opens the account's folder, or returns nil if it does not exist.
+func (files userStorage) openExisting() (*os.Root, error) {
 	dir, err := files.path()
 	if err != nil {
 		return nil, err
 	}
 	info, err := os.Lstat(dir)
 	if errors.Is(err, os.ErrNotExist) {
-		if err := os.MkdirAll(dir, 0o750); err != nil {
-			return nil, err
-		}
-	} else if err != nil {
+		return nil, nil
+	}
+	if err != nil {
 		return nil, err
-	} else if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return nil, fmt.Errorf("%w: user storage must be a directory", errStoragePath)
 	}
 	return os.OpenRoot(dir)
 }
 
+// usage measures the account's folder. Callers normally use usageCache instead.
 func (files userStorage) usage(ctx context.Context) (int64, error) {
-	dir, err := files.path()
-	if err != nil {
+	root, err := files.openExisting()
+	if err != nil || root == nil {
 		return 0, err
 	}
-	return diskUsage(ctx, dir, files.unit)
-}
-
-// usageExcept measures usage without the top-level entry skip.
-func (files userStorage) usageExcept(ctx context.Context, skip string) (int64, error) {
-	dir, err := files.path()
-	if err != nil {
-		return 0, err
-	}
-	return diskUsageExcept(ctx, dir, files.unit, skip)
+	defer root.Close()
+	return measureUsage(ctx, root.FS(), ".", files.unit)
 }
 
 func (files userStorage) purge() error {
@@ -113,6 +123,45 @@ func (files userStorage) purge() error {
 	// Unlink symbolic links without following their targets, including a link
 	// replacing the account's root. Confine removal to the configured uploads root.
 	return root.RemoveAll(files.slug)
+}
+
+// removeStaleStaging deletes the staging folders of uploads that were cut off
+// when the server last stopped, and returns how many it removed. No upload runs
+// during startup, so every staging folder is stale. Left in place, they would
+// use disk space that their owners cannot see or delete.
+func removeStaleStaging(dir string) (int, error) {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return 0, err
+	}
+	defer root.Close()
+	accounts, err := fs.ReadDir(root.FS(), ".")
+	if err != nil {
+		return 0, err
+	}
+	removed := 0
+	var errs []error
+	for _, account := range accounts {
+		if !account.IsDir() { // Also skips symbolic links.
+			continue
+		}
+		entries, err := fs.ReadDir(root.FS(), account.Name())
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		for _, entry := range entries {
+			if !strings.HasPrefix(entry.Name(), stagingPrefix) {
+				continue
+			}
+			if err := root.RemoveAll(filepath.Join(account.Name(), entry.Name())); err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			removed++
+		}
+	}
+	return removed, errors.Join(errs...)
 }
 
 // Root confines operations to one account. Reject symbolic links in every

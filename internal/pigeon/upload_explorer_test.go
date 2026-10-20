@@ -3,14 +3,12 @@ package pigeon
 import (
 	"context"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 )
@@ -105,53 +103,6 @@ func TestUploadPublicationRollbackPreservesExistingFolders(t *testing.T) {
 	if err != nil || used != 5 {
 		t.Fatalf("rollback changed existing data: used=%d, %v", used, err)
 	}
-}
-
-type gatedUploadBody struct {
-	io.ReadCloser
-	started chan struct{}
-	release chan struct{}
-}
-
-func (b *gatedUploadBody) Read(p []byte) (int, error) {
-	select {
-	case <-b.started:
-	default:
-		close(b.started)
-	}
-	<-b.release
-	return b.ReadCloser.Read(p)
-}
-
-// startGatedUpload begins a session upload whose body blocks until finish is
-// called, and waits until the handler starts reading it.
-func startGatedUpload(t *testing.T, cfg config, cookie *http.Cookie, csrf, directory string, files ...uploadFile) (finish func() *httptest.ResponseRecorder) {
-	t.Helper()
-	r := uploadFilesRequest(t, files...)
-	r.URL.RawQuery = url.Values{"dir": {directory}}.Encode()
-	r.Header.Del("Authorization")
-	r.AddCookie(cookie)
-	r.Header.Set("X-CSRF-Token", csrf)
-	body := &gatedUploadBody{ReadCloser: r.Body, started: make(chan struct{}), release: make(chan struct{})}
-	r.Body = body
-	done := make(chan struct{})
-	w := httptest.NewRecorder()
-	go func() {
-		cfg.handleUpload(w, r)
-		close(done)
-	}()
-	select {
-	case <-body.started:
-	case <-time.After(5 * time.Second):
-		t.Fatal("upload did not start reading")
-	}
-	var once sync.Once
-	finish = func() *httptest.ResponseRecorder {
-		once.Do(func() { close(body.release); <-done })
-		return w
-	}
-	t.Cleanup(func() { finish() })
-	return finish
 }
 
 func TestAccountRequestsDoNotWaitForUploadBodies(t *testing.T) {

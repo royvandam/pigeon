@@ -68,6 +68,13 @@ func Run(ctx context.Context, args []string) error {
 	if err := os.MkdirAll(settings.dir, 0o750); err != nil {
 		return fmt.Errorf("create upload directory: %w", err)
 	}
+	removed, err := removeStaleStaging(settings.dir)
+	if removed > 0 {
+		log.Printf("removed %d unfinished uploads left from the previous run", removed)
+	}
+	if err != nil {
+		log.Printf("warning: could not remove every unfinished upload: %v", err)
+	}
 
 	trustedProxies, err := parseTrustedProxies(settings.trustedProxies)
 	if err != nil {
