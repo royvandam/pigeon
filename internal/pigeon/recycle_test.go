@@ -39,7 +39,7 @@ func TestRecycleUserPreservesAccountAndRevokesPreviousAccess(t *testing.T) {
 			if _, err := cfg.store.db.Exec(`INSERT INTO sessions (token_hash, user_id, user_version, csrf_token, expires_at) VALUES (?, ?, ?, ?, ?)`, tokenHash(cookie.Value), old.ID, old.Version, csrf, time.Now().Add(time.Hour).Unix()); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := cfg.store.db.Exec(`INSERT INTO shares (token, user_id, path, is_directory, created_at) VALUES (?, ?, ?, 0, ?)`, strings.TrimPrefix(link, "/s/"), old.ID, "project/readme.txt", time.Now().Unix()); err != nil {
+			if _, err := cfg.store.db.Exec(`INSERT INTO shares (token_hash, user_id, path, is_directory, created_at) VALUES (?, ?, ?, 0, ?)`, tokenHash(strings.TrimPrefix(link, "/s/")), old.ID, "project/readme.txt", time.Now().Unix()); err != nil {
 				t.Fatal(err)
 			}
 			fresh, err := cfg.store.recycleUser(ctx, old.ID, "fresh-recycled-password")

@@ -3,6 +3,7 @@ package pigeon
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -114,7 +115,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS sessions_user_id ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS sessions_expires_at ON sessions(expires_at);
 CREATE TABLE IF NOT EXISTS shares (
-  token TEXT PRIMARY KEY,
+  token_hash TEXT PRIMARY KEY,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   path TEXT NOT NULL,
   is_directory INTEGER NOT NULL CHECK (is_directory IN (0, 1)),
@@ -158,6 +159,9 @@ CREATE TABLE IF NOT EXISTS shares (
 			return err
 		}
 	}
+	if err := hashShareTokens(ctx, tx); err != nil {
+		return err
+	}
 	dir, err := filepath.Abs("./uploads")
 	if err != nil {
 		return err
@@ -168,6 +172,39 @@ CREATE TABLE IF NOT EXISTS shares (
 		return err
 	}
 	return tx.Commit()
+}
+
+// hashShareTokens replaces plaintext share tokens from older databases with
+// their hashes, so existing links keep working but the database no longer
+// contains them.
+func hashShareTokens(ctx context.Context, tx *sql.Tx) error {
+	var plaintext bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pragma_table_info('shares') WHERE name = 'token')`).Scan(&plaintext); err != nil || !plaintext {
+		return err
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT token FROM shares`)
+	if err != nil {
+		return err
+	}
+	var tokens []string
+	for rows.Next() {
+		var token string
+		if err := rows.Scan(&token); err != nil {
+			rows.Close()
+			return err
+		}
+		tokens = append(tokens, token)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return err
+	}
+	for _, token := range tokens {
+		if _, err := tx.ExecContext(ctx, `UPDATE shares SET token = ? WHERE token = ?`, tokenHash(token), token); err != nil {
+			return err
+		}
+	}
+	_, err = tx.ExecContext(ctx, `ALTER TABLE shares RENAME COLUMN token TO token_hash`)
+	return err
 }
 
 func (s *store) loadSettings(ctx context.Context) (settings, error) {

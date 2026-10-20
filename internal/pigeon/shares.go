@@ -19,38 +19,40 @@ type shareLink struct {
 	Directory bool
 }
 
-func (s *store) shareURL(ctx context.Context, u user, name string) (string, error) {
-	var token string
+// shareActive reports whether name has a link. Only a hash of each token is
+// stored, like session tokens, so a leaked database or backup yields no working
+// links, and an existing link's URL cannot be shown again.
+func (s *store) shareActive(ctx context.Context, u user, name string) (bool, error) {
+	var active bool
 	err := s.db.QueryRowContext(ctx, `
-SELECT s.token FROM shares s JOIN users u ON u.id = s.user_id
-WHERE s.user_id = ? AND s.path = ? AND u.auth_version = ? AND u.deleted_at IS NULL`,
-		u.ID, name, u.Version).Scan(&token)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
-	}
-	if err != nil {
-		return "", err
-	}
-	return "/s/" + token, nil
+SELECT EXISTS(SELECT 1 FROM shares s JOIN users u ON u.id = s.user_id
+WHERE s.user_id = ? AND s.path = ? AND u.auth_version = ? AND u.deleted_at IS NULL)`,
+		u.ID, name, u.Version).Scan(&active)
+	return active, err
 }
 
+// createShare returns a new link for name, replacing any existing one, whose
+// URL then stops working.
 func (s *store) createShare(ctx context.Context, u user, name string, directory bool) (string, error) {
 	token, err := randomToken()
 	if err != nil {
 		return "", err
 	}
-	_, err = s.db.ExecContext(ctx, `
-INSERT INTO shares (token, user_id, path, is_directory, created_at)
+	result, err := s.db.ExecContext(ctx, `
+INSERT INTO shares (token_hash, user_id, path, is_directory, created_at)
 SELECT ?, id, ?, ?, ? FROM users WHERE id = ? AND auth_version = ? AND deleted_at IS NULL
-ON CONFLICT(user_id, path) DO NOTHING`, token, name, directory, time.Now().Unix(), u.ID, u.Version)
+ON CONFLICT(user_id, path) DO UPDATE SET
+  token_hash = excluded.token_hash, is_directory = excluded.is_directory, created_at = excluded.created_at`,
+		tokenHash(token), name, directory, time.Now().Unix(), u.ID, u.Version)
 	if err != nil {
 		return "", err
 	}
-	link, err := s.shareURL(ctx, u, name)
-	if err == nil && link == "" {
-		err = errInvalidCredentials
+	if n, err := result.RowsAffected(); err != nil {
+		return "", err
+	} else if n == 0 {
+		return "", errInvalidCredentials
 	}
-	return link, err
+	return "/s/" + token, nil
 }
 
 func (s *store) revokeShare(ctx context.Context, id int64, name string) error {
@@ -77,7 +79,7 @@ func (s *store) findShare(ctx context.Context, token string) (shareLink, error) 
 	var link shareLink
 	err = s.db.QueryRowContext(ctx, `
 SELECT u.id, u.slug, s.path, s.is_directory FROM shares s JOIN users u ON u.id = s.user_id
-WHERE s.token = ? AND u.deleted_at IS NULL`, token).
+WHERE s.token_hash = ? AND u.deleted_at IS NULL`, tokenHash(token)).
 		Scan(&link.User.ID, &link.User.Slug, &link.Path, &link.Directory)
 	if errors.Is(err, sql.ErrNoRows) {
 		return shareLink{}, errShareNotFound
@@ -109,7 +111,7 @@ func (cfg config) handleShares(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer access.close()
-	link := ""
+	link, active := "", false
 	if r.Method == http.MethodPost && r.PostForm.Get("action") == "revoke" {
 		// Revoking does not require the item to still exist on disk.
 		err = cfg.store.revokeShare(r.Context(), a.User.ID, name)
@@ -126,9 +128,10 @@ func (cfg config) handleShares(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if r.Method == http.MethodGet {
-			link, err = cfg.store.shareURL(r.Context(), a.User, name)
+			active, err = cfg.store.shareActive(r.Context(), a.User, name)
 		} else if r.PostForm.Get("action") == "create" {
 			link, err = cfg.store.createShare(r.Context(), a.User, name, info.IsDir())
+			active = err == nil
 		} else {
 			http.Error(w, "unknown share action", http.StatusBadRequest)
 			return
@@ -143,9 +146,11 @@ func (cfg config) handleShares(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
+	// The URL is only known right after creation.
 	json.NewEncoder(w).Encode(struct {
-		URL string `json:"url"`
-	}{URL: link})
+		URL    string `json:"url"`
+		Active bool   `json:"active"`
+	}{URL: link, Active: active})
 }
 
 func (cfg config) openSharedDownload(ctx context.Context, token string) (*storedDownload, error) {
