@@ -49,14 +49,32 @@ func (cfg config) handleFiles(w http.ResponseWriter, r *http.Request) {
 	}
 	action := r.PostForm.Get("action")
 	source := r.PostForm.Get("path")
+	var change int64 // to the account's usage
+	mutating := false
 	if action == "mkdir" {
 		// A folder uses disk space and an inode, so it is charged like a file.
 		err = access.requireQuota(r.Context(), access.Files.unit)
+		change = access.Files.unit
 	}
 	if err == nil {
 		err = manageFile(root, action, directory, source, r.PostForm.Get("name"), r.PostForm.Get("destination"), func() error {
+			mutating = true
+			if action == "delete" {
+				// Measure what the deletion frees while the item still exists.
+				removed, err := measureUsage(r.Context(), root.FS(), source, access.Files.unit)
+				if err != nil {
+					return err
+				}
+				change = -removed
+			}
 			return cfg.store.revokePathShares(r.Context(), a.User.ID, source)
 		})
+	}
+	if err != nil && mutating {
+		access.forgetUsage() // A failed deletion may have removed part of a folder.
+	}
+	if err == nil {
+		access.changed(change)
 	}
 	if err != nil {
 		message, status := storageError(err)

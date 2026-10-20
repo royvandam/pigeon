@@ -105,8 +105,10 @@ func TestQuotaCountsExistingFilesAndReclaimsRemovedFiles(t *testing.T) {
 	if w.Code != http.StatusRequestEntityTooLarge || body.read {
 		t.Fatalf("full quota should reject without reading: %d, body read = %t", w.Code, body.read)
 	}
-	if err := os.Remove(path); err != nil {
-		t.Fatal(err)
+	cookie, csrf := sessionFor(t, cfg, "Test User")
+	form := url.Values{"action": {"delete"}, "path": {"existing/original.txt"}, "csrf_token": {csrf}}
+	if w := serve(newServer(cfg).Handler, formRequest("/files", form, cookie)); w.Code != http.StatusSeeOther {
+		t.Fatalf("delete: %d, %s", w.Code, w.Body)
 	}
 	w = httptest.NewRecorder()
 	cfg.handleUpload(w, uploadRequest(t, "reclaimed.txt", "12345"))

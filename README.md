@@ -218,8 +218,11 @@ positive; values such as `500MB`, `2GB`, or `100B` use powers of 1024.
 
 The upload page shows used, total, and remaining storage and updates these values
 after an upload. The server measures everything inside each user's folder,
-including files already on disk and files in subfolders. Like disk allocation,
-usage is counted in 4 KiB units:
+including files already on disk and files in subfolders. It measures a folder
+once, when the account is first used after the server starts, and then keeps the
+result up to date as files change through Pigeon. Files added or removed
+directly on disk show within 10 minutes. Uploads cut off by a server stop are
+removed at the next start. Like disk allocation, usage is counted in 4 KiB units:
 
 - Each file's size is rounded up to a whole unit, with a minimum of one unit even
   when the file is empty.

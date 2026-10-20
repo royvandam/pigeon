@@ -8,6 +8,8 @@ import "context"
 type accountAccess struct {
 	Files      userStorage
 	QuotaBytes int64
+	id         int64
+	cache      *usageCache
 	release    func()
 }
 
@@ -21,12 +23,30 @@ func (cfg config) accessAccount(ctx context.Context, u user) (*accountAccess, er
 		release()
 		return nil, err
 	}
-	return &accountAccess{Files: cfg.filesFor(u), QuotaBytes: quota, release: release}, nil
+	return &accountAccess{Files: cfg.filesFor(u), QuotaBytes: quota, id: u.ID, cache: cfg.store.usage, release: release}, nil
+}
+
+// used returns the account's storage usage, measuring its folder only when no
+// value is cached.
+func (access *accountAccess) used(ctx context.Context) (int64, error) {
+	return access.cache.usage(ctx, access.id, access.Files)
+}
+
+// changed records delta bytes of usage added, or removed when negative, by a
+// change made while holding this access.
+func (access *accountAccess) changed(delta int64) {
+	access.cache.add(access.id, delta)
+}
+
+// forgetUsage drops the cached usage after a change that may have partly
+// failed, so the next request measures the folder again.
+func (access *accountAccess) forgetUsage() {
+	access.cache.forget(access.id)
 }
 
 // requireQuota reports errDiskQuotaExceeded unless n more bytes fit the quota.
 func (access *accountAccess) requireQuota(ctx context.Context, n int64) error {
-	used, err := access.Files.usage(ctx)
+	used, err := access.used(ctx)
 	if err != nil {
 		return err
 	}

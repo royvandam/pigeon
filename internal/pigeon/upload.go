@@ -76,7 +76,7 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	root.Close()
-	used, err := files.usage(r.Context())
+	used, err := access.used(r.Context())
 	if err != nil {
 		http.Error(w, "failed to check storage usage", http.StatusInternalServerError)
 		return
@@ -169,7 +169,7 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer access.close()
 	quota = access.QuotaBytes
-	used, err = files.usageExcept(r.Context(), batch.stageName)
+	used, err = access.used(r.Context()) // Staging folders are never counted.
 	if err != nil {
 		http.Error(w, "failed to check storage usage", http.StatusInternalServerError)
 		return
@@ -186,9 +186,11 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	savedName, group, err := batch.publish()
 	if err != nil {
+		access.forgetUsage() // Publication rolls back, but only as far as it can.
 		writeStorageError(w, err)
 		return
 	}
+	access.changed(charged)
 	progress.setState("complete")
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")

@@ -37,7 +37,7 @@ func (cfg config) renderIndex(w http.ResponseWriter, r *http.Request, a authenti
 		writeStorageError(w, err)
 		return
 	}
-	used, err := access.Files.usage(r.Context())
+	used, err := access.used(r.Context())
 	if err != nil {
 		http.Error(w, "failed to check storage usage", http.StatusInternalServerError)
 		return

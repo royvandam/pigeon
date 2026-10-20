@@ -21,6 +21,7 @@ type store struct {
 	// uploadSlots lets one upload per account stream at a time; see lockUploadSlot.
 	uploadSlots sync.Map
 	progress    sync.Map
+	usage       *usageCache
 	authLimiter *authLimiter
 	passwords   passwordHasher
 }
@@ -79,7 +80,7 @@ func openStore(ctx context.Context, path string, passwordCost int) (*store, erro
 	}
 	// A single connection serializes account changes and their transactions.
 	db.SetMaxOpenConns(1)
-	s := &store{db: db, authLimiter: newAuthLimiter(), passwords: passwords}
+	s := &store{db: db, usage: newUsageCache(), authLimiter: newAuthLimiter(), passwords: passwords}
 	if err := s.initialize(ctx); err != nil {
 		db.Close()
 		return nil, err
