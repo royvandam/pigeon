@@ -6,9 +6,9 @@ uploads stored in a separate folder for each user.
 
 Enter the development environment with `nix-shell`. It provides Go, `gopls`,
 `goimports`, the SQLite CLI, Node.js for upload-page tests, and the GitHub CLI
-(`gh`). `go.mod` requires Go 1.26.9 or newer for its security fixes. With Go's
+(`gh`). `go.mod` requires Go 1.26.10 or newer for its security fixes. With Go's
 default `GOTOOLCHAIN=auto`, an older Go, including the Nix shell's, downloads
-that release automatically on first use. Without Nix, install Go 1.26.9 or newer.
+that release automatically on first use. Without Nix, install Go 1.26.10 or newer.
 
 ```sh
 go run ./cmd/pigeon -listen 127.0.0.1:8080
