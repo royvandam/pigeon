@@ -25,7 +25,7 @@ func TestDefaultQuotaAndDatabaseMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	token, err := cfg.store.createSession(ctx, u)
+	token, err := cfg.store.sessions.Create(ctx, u)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ ALTER TABLE settings ADD COLUMN max_bytes INTEGER NOT NULL DEFAULT 209715200 CHE
 	if err != nil || got != want {
 		t.Fatalf("migration changed server settings: %#v, %v", got, err)
 	}
-	a, err := s.session(ctx, token)
+	a, err := s.sessions.Lookup(ctx, token)
 	if err != nil || a.User.QuotaBytes != quota.DefaultQuota {
 		t.Fatalf("migrated user's session/quota = %#v, %v", a, err)
 	}
@@ -74,7 +74,7 @@ ALTER TABLE settings ADD COLUMN max_bytes INTEGER NOT NULL DEFAULT 209715200 CHE
 		t.Fatal(err)
 	}
 	defer s.db.Close()
-	a, err = s.session(ctx, token)
+	a, err = s.sessions.Lookup(ctx, token)
 	if err != nil || a.User.QuotaBytes != 12345 {
 		t.Fatalf("quota did not survive restart: %#v, %v", a, err)
 	}
@@ -194,7 +194,7 @@ func TestAdminCanAssignAndChangeQuotas(t *testing.T) {
 	if w.Code != http.StatusSeeOther {
 		t.Fatalf("change quota: %d, %s", w.Code, w.Body)
 	}
-	a, err := cfg.store.session(ctx, userCookie.Value)
+	a, err := cfg.store.sessions.Lookup(ctx, userCookie.Value)
 	if err != nil || a.User.QuotaBytes != 4 {
 		t.Fatalf("existing session did not see changed quota: %#v, %v", a, err)
 	}

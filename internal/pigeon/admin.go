@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/royvandam/pigeon/pkg/account"
+	"github.com/royvandam/pigeon/pkg/auth"
 	"github.com/royvandam/pigeon/pkg/quota"
 )
 
@@ -41,7 +42,7 @@ type adminUser struct {
 	QuotaInput string
 }
 
-func (cfg config) renderAdmin(w http.ResponseWriter, r *http.Request, a authentication, data adminPage, status int) {
+func (cfg config) renderAdmin(w http.ResponseWriter, r *http.Request, a auth.Authentication, data adminPage, status int) {
 	users, err := cfg.store.accounts.List(r.Context())
 	if err != nil {
 		http.Error(w, "failed to load users", http.StatusInternalServerError)

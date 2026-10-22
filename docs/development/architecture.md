@@ -9,6 +9,7 @@ internal/pigeon/    Private application code and Go tests
 internal/token/     Random tokens for sessions, share links, and forms
 pkg/account/        Accounts, passwords, account locks, and lifecycle changes
   wordlists/        Embedded passphrase dictionary and attribution
+pkg/auth/           Sign-in sessions and rate-limited password checks
 pkg/database/       SQLite connection and schema migrations
 pkg/quota/          Quota rules, usage measurement, and the usage cache
 pkg/storage/        Storage provider interfaces and path rules
@@ -84,6 +85,20 @@ quotas. It takes the locks a change needs and coordinates the database with the
 account's files and cached usage. A purge keeps the account reserved until its
 files are removed, so a failure leaves it intact for a retry.
 
+## Authentication
+
+`pkg/auth` authenticates requests. `auth.Authenticator` checks passwords for
+the sign-in form and HTTP Basic authentication. Each client may make 10 failed
+attempts, and one more becomes available every 6 seconds; the limit applies
+before bcrypt runs, and successful sign-ins return their attempt. At most one
+check per CPU runs at a time. The HTTP layer identifies the client from its
+address, or from `X-Forwarded-For` when the request comes from a trusted proxy,
+and `auth.ClientKey` groups IPv6 clients by their /64 network.
+
+`auth.Sessions` stores browser sessions as hashes of their tokens, each with a
+CSRF token. A session lasts 12 hours and ends when the account is deleted or
+its password changes.
+
 ## Request and storage ownership
 
 `userStorage` names an account's namespace in the storage provider and
@@ -110,7 +125,8 @@ accounts, sessions, and share links. Inside `internal/pigeon`, `run.go`
 handles startup, `database.go` persists server settings, `setup.go` handles
 first-run provisioning, and `accounts.go` turns admin page actions into account
 changes.
-`session.go` and `auth.go` handle authentication. `admin.go`, `index.go`, and
+`auth.go` handles sign-in, sign-out, and request authentication, and
+`ratelimit.go` identifies clients behind trusted proxies. `admin.go`, `index.go`, and
 `upload.go` serve user management, the explorer page, and the upload endpoint.
 `files.go` handles explorer requests, and `download.go` serves files and ZIP
 archives. `upload_files.go` streams and publishes batches. `server.go` handles

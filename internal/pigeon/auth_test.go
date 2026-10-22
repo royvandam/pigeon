@@ -91,7 +91,7 @@ func TestBrowserLoginLogout(t *testing.T) {
 	if sessionCookie == nil || !sessionCookie.HttpOnly || sessionCookie.SameSite != http.SameSiteLaxMode {
 		t.Fatal("login did not set a protected session cookie")
 	}
-	a, err := cfg.store.session(context.Background(), sessionCookie.Value)
+	a, err := cfg.store.sessions.Lookup(context.Background(), sessionCookie.Value)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestBrowserLoginLogout(t *testing.T) {
 	if w.Code != http.StatusSeeOther {
 		t.Fatalf("logout: %d %s", w.Code, w.Body)
 	}
-	if _, err := cfg.store.session(context.Background(), sessionCookie.Value); !errors.Is(err, account.ErrInvalidCredentials) {
+	if _, err := cfg.store.sessions.Lookup(context.Background(), sessionCookie.Value); !errors.Is(err, account.ErrInvalidCredentials) {
 		t.Fatalf("logout left a valid session: %v", err)
 	}
 }
@@ -182,7 +182,7 @@ func TestAdminPermissionsCSRFAndUserLifecycle(t *testing.T) {
 	if err != nil || alice.Admin || alice.Slug != "alice-smith" {
 		t.Fatalf("created user: %#v, %v", alice, err)
 	}
-	oldToken, err := cfg.store.createSession(ctx, alice)
+	oldToken, err := cfg.store.sessions.Create(ctx, alice)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,10 +193,10 @@ func TestAdminPermissionsCSRFAndUserLifecycle(t *testing.T) {
 		t.Fatalf("reset user: %d %s", w.Code, w.Body)
 	}
 	resetPassphrase := displayedPassphrase(t, w)
-	if _, err := cfg.store.session(ctx, oldToken); !errors.Is(err, account.ErrInvalidCredentials) {
+	if _, err := cfg.store.sessions.Lookup(ctx, oldToken); !errors.Is(err, account.ErrInvalidCredentials) {
 		t.Fatalf("password reset did not revoke session: %v", err)
 	}
-	if _, err := cfg.store.createSession(ctx, alice); !errors.Is(err, account.ErrInvalidCredentials) {
+	if _, err := cfg.store.sessions.Create(ctx, alice); !errors.Is(err, account.ErrInvalidCredentials) {
 		t.Fatalf("password reset accepted a login already in progress: %v", err)
 	}
 	if _, err := cfg.store.accounts.Authenticate(ctx, "Alice Smith", passphrase); !errors.Is(err, account.ErrInvalidCredentials) {
@@ -206,7 +206,7 @@ func TestAdminPermissionsCSRFAndUserLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	newToken, err := cfg.store.createSession(ctx, alice)
+	newToken, err := cfg.store.sessions.Create(ctx, alice)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +216,7 @@ func TestAdminPermissionsCSRFAndUserLifecycle(t *testing.T) {
 	if w.Code != http.StatusSeeOther {
 		t.Fatalf("delete user: %d %s", w.Code, w.Body)
 	}
-	if _, err := cfg.store.session(ctx, newToken); !errors.Is(err, account.ErrInvalidCredentials) {
+	if _, err := cfg.store.sessions.Lookup(ctx, newToken); !errors.Is(err, account.ErrInvalidCredentials) {
 		t.Fatal("deleted user's session still works")
 	}
 	if _, err := cfg.store.accounts.Authenticate(ctx, "Alice Smith", resetPassphrase); !errors.Is(err, account.ErrInvalidCredentials) {
@@ -251,7 +251,7 @@ func TestSessionExpirationAndCrossOriginRequests(t *testing.T) {
 	if _, err := cfg.store.db.Exec(`UPDATE sessions SET expires_at = 1`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := cfg.store.session(context.Background(), cookie.Value); !errors.Is(err, account.ErrInvalidCredentials) {
+	if _, err := cfg.store.sessions.Lookup(context.Background(), cookie.Value); !errors.Is(err, account.ErrInvalidCredentials) {
 		t.Fatal("expired session still works")
 	}
 }
@@ -390,7 +390,7 @@ func TestHTTPSPublicURLSecuresCookiesAndEnablesHSTS(t *testing.T) {
 			session := check("sign-in", w, sessionCookieName, http.StatusSeeOther)
 			check("sign-in clears the login cookie", w, loginCookieName, http.StatusSeeOther)
 
-			a, err := cfg.store.session(context.Background(), session.Value)
+			a, err := cfg.store.sessions.Lookup(context.Background(), session.Value)
 			if err != nil {
 				t.Fatal(err)
 			}

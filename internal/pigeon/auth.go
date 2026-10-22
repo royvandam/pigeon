@@ -9,6 +9,7 @@ import (
 
 	"github.com/royvandam/pigeon/internal/token"
 	"github.com/royvandam/pigeon/pkg/account"
+	"github.com/royvandam/pigeon/pkg/auth"
 )
 
 const (
@@ -32,16 +33,16 @@ func (cfg config) parseForm(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-func (cfg config) requestAuthentication(r *http.Request) (authentication, error) {
+func (cfg config) requestAuthentication(r *http.Request) (auth.Authentication, error) {
 	if username, password, ok := r.BasicAuth(); ok {
 		u, err := cfg.checkPassword(r, username, password)
-		return authentication{User: u, Basic: true}, err
+		return auth.Authentication{User: u, Basic: true}, err
 	}
 	cookie, err := r.Cookie(sessionCookieName)
 	if err != nil {
-		return authentication{}, account.ErrInvalidCredentials
+		return auth.Authentication{}, account.ErrInvalidCredentials
 	}
-	return cfg.store.session(r.Context(), cookie.Value)
+	return cfg.store.sessions.Lookup(r.Context(), cookie.Value)
 }
 
 // navigation reports whether r loads a page in a browser tab. Browsers send
@@ -63,10 +64,10 @@ type authOptions struct {
 	Browser       bool
 }
 
-func (cfg config) requireAuth(w http.ResponseWriter, r *http.Request, options authOptions) (authentication, bool) {
+func (cfg config) requireAuth(w http.ResponseWriter, r *http.Request, options authOptions) (auth.Authentication, bool) {
 	a, err := cfg.requestAuthentication(r)
 	if err != nil {
-		var limited *tooManyAttemptsError
+		var limited *auth.TooManyAttemptsError
 		if errors.As(err, &limited) {
 			setRetryAfter(w, limited)
 			http.Error(w, limited.Error(), http.StatusTooManyRequests)
@@ -84,27 +85,27 @@ func (cfg config) requireAuth(w http.ResponseWriter, r *http.Request, options au
 			}
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 		}
-		return authentication{}, false
+		return auth.Authentication{}, false
 	}
 	if options.Administrator && !a.User.Admin {
 		http.Error(w, account.ErrAdministratorRequired.Error(), http.StatusForbidden)
-		return authentication{}, false
+		return auth.Authentication{}, false
 	}
 	if r.Method == http.MethodPost {
 		if !cfg.sameOrigin(r) {
 			http.Error(w, "invalid request origin", http.StatusForbidden)
-			return authentication{}, false
+			return auth.Authentication{}, false
 		}
 		csrf := r.Header.Get("X-CSRF-Token")
 		if r.URL.Path != "/upload" {
 			if !cfg.parseForm(w, r) {
-				return authentication{}, false
+				return auth.Authentication{}, false
 			}
 			csrf = r.PostForm.Get("csrf_token")
 		}
 		if !a.Basic && !validCSRF(a.CSRFToken, csrf) {
 			http.Error(w, "invalid CSRF token", http.StatusForbidden)
-			return authentication{}, false
+			return auth.Authentication{}, false
 		}
 	}
 	return a, true
@@ -114,7 +115,7 @@ func (cfg config) setSessionCookie(w http.ResponseWriter, r *http.Request, token
 	http.SetCookie(w, &http.Cookie{
 		Name: sessionCookieName, Value: token, Path: "/", HttpOnly: true,
 		Secure: cfg.secureCookies(r), SameSite: http.SameSiteLaxMode,
-		MaxAge: int(sessionLifetime.Seconds()), Expires: time.Now().Add(sessionLifetime),
+		MaxAge: int(auth.SessionLifetime.Seconds()), Expires: time.Now().Add(auth.SessionLifetime),
 	})
 }
 
@@ -157,10 +158,10 @@ func (cfg config) handleLogin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		u, err := cfg.checkPassword(r, r.PostForm.Get("username"), r.PostForm.Get("password"))
-		var limited *tooManyAttemptsError
+		var limited *auth.TooManyAttemptsError
 		if errors.As(err, &limited) {
 			setRetryAfter(w, limited)
-			renderTemplate(w, loginTmpl, loginPage{CSRFToken: cookie.Value, Error: "Too many sign-in attempts. Try again in " + limited.wait() + "."}, http.StatusTooManyRequests)
+			renderTemplate(w, loginTmpl, loginPage{CSRFToken: cookie.Value, Error: "Too many sign-in attempts. Try again in " + limited.Wait() + "."}, http.StatusTooManyRequests)
 			return
 		}
 		if errors.Is(err, account.ErrInvalidCredentials) {
@@ -172,7 +173,7 @@ func (cfg config) handleLogin(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "login unavailable", http.StatusInternalServerError)
 			return
 		}
-		token, err := cfg.store.createSession(r.Context(), u)
+		token, err := cfg.store.sessions.Create(r.Context(), u)
 		if err != nil {
 			http.Error(w, "login unavailable; try again", http.StatusInternalServerError)
 			return
@@ -192,7 +193,7 @@ func (cfg config) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := cfg.store.deleteSession(r.Context(), a.TokenHash); err != nil {
+	if err := cfg.store.sessions.Delete(r.Context(), a.TokenHash); err != nil {
 		http.Error(w, "logout failed", http.StatusInternalServerError)
 		return
 	}

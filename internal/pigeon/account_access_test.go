@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/royvandam/pigeon/pkg/account"
+	"github.com/royvandam/pigeon/pkg/auth"
 	"github.com/royvandam/pigeon/pkg/quota"
 )
 
@@ -41,7 +42,7 @@ func TestReadsRejectOldIdentityAfterPurgeAndUsernameReuse(t *testing.T) {
 		t.Fatalf("old identity can download replacement account files: %v", err)
 	}
 	w := httptest.NewRecorder()
-	cfg.renderIndex(w, httptest.NewRequest(http.MethodGet, "/", nil), authentication{User: old}, "", "", "", http.StatusOK)
+	cfg.renderIndex(w, httptest.NewRequest(http.MethodGet, "/", nil), auth.Authentication{User: old}, "", "", "", http.StatusOK)
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("old identity can browse replacement account: %d %s", w.Code, w.Body)
 	}

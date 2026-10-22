@@ -10,14 +10,15 @@ import (
 	"sync"
 
 	"github.com/royvandam/pigeon/pkg/account"
+	"github.com/royvandam/pigeon/pkg/auth"
 	"github.com/royvandam/pigeon/pkg/database"
 )
 
 type store struct {
-	db          *sql.DB
-	accounts    *account.Store
-	progress    sync.Map
-	authLimiter *authLimiter
+	db       *sql.DB
+	accounts *account.Store
+	sessions *auth.Sessions
+	progress sync.Map
 }
 
 type settings struct {
@@ -57,7 +58,7 @@ func openStore(ctx context.Context, path string, passwordCost int) (*store, erro
 		db.Close()
 		return nil, err
 	}
-	s := &store{db: db, accounts: accounts, authLimiter: newAuthLimiter()}
+	s := &store{db: db, accounts: accounts, sessions: auth.NewSessions(db)}
 	if err := s.initializeSettings(ctx); err != nil {
 		db.Close()
 		return nil, err

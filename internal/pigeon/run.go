@@ -12,6 +12,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/royvandam/pigeon/pkg/account"
+	"github.com/royvandam/pigeon/pkg/auth"
 	"github.com/royvandam/pigeon/pkg/quota"
 	"github.com/royvandam/pigeon/pkg/storage/local"
 )
@@ -92,7 +93,8 @@ func Run(ctx context.Context, args []string) error {
 	}
 	locks, usage := account.NewLocks(), quota.NewCache(time.Now)
 	cfg := config{dir: settings.dir, listen: settings.listen, store: s, storage: provider, locks: locks, usage: usage,
-		manager: account.NewManager(s.accounts, locks, usage, provider), trustedProxies: trustedProxies, publicURL: publicURL}
+		manager: account.NewManager(s.accounts, locks, usage, provider), authenticator: auth.NewAuthenticator(s.accounts, time.Now),
+		trustedProxies: trustedProxies, publicURL: publicURL}
 	log.Printf("listening on http://%s", cfg.listen)
 	if publicURL != nil {
 		log.Printf("public URL: %s", publicURL)
