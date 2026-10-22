@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/royvandam/pigeon/pkg/storage"
 )
 
 func TestFileDownloadAttachmentRangeAndHead(t *testing.T) {
@@ -69,7 +71,7 @@ func TestDirectoryDownloadIncludesHierarchyAndEmptyFolders(t *testing.T) {
 		}
 		contents := make(map[string]string)
 		for _, file := range archive.File {
-			if strings.Contains(file.Name, stagingPrefix) {
+			if strings.Contains(file.Name, storage.ReservedPrefix) {
 				t.Fatalf("private staging files leaked: %s", file.Name)
 			}
 			reader, err := file.Open()

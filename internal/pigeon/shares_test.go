@@ -15,6 +15,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/royvandam/pigeon/pkg/storage"
 )
 
 // shareStatus returns what the Share dialog loads for name.
@@ -128,7 +130,7 @@ func TestSharedFolderZipIsScopedAndIncludesCurrentContents(t *testing.T) {
 			t.Fatal(err)
 		}
 		contents[entry.Name] = string(data)
-		if !strings.HasPrefix(entry.Name, "project/") || strings.Contains(entry.Name, stagingPrefix) || strings.Contains(entry.Name, "private.txt") {
+		if !strings.HasPrefix(entry.Name, "project/") || strings.Contains(entry.Name, storage.ReservedPrefix) || strings.Contains(entry.Name, "private.txt") {
 			t.Fatalf("shared ZIP leaked unrelated data: %s", entry.Name)
 		}
 	}

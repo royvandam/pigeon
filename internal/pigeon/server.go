@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/royvandam/pigeon/pkg/storage"
 )
 
 type config struct {
@@ -19,9 +21,10 @@ type config struct {
 	// nil when unknown.
 	publicURL *url.URL
 
-	dir    string
-	listen string
-	store  *store
+	dir     string
+	listen  string
+	store   *store
+	storage storage.Provider
 	// allocationUnit is the minimum quota charge per file and folder; zero
 	// selects defaultAllocationUnit. Tests use 1 to keep byte arithmetic exact.
 	allocationUnit int64

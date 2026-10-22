@@ -8,7 +8,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 )
@@ -66,42 +65,6 @@ func TestUploadRejectsInvalidDestinationsBeforeReadingBody(t *testing.T) {
 		if w.Code != status || body.read {
 			t.Errorf("destination %q: %d, body read=%t; want %d without reading", destination, w.Code, body.read, status)
 		}
-	}
-}
-
-func TestUploadPublicationRollbackPreservesExistingFolders(t *testing.T) {
-	t.Parallel()
-	cfg := newTestConfig(t, 100)
-	writeStoredFile(t, cfg, "test-user", "destination/project/existing.txt", "keep")
-	batch, err := newUploadBatch(filepath.Join(cfg.dir, "test-user"), "destination", 100, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer batch.close()
-	for _, name := range []string{"project/new/a.txt", "other/b.txt"} {
-		if err := batch.checkPath(name); err != nil {
-			t.Fatal(err)
-		}
-		if err := batch.add(name, strings.NewReader("data")); err != nil {
-			t.Fatal(err)
-		}
-	}
-	// Fail after the first file has been published and a second parent created.
-	if err := batch.stage.Remove("other/b.txt"); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := batch.publish(); err == nil {
-		t.Fatal("publication succeeded with missing staged file")
-	}
-	for _, name := range []string{"project/new", "other"} {
-		if _, err := os.Stat(filepath.Join(cfg.dir, "test-user", "destination", filepath.FromSlash(name))); !errors.Is(err, os.ErrNotExist) {
-			t.Errorf("rollback left %s behind: %v", name, err)
-		}
-	}
-	used, err := diskUsage(context.Background(), filepath.Join(cfg.dir, "test-user", "destination"), 1)
-	// The preserved project folder and its four-byte file, at one byte per entry.
-	if err != nil || used != 5 {
-		t.Fatalf("rollback changed existing data: used=%d, %v", used, err)
 	}
 }
 

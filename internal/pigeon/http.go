@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"os"
 	"strings"
+
+	"github.com/royvandam/pigeon/pkg/storage"
 )
 
 func allowMethods(w http.ResponseWriter, r *http.Request, methods ...string) bool {
@@ -26,9 +28,9 @@ func writeStorageError(w http.ResponseWriter, err error) {
 
 func storageError(err error) (string, int) {
 	switch {
-	case errors.Is(err, errStoragePath):
+	case errors.Is(err, storage.ErrInvalidPath):
 		return err.Error(), http.StatusBadRequest
-	case errors.Is(err, errFileConflict), errors.Is(err, os.ErrExist):
+	case errors.Is(err, storage.ErrConflict), errors.Is(err, os.ErrExist):
 		return err.Error(), http.StatusConflict
 	case errors.Is(err, errDiskQuotaExceeded):
 		return "disk quota exceeded", http.StatusRequestEntityTooLarge

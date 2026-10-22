@@ -3,16 +3,14 @@ package pigeon
 import (
 	"archive/zip"
 	"context"
-	"fmt"
 	"io"
 	"io/fs"
 	"log"
 	"mime"
 	"net/http"
-	"os"
 	"path"
-	"path/filepath"
-	"strings"
+
+	"github.com/royvandam/pigeon/pkg/storage"
 )
 
 func (cfg config) handleDownload(w http.ResponseWriter, r *http.Request) {
@@ -39,30 +37,30 @@ func (cfg config) openPrivateDownload(ctx context.Context, u user, name string) 
 		return nil, err
 	}
 	defer access.close()
-	root, err := access.Files.open()
+	tree, err := access.Files.open(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer root.Close()
+	defer tree.Close()
 	// The download retains its own handle; release account access before streaming.
-	return openStoredDownload(root, name, u.Slug)
+	return openStoredDownload(ctx, tree, name, u.Slug)
 }
 
 type storedDownload struct {
-	file     *os.File
-	folder   *os.Root
+	file     storage.File
+	folder   storage.Tree
 	info     fs.FileInfo
 	filename string
 }
 
-func openStoredDownload(root *os.Root, name, rootName string) (*storedDownload, error) {
-	info, err := storageInfo(root, name)
+func openStoredDownload(ctx context.Context, tree storage.Tree, name, rootName string) (*storedDownload, error) {
+	info, err := tree.Stat(ctx, name)
 	if err != nil {
 		return nil, err
 	}
 	download := &storedDownload{info: info, filename: info.Name()}
 	if info.IsDir() {
-		folder, err := root.OpenRoot(nativeStoragePath(name))
+		folder, err := tree.Sub(ctx, name)
 		if err != nil {
 			return nil, err
 		}
@@ -73,16 +71,13 @@ func openStoredDownload(root *os.Root, name, rootName string) (*storedDownload, 
 		}
 		return download, nil
 	}
-	file, err := root.Open(filepath.FromSlash(name))
+	file, err := tree.Open(ctx, name)
 	if err != nil {
 		return nil, err
 	}
 	info, err = file.Stat()
-	if err != nil || !info.Mode().IsRegular() {
+	if err != nil {
 		file.Close()
-		if err == nil {
-			err = fmt.Errorf("%w: special files cannot be downloaded", errStoragePath)
-		}
 		return nil, err
 	}
 	download.file, download.info = file, info
@@ -116,31 +111,9 @@ func (d *storedDownload) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, d.filename, d.info.ModTime(), d.file)
 }
 
-func writeFolderZip(ctx context.Context, w io.Writer, root *os.Root, prefix string) error {
+func writeFolderZip(ctx context.Context, w io.Writer, folder storage.Tree, prefix string) error {
 	archive := zip.NewWriter(w)
-	err := fs.WalkDir(root.FS(), ".", func(name string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if strings.HasPrefix(entry.Name(), stagingPrefix) {
-			if entry.IsDir() {
-				return fs.SkipDir
-			}
-			return nil
-		}
-		if entry.Type()&os.ModeSymlink != 0 {
-			return fmt.Errorf("symbolic links cannot be downloaded")
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		if !info.IsDir() && !info.Mode().IsRegular() {
-			return fmt.Errorf("special files cannot be downloaded")
-		}
+	err := folder.Walk(ctx, "", func(name string, info fs.FileInfo) error {
 		header, err := zip.FileInfoHeader(info)
 		if err != nil {
 			return err
@@ -155,7 +128,7 @@ func writeFolderZip(ctx context.Context, w io.Writer, root *os.Root, prefix stri
 		if err != nil || info.IsDir() {
 			return err
 		}
-		file, err := root.Open(filepath.FromSlash(name))
+		file, err := folder.Open(ctx, name)
 		if err != nil {
 			return err
 		}

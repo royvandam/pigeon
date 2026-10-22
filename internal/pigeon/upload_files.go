@@ -1,22 +1,23 @@
 package pigeon
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
-	"os"
+	"io/fs"
 	"path"
-	"path/filepath"
+
+	"github.com/royvandam/pigeon/pkg/storage"
 )
 
 var errDiskQuotaExceeded = errors.New("disk quota exceeded")
 
-// Write into a private staging directory and publish only after every multipart
-// part has been validated. Root confines filesystem operations to that directory.
+// Stage files out of sight and publish them only after every multipart part has
+// been validated.
 type uploadBatch struct {
-	root      *os.Root
-	stage     *os.Root
-	stageName string
+	tree      storage.Tree
+	stage     storage.Upload
 	paths     map[string]bool // true for files, false for their parent directories
 	firstPath string
 	files     int
@@ -30,38 +31,26 @@ type uploadBatch struct {
 	names     []string
 }
 
-func newUploadBatch(dir, target string, remaining, unit int64) (*uploadBatch, error) {
-	root, err := os.OpenRoot(dir)
+// newUploadBatch stages files for folder target of tree, which stays open until
+// the batch is closed.
+func newUploadBatch(ctx context.Context, tree storage.Tree, target string, remaining, unit int64) (*uploadBatch, error) {
+	if err := storage.RequireDirectory(ctx, tree, target); err != nil {
+		return nil, err
+	}
+	stage, err := tree.BeginUpload(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if err := requireDirectory(root, target); err != nil {
-		root.Close()
-		return nil, err
-	}
-	name := stagingPrefix + shortRandHex(12)
-	if err := root.Mkdir(name, 0o750); err != nil {
-		root.Close()
-		return nil, err
-	}
-	stage, err := root.OpenRoot(name)
-	if err != nil {
-		root.RemoveAll(name)
-		root.Close()
-		return nil, err
-	}
-	return &uploadBatch{root: root, stage: stage, stageName: name, paths: make(map[string]bool), target: target,
+	return &uploadBatch{tree: tree, stage: stage, paths: make(map[string]bool), target: target,
 		remaining: remaining, unit: unit}, nil
 }
 
 func (b *uploadBatch) close() {
 	b.stage.Close()
-	b.root.RemoveAll(b.stageName)
-	b.root.Close()
 }
 
-func (b *uploadBatch) checkPath(name string) error {
-	if err := validateStoragePath(name, false); err != nil {
+func (b *uploadBatch) checkPath(ctx context.Context, name string) error {
+	if err := storage.ValidatePath(name); err != nil {
 		return err
 	}
 	// Only the uploaded path is new; the destination folder may be older.
@@ -69,17 +58,17 @@ func (b *uploadBatch) checkPath(name string) error {
 		return err
 	}
 	if _, exists := b.paths[name]; exists {
-		return fmt.Errorf("%w: duplicate or conflicting file path", errStoragePath)
+		return fmt.Errorf("%w: duplicate or conflicting file path", storage.ErrInvalidPath)
 	}
 	for parent := path.Dir(name); parent != "."; parent = path.Dir(parent) {
 		if b.paths[parent] {
-			return fmt.Errorf("%w: file path conflicts with a parent file", errStoragePath)
+			return fmt.Errorf("%w: file path conflicts with a parent file", storage.ErrInvalidPath)
 		}
 	}
 	destination := path.Join(b.target, name)
-	if info, err := storageInfo(b.root, destination); err == nil && info != nil {
-		return fmt.Errorf("%w: %q; rename or delete the existing item first", errFileConflict, destination)
-	} else if !errors.Is(err, os.ErrNotExist) {
+	if info, err := b.tree.Stat(ctx, destination); err == nil && info != nil {
+		return fmt.Errorf("%w: %q; rename or delete the existing item first", storage.ErrConflict, destination)
+	} else if !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
 	return nil
@@ -87,15 +76,15 @@ func (b *uploadBatch) checkPath(name string) error {
 
 // newDirectories counts the folders that publishing name would create: parents
 // that neither exist on disk nor belong to an earlier file in this batch.
-func (b *uploadBatch) newDirectories(name string) (int64, error) {
+func (b *uploadBatch) newDirectories(ctx context.Context, name string) (int64, error) {
 	var count int64
 	for parent := path.Dir(name); parent != "."; parent = path.Dir(parent) {
 		if _, planned := b.paths[parent]; planned {
 			break
 		}
-		if _, err := storageInfo(b.root, path.Join(b.target, parent)); err == nil {
+		if _, err := b.tree.Stat(ctx, path.Join(b.target, parent)); err == nil {
 			break
-		} else if !errors.Is(err, os.ErrNotExist) {
+		} else if !errors.Is(err, fs.ErrNotExist) {
 			return 0, err
 		}
 		count++
@@ -103,8 +92,8 @@ func (b *uploadBatch) newDirectories(name string) (int64, error) {
 	return count, nil
 }
 
-func (b *uploadBatch) add(name string, contents io.Reader) error {
-	folders, err := b.newDirectories(name)
+func (b *uploadBatch) add(ctx context.Context, name string, contents io.Reader) error {
+	folders, err := b.newDirectories(ctx, name)
 	if err != nil {
 		return err
 	}
@@ -113,11 +102,7 @@ func (b *uploadBatch) add(name string, contents io.Reader) error {
 	if available < b.unit {
 		return errDiskQuotaExceeded
 	}
-	native := filepath.FromSlash(name)
-	if err := b.stage.MkdirAll(filepath.Dir(native), 0o750); err != nil {
-		return err
-	}
-	out, err := b.stage.OpenFile(native, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o640)
+	out, err := b.stage.Create(name)
 	if err != nil {
 		return err
 	}
@@ -159,15 +144,15 @@ func (b *uploadBatch) add(name string, contents io.Reader) error {
 // currentCharge recomputes the batch's charge against the destination as it is
 // now. Uploads stream without the account lock, so folders may have been
 // created or removed since the files were added.
-func (b *uploadBatch) currentCharge() (int64, error) {
+func (b *uploadBatch) currentCharge(ctx context.Context) (int64, error) {
 	planned := map[string]bool{}
 	var folders int64
 	for _, name := range b.names {
 		for parent := path.Dir(name); parent != "." && !planned[parent]; parent = path.Dir(parent) {
 			planned[parent] = true
-			if _, err := storageInfo(b.root, path.Join(b.target, parent)); err == nil {
+			if _, err := b.tree.Stat(ctx, path.Join(b.target, parent)); err == nil {
 				break
-			} else if !errors.Is(err, os.ErrNotExist) {
+			} else if !errors.Is(err, fs.ErrNotExist) {
 				return 0, err
 			}
 			folders++
@@ -176,62 +161,19 @@ func (b *uploadBatch) currentCharge() (int64, error) {
 	return b.charged + (folders-b.folders)*b.unit, nil
 }
 
-func (b *uploadBatch) publish() (string, bool, error) {
-	// File management uses the same per-user lock as uploads. Preflight every
-	// destination before changing anything and roll back on publication errors.
-	if err := requireDirectory(b.root, b.target); err != nil {
+// publish moves the staged files into place. File management uses the same
+// per-user lock as uploads, so nothing changes the destination meanwhile.
+func (b *uploadBatch) publish(ctx context.Context) (string, bool, error) {
+	if err := b.stage.Publish(ctx, b.target, b.names); err != nil {
 		return "", false, err
-	}
-	for _, name := range b.names {
-		if _, err := storageInfo(b.root, path.Join(b.target, name)); !errors.Is(err, os.ErrNotExist) {
-			if err == nil {
-				err = fmt.Errorf("%w: %q", errFileConflict, path.Join(b.target, name))
-			}
-			return "", false, err
-		}
-	}
-	var createdDirs, published []string
-	rollback := func() {
-		for i := len(published) - 1; i >= 0; i-- {
-			b.root.Remove(filepath.FromSlash(published[i]))
-		}
-		for i := len(createdDirs) - 1; i >= 0; i-- {
-			b.root.Remove(filepath.FromSlash(createdDirs[i]))
-		}
-	}
-	for _, name := range b.names {
-		destination := path.Join(b.target, name)
-		parent := path.Dir(destination)
-		var missing []string
-		for parent != "." {
-			if _, err := b.root.Lstat(filepath.FromSlash(parent)); err == nil {
-				break
-			} else if !errors.Is(err, os.ErrNotExist) {
-				rollback()
-				return "", false, err
-			}
-			missing = append(missing, parent)
-			parent = path.Dir(parent)
-		}
-		for i := len(missing) - 1; i >= 0; i-- {
-			if err := b.root.Mkdir(filepath.FromSlash(missing[i]), 0o750); err != nil {
-				rollback()
-				return "", false, err
-			}
-			createdDirs = append(createdDirs, missing[i])
-		}
-		source := filepath.Join(b.stageName, filepath.FromSlash(name))
-		if err := b.root.Rename(source, filepath.FromSlash(destination)); err != nil {
-			rollback()
-			return "", false, err
-		}
-		published = append(published, destination)
 	}
 	group := b.files > 1 || path.Dir(b.firstPath) != "."
 	saved := path.Join(b.target, b.firstPath)
 	if group {
-		saved = nativeStoragePath(b.target)
-		saved = filepath.ToSlash(saved)
+		saved = b.target
+		if saved == "" {
+			saved = "."
+		}
 	}
 	return saved, group, nil
 }

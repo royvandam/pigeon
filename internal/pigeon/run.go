@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/royvandam/pigeon/pkg/storage/local"
 	"golang.org/x/term"
 )
 
@@ -65,10 +66,11 @@ func Run(ctx context.Context, args []string) error {
 	if err := promptInitialAdmin(ctx, s, os.Stdin, os.Stdout, readSecret); err != nil {
 		return fmt.Errorf("admin setup: %w", err)
 	}
-	if err := os.MkdirAll(settings.dir, 0o750); err != nil {
+	provider, err := local.NewProvider(settings.dir)
+	if err != nil {
 		return fmt.Errorf("create upload directory: %w", err)
 	}
-	removed, err := removeStaleStaging(settings.dir)
+	removed, err := provider.RemoveStaleUploads(ctx)
 	if removed > 0 {
 		log.Printf("removed %d unfinished uploads left from the previous run", removed)
 	}
@@ -84,7 +86,7 @@ func Run(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	cfg := config{dir: settings.dir, listen: settings.listen, store: s, trustedProxies: trustedProxies, publicURL: publicURL}
+	cfg := config{dir: settings.dir, listen: settings.listen, store: s, storage: provider, trustedProxies: trustedProxies, publicURL: publicURL}
 	log.Printf("listening on http://%s", cfg.listen)
 	if publicURL != nil {
 		log.Printf("public URL: %s", publicURL)

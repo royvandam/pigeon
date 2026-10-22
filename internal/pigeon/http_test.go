@@ -9,6 +9,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/royvandam/pigeon/pkg/storage"
 )
 
 func TestStorageErrorResponses(t *testing.T) {
@@ -18,8 +20,8 @@ func TestStorageErrorResponses(t *testing.T) {
 		status int
 		text   string
 	}{
-		{fmt.Errorf("%w: malformed name", errStoragePath), 400, "malformed name"},
-		{errFileConflict, 409, "already exists"},
+		{fmt.Errorf("%w: malformed name", storage.ErrInvalidPath), 400, "malformed name"},
+		{storage.ErrConflict, 409, "already exists"},
 		{os.ErrNotExist, 404, "not found"},
 		{errInvalidCredentials, 401, "unauthorized"},
 		{context.Canceled, 408, "operation canceled"},

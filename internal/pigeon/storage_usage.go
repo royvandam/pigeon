@@ -2,14 +2,13 @@ package pigeon
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io/fs"
 	"math"
-	"os"
-	"strings"
 	"sync"
 	"time"
+
+	"github.com/royvandam/pigeon/pkg/storage"
 )
 
 // Each file and folder is charged at least one allocation unit, rounding file
@@ -30,47 +29,18 @@ func chargedSize(size, unit int64) int64 {
 }
 
 // measureUsage returns the quota charge of name and everything below it in
-// fsys. The top folder "." is not charged, because it is the account itself.
-// Staging folders are skipped: an upload is charged when it is published.
-func measureUsage(ctx context.Context, fsys fs.FS, name string, unit int64) (int64, error) {
+// tree. The top folder is not charged, because it is the account itself.
+// Providers leave out uploads in progress: an upload is charged when it is
+// published.
+func measureUsage(ctx context.Context, tree storage.Tree, name string, unit int64) (int64, error) {
 	var used int64
-	err := fs.WalkDir(fsys, name, func(path string, entry fs.DirEntry, err error) error {
-		// An entry removed during the walk, such as by an operator, no longer
-		// counts.
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if strings.HasPrefix(entry.Name(), stagingPrefix) {
-			if entry.IsDir() {
-				return fs.SkipDir
-			}
-			return nil
-		}
-		if entry.Type()&fs.ModeSymlink != 0 {
-			return fmt.Errorf("upload folders cannot contain symbolic links")
-		}
+	err := tree.Walk(ctx, name, func(path string, info fs.FileInfo) error {
 		charge := unit
-		if entry.IsDir() {
-			if path == "." {
+		if info.IsDir() {
+			if path == "" {
 				return nil
 			}
 		} else {
-			info, err := entry.Info()
-			if errors.Is(err, fs.ErrNotExist) {
-				return nil
-			}
-			if err != nil {
-				return err
-			}
-			if !info.Mode().IsRegular() {
-				return fmt.Errorf("upload folders can only contain regular files and directories")
-			}
 			charge = chargedSize(info.Size(), unit)
 		}
 		if charge > math.MaxInt64-used {
@@ -80,19 +50,6 @@ func measureUsage(ctx context.Context, fsys fs.FS, name string, unit int64) (int
 		return nil
 	})
 	return used, err
-}
-
-// diskUsage measures the folder dir, which is not charged itself.
-func diskUsage(ctx context.Context, dir string, unit int64) (int64, error) {
-	root, err := os.OpenRoot(dir)
-	if errors.Is(err, os.ErrNotExist) {
-		return 0, nil
-	}
-	if err != nil {
-		return 0, err
-	}
-	defer root.Close()
-	return measureUsage(ctx, root.FS(), ".", unit)
 }
 
 // usageRemeasureAfter bounds how long files changed directly on disk, outside
