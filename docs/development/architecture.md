@@ -134,8 +134,8 @@ moves, deletes, and opens downloads:
 
 - new names are checked for invisible formatting characters;
 - a new folder is charged one allocation unit;
-- renames, moves, and deletions revoke the share links below the changed path
-  after validation and before the change;
+- renames, moves, and deletions revoke the share links of the item and
+  everything below it, after validation and before the change;
 - each change keeps the cached usage up to date, or drops it when a change may
   have partly failed.
 
