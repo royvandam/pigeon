@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/royvandam/pigeon/pkg/storage"
+	"github.com/royvandam/pigeon/pkg/files"
 )
 
 type fileEntry struct {
@@ -39,9 +39,9 @@ func explorerURL(directory string) string {
 	return "/?" + url.Values{"dir": {directory}}.Encode()
 }
 
-func readExplorer(ctx context.Context, tree storage.Tree, directory, csrf string) (explorerData, error) {
+func readExplorer(ctx context.Context, access *files.Access, directory, csrf string) (explorerData, error) {
 	data := explorerData{Directory: directory, CSRFToken: csrf}
-	items, err := tree.List(ctx, directory)
+	items, err := access.List(ctx, directory)
 	if err != nil {
 		return data, err
 	}

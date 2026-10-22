@@ -3,7 +3,6 @@ package pigeon
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"regexp"
 	"sync"
@@ -82,7 +81,14 @@ func (p *uploadProgress) fail() {
 	}
 }
 
-func (p *uploadProgress) addBytes(n int64) {
+// Preparing records that the upload has started checking the account's storage.
+func (p *uploadProgress) Preparing() {
+	p.setState("preparing")
+}
+
+// Written counts file bytes once storage has accepted them, so multipart
+// framing and bytes still buffered in the browser or a proxy do not count.
+func (p *uploadProgress) Written(n int64) {
 	if p == nil {
 		return
 	}
@@ -130,17 +136,4 @@ func (cfg config) handleUploadProgress(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(snapshot)
-}
-
-// Count file bytes only after the output writer accepts them. Multipart framing
-// and bytes still buffered in the browser or a proxy do not advance progress.
-type uploadProgressWriter struct {
-	io.Writer
-	progress *uploadProgress
-}
-
-func (w uploadProgressWriter) Write(data []byte) (int, error) {
-	n, err := w.Writer.Write(data)
-	w.progress.addBytes(int64(n))
-	return n, err
 }

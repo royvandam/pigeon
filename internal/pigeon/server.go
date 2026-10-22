@@ -13,6 +13,7 @@ import (
 
 	"github.com/royvandam/pigeon/pkg/account"
 	"github.com/royvandam/pigeon/pkg/auth"
+	"github.com/royvandam/pigeon/pkg/files"
 	"github.com/royvandam/pigeon/pkg/quota"
 	"github.com/royvandam/pigeon/pkg/storage"
 )
@@ -33,9 +34,7 @@ type config struct {
 	manager *account.Manager
 	// authenticator checks passwords and limits failed attempts.
 	authenticator *auth.Authenticator
-	// allocationUnit is the minimum quota charge per file and folder; zero
-	// selects quota.DefaultAllocationUnit. Tests use 1 to keep byte arithmetic exact.
-	allocationUnit int64
+	files         *files.Service
 	// formReadTimeout and uploadIdleTimeout limit slow request bodies; zero
 	// selects the defaults in deadline.go.
 	formReadTimeout   time.Duration

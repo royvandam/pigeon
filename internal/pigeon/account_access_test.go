@@ -46,12 +46,12 @@ func TestReadsRejectOldIdentityAfterPurgeAndUsernameReuse(t *testing.T) {
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("old identity can browse replacement account: %d %s", w.Code, w.Body)
 	}
-	access, err := cfg.accessAccount(ctx, fresh)
+	access, err := cfg.files.Open(ctx, fresh)
 	if err != nil {
 		t.Fatalf("replacement account cannot access its own files: %v", err)
 	}
-	access.close()
-	access.close() // Error rendering and deferred cleanup can both release access.
+	access.Close()
+	access.Close() // Error rendering and deferred cleanup can both release access.
 }
 
 func TestReadAccessRechecksIdentityAfterWaiting(t *testing.T) {
@@ -68,9 +68,9 @@ func TestReadAccessRechecksIdentityAfterWaiting(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		access, err := cfg.accessAccount(ctx, u)
+		access, err := cfg.files.Open(ctx, u)
 		if access != nil {
-			access.close()
+			access.Close()
 		}
 		done <- err
 	}()
@@ -105,18 +105,18 @@ func TestPrivateDownloadReleasesAccessBeforeStreaming(t *testing.T) {
 	defer download.Close()
 	waitCtx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
-	access, err := cfg.accessAccount(waitCtx, u)
+	access, err := cfg.files.Open(waitCtx, u)
 	if err != nil {
 		t.Fatalf("download retained the account lock while streaming: %v", err)
 	}
-	access.close()
+	access.Close()
 	// The opened handle stays bound to the item when its path is renamed.
 	if err := os.Rename(filepath.Join(cfg.dir, u.Slug, "kept.txt"), filepath.Join(cfg.dir, u.Slug, "renamed.txt")); err != nil {
 		t.Fatal(err)
 	}
 	writeStoredFile(t, cfg, u.Slug, "kept.txt", "replacement")
 	w := httptest.NewRecorder()
-	download.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/download?path=kept.txt", nil))
+	serveDownload(w, httptest.NewRequest(http.MethodGet, "/download?path=kept.txt", nil), download)
 	if w.Code != http.StatusOK || w.Body.String() != "original" {
 		t.Fatalf("download followed a reused path: %d %s", w.Code, w.Body)
 	}

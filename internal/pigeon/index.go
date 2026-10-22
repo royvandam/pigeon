@@ -4,7 +4,6 @@ import (
 	"net/http"
 
 	"github.com/royvandam/pigeon/pkg/auth"
-	"github.com/royvandam/pigeon/pkg/quota"
 )
 
 func (cfg config) handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -25,24 +24,18 @@ func (cfg config) handleIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 func (cfg config) renderIndex(w http.ResponseWriter, r *http.Request, a auth.Authentication, directory, message, fileError string, status int) {
-	access, err := cfg.accessAccount(r.Context(), a.User)
+	access, err := cfg.files.Open(r.Context(), a.User)
 	if err != nil {
 		writeStorageError(w, err)
 		return
 	}
-	defer access.close()
-	tree, err := access.Files.open(r.Context())
+	defer access.Close()
+	explorer, err := readExplorer(r.Context(), access, directory, a.CSRFToken)
 	if err != nil {
 		writeStorageError(w, err)
 		return
 	}
-	defer tree.Close()
-	explorer, err := readExplorer(r.Context(), tree, directory, a.CSRFToken)
-	if err != nil {
-		writeStorageError(w, err)
-		return
-	}
-	used, err := access.used(r.Context())
+	usage, err := access.Usage(r.Context())
 	if err != nil {
 		http.Error(w, "failed to check storage usage", http.StatusInternalServerError)
 		return
@@ -60,11 +53,11 @@ func (cfg config) renderIndex(w http.ResponseWriter, r *http.Request, a auth.Aut
 		FileError      string
 	}{
 		explorerData:   explorer,
-		QuotaHuman:     humanBytes(access.QuotaBytes),
-		UsedHuman:      humanBytes(used),
-		RemainingHuman: humanBytes(quota.Remaining(access.QuotaBytes, used)),
-		RemainingBytes: quota.Remaining(access.QuotaBytes, used),
-		AllocationUnit: access.Files.unit,
+		QuotaHuman:     humanBytes(usage.Quota),
+		UsedHuman:      humanBytes(usage.Used),
+		RemainingHuman: humanBytes(usage.Remaining()),
+		RemainingBytes: usage.Remaining(),
+		AllocationUnit: cfg.files.AllocationUnit(),
 		Username:       a.User.Username,
 		Admin:          a.User.Admin,
 		Message:        message,

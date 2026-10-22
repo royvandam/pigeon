@@ -1,7 +1,6 @@
 package pigeon
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"log"
@@ -50,7 +49,7 @@ func (cfg config) renderAdmin(w http.ResponseWriter, r *http.Request, a auth.Aut
 	}
 	var rows, deletedRows []adminUser
 	for _, u := range users {
-		used, err := cfg.storedUsage(r.Context(), u)
+		used, err := cfg.files.Usage(r.Context(), u)
 		if err != nil {
 			http.Error(w, "failed to check storage usage", http.StatusInternalServerError)
 			return
@@ -74,18 +73,6 @@ func (cfg config) renderAdmin(w http.ResponseWriter, r *http.Request, a auth.Aut
 		status = http.StatusConflict
 	}
 	renderTemplate(w, adminTmpl, data, status)
-}
-
-// storedUsage returns an account's storage usage for display, including deleted
-// accounts, whose folders are kept. It takes the account lock, like every other
-// user of the usage cache, but skips the identity check.
-func (cfg config) storedUsage(ctx context.Context, u account.User) (int64, error) {
-	release, err := cfg.locks.Lock(ctx, u.ID)
-	if err != nil {
-		return 0, err
-	}
-	defer release()
-	return cfg.usage.Usage(ctx, u.ID, cfg.filesFor(u).usage)
 }
 
 func (cfg config) handleAdmin(w http.ResponseWriter, r *http.Request) {

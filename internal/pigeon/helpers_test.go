@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"io/fs"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -23,6 +24,7 @@ import (
 
 	"github.com/royvandam/pigeon/pkg/account"
 	"github.com/royvandam/pigeon/pkg/auth"
+	"github.com/royvandam/pigeon/pkg/files"
 	"github.com/royvandam/pigeon/pkg/quota"
 	"github.com/royvandam/pigeon/pkg/storage"
 	"github.com/royvandam/pigeon/pkg/storage/local"
@@ -55,19 +57,26 @@ func newTestConfig(t *testing.T, quotaBytes int64) config {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A one-byte allocation unit keeps quota arithmetic in tests exact; tests of
-	// the production unit set allocationUnit explicitly.
 	cfg := config{dir: provider.Directory(), store: s, storage: provider, locks: account.NewLocks(),
-		authenticator: auth.NewAuthenticator(s.accounts, time.Now), allocationUnit: 1}
-	setUsageClock(&cfg, time.Now)
+		usage: quota.NewCache(time.Now), authenticator: auth.NewAuthenticator(s.accounts, time.Now)}
+	// A one-byte allocation unit keeps quota arithmetic in tests exact; tests of
+	// the production unit use productionUnitConfig.
+	wire(&cfg, 1)
 	return cfg
 }
 
+// wire builds cfg's account manager and file service from its stores, storage,
+// locks, and usage cache, charging unit per file and folder. Call it before
+// passing cfg to anything, which copies it.
+func wire(cfg *config, unit int64) {
+	cfg.manager = account.NewManager(cfg.store.accounts, cfg.locks, cfg.usage, cfg.storage)
+	cfg.files = files.NewService(cfg.storage, cfg.store.accounts, cfg.locks, cfg.usage, cfg.store.shares, unit)
+}
+
 // setUsageClock gives cfg a new usage cache that reads the time from clock.
-// Call it before passing cfg to anything, which copies it.
 func setUsageClock(cfg *config, clock func() time.Time) {
 	cfg.usage = quota.NewCache(clock)
-	cfg.manager = account.NewManager(cfg.store.accounts, cfg.locks, cfg.usage, cfg.storage)
+	wire(cfg, cfg.files.AllocationUnit())
 }
 
 // activeUsers lists the accounts that have not been deleted.
@@ -311,7 +320,15 @@ func diskUsage(ctx context.Context, dir string, unit int64) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return userStorage{provider: provider, slug: filepath.Base(dir), unit: unit}.usage(ctx)
+	tree, err := provider.Open(ctx, filepath.Base(dir))
+	if errors.Is(err, fs.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	defer tree.Close()
+	return quota.Measure(ctx, tree, "", unit)
 }
 
 // createShare creates a link for u's item at name and returns its URL path.

@@ -56,7 +56,7 @@ func TestPurgeRemovesUploadsAndCredentialsAndReleasesUsername(t *testing.T) {
 	if err != nil || fresh.Slug != u.Slug || fresh.ID == u.ID {
 		t.Fatalf("purged username or account ID was not safely released: %#v, %v", fresh, err)
 	}
-	tree, err := cfg.filesFor(fresh).open(ctx)
+	tree, err := cfg.storage.Create(ctx, fresh.Slug)
 	if err != nil {
 		t.Fatal(err)
 	}

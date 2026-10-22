@@ -274,6 +274,7 @@ func TestSharesSurviveRestartAndOlderDatabasesGainTheTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg.store = s
+	wire(&cfg, 1)
 	link := shareRequest(t, cfg, cookie, csrf, "create", "readme.txt")
 	if err := s.db.Close(); err != nil {
 		t.Fatal(err)
@@ -284,6 +285,7 @@ func TestSharesSurviveRestartAndOlderDatabasesGainTheTable(t *testing.T) {
 	}
 	defer s.db.Close()
 	cfg.store = s
+	wire(&cfg, 1)
 	if w := publicDownload(cfg, http.MethodGet, link); w.Code != http.StatusOK || w.Body.String() != "shared" {
 		t.Fatalf("restart invalidated a share: %d, %s", w.Code, w.Body)
 	}
@@ -323,6 +325,7 @@ func TestPlaintextShareTokensAreHashedOnUpgrade(t *testing.T) {
 	}
 	defer s.db.Close()
 	cfg.store = s
+	wire(&cfg, 1)
 	var stored string
 	if err := s.db.QueryRow(`SELECT token_hash FROM shares`).Scan(&stored); err != nil || stored != token.Hash(plaintext) {
 		t.Fatalf("upgraded share token = %q, %v; want its hash", stored, err)
@@ -342,6 +345,7 @@ func TestPlaintextShareTokensAreHashedOnUpgrade(t *testing.T) {
 	}
 	defer s.db.Close()
 	cfg.store = s
+	wire(&cfg, 1)
 	if w := publicDownload(cfg, http.MethodGet, "/s/"+plaintext); w.Code != http.StatusOK {
 		t.Fatalf("second start broke an upgraded link: %d", w.Code)
 	}
