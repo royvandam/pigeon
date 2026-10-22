@@ -54,9 +54,9 @@ func TestSettingsAndUsersSurviveRestart(t *testing.T) {
 func TestUsernameNormalization(t *testing.T) {
 	t.Parallel()
 	for _, tt := range []struct{ username, slug string }{
-		{" Roy Van Dijk ", "roy-van-dijk"},
+		{" Jane Doe ", "jane-doe"},
 		{"Élise_Müller", "elise-muller"},
-		{"ＲＯＹ", "roy"},
+		{"ＪＡＮＥ", "jane"},
 		{"../../Alice", "alice"},
 		{"中文 用户", "中文-用户"},
 		{"Straße", "strasse"},

@@ -44,7 +44,7 @@ revoke them separately if needed.
 
 ## Storage and deleted accounts
 
-An upload from `Roy Van Dijk` is saved in `uploads/roy-van-dijk/`. Names are
+An upload from `Jane Doe` is saved in `uploads/jane-doe/`. Names are
 normalized with Unicode case folding, accents are removed where possible, and
 punctuation and whitespace become hyphens. Other Unicode letters and digits are
 retained. Username comparisons are case-insensitive. Creation fails if the

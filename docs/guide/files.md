@@ -24,7 +24,7 @@ Uploads go into the folder currently open in the explorer. Original filenames
 (including spaces, Unicode, and dotfiles) and directory hierarchies are preserved,
 without timestamped filenames or wrapper folders. For example, uploading
 `project/docs/readme.txt` while browsing `Archive` saves it as
-`uploads/roy-van-dijk/Archive/project/docs/readme.txt`.
+`uploads/jane-doe/Archive/project/docs/readme.txt`.
 Directory uploads can add files to existing folders. Existing files are never
 replaced: a filename conflict rejects the whole upload with HTTP 409. Rename,
 move, or delete the existing item before uploading a replacement. Previously
