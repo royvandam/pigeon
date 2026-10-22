@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/royvandam/pigeon/internal/token"
+	"github.com/royvandam/pigeon/pkg/account"
 )
 
 const (
@@ -38,7 +39,7 @@ func (cfg config) requestAuthentication(r *http.Request) (authentication, error)
 	}
 	cookie, err := r.Cookie(sessionCookieName)
 	if err != nil {
-		return authentication{}, errInvalidCredentials
+		return authentication{}, account.ErrInvalidCredentials
 	}
 	return cfg.store.session(r.Context(), cookie.Value)
 }
@@ -69,7 +70,7 @@ func (cfg config) requireAuth(w http.ResponseWriter, r *http.Request, options au
 		if errors.As(err, &limited) {
 			setRetryAfter(w, limited)
 			http.Error(w, limited.Error(), http.StatusTooManyRequests)
-		} else if !errors.Is(err, errInvalidCredentials) {
+		} else if !errors.Is(err, account.ErrInvalidCredentials) {
 			log.Printf("authenticate: %v", err)
 			http.Error(w, "authentication unavailable", http.StatusInternalServerError)
 		} else if options.Browser || (r.Method == http.MethodGet && navigation(r)) {
@@ -86,7 +87,7 @@ func (cfg config) requireAuth(w http.ResponseWriter, r *http.Request, options au
 		return authentication{}, false
 	}
 	if options.Administrator && !a.User.Admin {
-		http.Error(w, errAdministratorRequired.Error(), http.StatusForbidden)
+		http.Error(w, account.ErrAdministratorRequired.Error(), http.StatusForbidden)
 		return authentication{}, false
 	}
 	if r.Method == http.MethodPost {
@@ -162,7 +163,7 @@ func (cfg config) handleLogin(w http.ResponseWriter, r *http.Request) {
 			renderTemplate(w, loginTmpl, loginPage{CSRFToken: cookie.Value, Error: "Too many sign-in attempts. Try again in " + limited.wait() + "."}, http.StatusTooManyRequests)
 			return
 		}
-		if errors.Is(err, errInvalidCredentials) {
+		if errors.Is(err, account.ErrInvalidCredentials) {
 			renderTemplate(w, loginTmpl, loginPage{CSRFToken: cookie.Value, Error: err.Error()}, http.StatusUnauthorized)
 			return
 		}

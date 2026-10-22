@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/royvandam/pigeon/pkg/account"
 	"github.com/royvandam/pigeon/pkg/storage"
 )
 
@@ -23,7 +24,7 @@ func TestStorageErrorResponses(t *testing.T) {
 		{fmt.Errorf("%w: malformed name", storage.ErrInvalidPath), 400, "malformed name"},
 		{storage.ErrConflict, 409, "already exists"},
 		{os.ErrNotExist, 404, "not found"},
-		{errInvalidCredentials, 401, "unauthorized"},
+		{account.ErrInvalidCredentials, 401, "unauthorized"},
 		{context.Canceled, 408, "operation canceled"},
 		{context.DeadlineExceeded, 408, "operation canceled"},
 		{errors.New("internal filesystem detail"), 500, "unable to access files"},

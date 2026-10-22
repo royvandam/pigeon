@@ -11,13 +11,14 @@ import (
 	"time"
 
 	"github.com/royvandam/pigeon/internal/token"
+	"github.com/royvandam/pigeon/pkg/account"
 	"github.com/royvandam/pigeon/pkg/storage"
 )
 
 var errShareNotFound = errors.New("share link not found")
 
 type shareLink struct {
-	User      user
+	User      account.User
 	Path      string
 	Directory bool
 }
@@ -25,7 +26,7 @@ type shareLink struct {
 // shareActive reports whether name has a link. Only a hash of each token is
 // stored, like session tokens, so a leaked database or backup yields no working
 // links, and an existing link's URL cannot be shown again.
-func (s *store) shareActive(ctx context.Context, u user, name string) (bool, error) {
+func (s *store) shareActive(ctx context.Context, u account.User, name string) (bool, error) {
 	var active bool
 	err := s.db.QueryRowContext(ctx, `
 SELECT EXISTS(SELECT 1 FROM shares s JOIN users u ON u.id = s.user_id
@@ -36,7 +37,7 @@ WHERE s.user_id = ? AND s.path = ? AND u.auth_version = ? AND u.deleted_at IS NU
 
 // createShare returns a new link for name, replacing any existing one, whose
 // URL then stops working.
-func (s *store) createShare(ctx context.Context, u user, name string, directory bool) (string, error) {
+func (s *store) createShare(ctx context.Context, u account.User, name string, directory bool) (string, error) {
 	secret, err := token.New()
 	if err != nil {
 		return "", err
@@ -53,7 +54,7 @@ ON CONFLICT(user_id, path) DO UPDATE SET
 	if n, err := result.RowsAffected(); err != nil {
 		return "", err
 	} else if n == 0 {
-		return "", errInvalidCredentials
+		return "", account.ErrInvalidCredentials
 	}
 	return "/s/" + secret, nil
 }
@@ -141,7 +142,7 @@ func (cfg config) handleShares(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err != nil {
-		if errors.Is(err, errInvalidCredentials) {
+		if errors.Is(err, account.ErrInvalidCredentials) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 		} else {
 			http.Error(w, "failed to update share link", http.StatusInternalServerError)
@@ -161,7 +162,7 @@ func (cfg config) openSharedDownload(ctx context.Context, token string) (*stored
 	if err != nil {
 		return nil, err
 	}
-	unlock, err := cfg.store.lockUploads(ctx, link.User.ID)
+	unlock, err := cfg.locks.Lock(ctx, link.User.ID)
 	if err != nil {
 		return nil, err
 	}

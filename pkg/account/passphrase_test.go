@@ -1,4 +1,4 @@
-package pigeon
+package account
 
 import (
 	"regexp"
@@ -28,7 +28,7 @@ func TestGeneratedPassphrasesAreFourWordsAndValidPasswords(t *testing.T) {
 		dictionary[word] = true
 	}
 	for range 32 {
-		passphrase, err := generatePassphrase()
+		passphrase, err := GeneratePassphrase()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -41,7 +41,7 @@ func TestGeneratedPassphrasesAreFourWordsAndValidPasswords(t *testing.T) {
 				t.Fatalf("generated word is absent from the dictionary: %q", word)
 			}
 		}
-		if err := validatePassword(passphrase); err != nil {
+		if err := ValidatePassword(passphrase); err != nil {
 			t.Fatalf("generated passphrase is not accepted as a password: %v", err)
 		}
 	}

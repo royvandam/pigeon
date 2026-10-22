@@ -3,27 +3,11 @@ package pigeon
 import (
 	"context"
 	"errors"
-	"fmt"
 
-	"github.com/royvandam/pigeon/pkg/storage"
+	"github.com/royvandam/pigeon/pkg/account"
 )
 
-var (
-	errPassphraseGeneration  = errors.New("failed to generate passphrase")
-	errAdministratorRequired = errors.New("administrator access required")
-)
-
-// accountManager coordinates account changes without HTTP or template concerns.
-// The store owns transactions; userStorage owns filesystem operations.
-type accountManager struct {
-	store   *store
-	storage storage.Provider
-}
-
-func (cfg config) accounts() accountManager {
-	return accountManager{store: cfg.store, storage: cfg.storage}
-}
-
+// accountCommand is an account change requested on the admin page.
 type accountCommand struct {
 	action        string
 	id            int64
@@ -32,62 +16,36 @@ type accountCommand struct {
 	quota         int64
 }
 
-type issuedCredentials struct {
-	User       user
-	Passphrase string
-}
-
 type accountChange struct {
-	Credentials          *issuedCredentials
+	Credentials          *account.Credentials
 	ActorPasswordChanged bool
 }
 
-func issueUserCredentials(save func(string) (user, error)) (*issuedCredentials, error) {
-	passphrase, err := generatePassphrase()
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", errPassphraseGeneration, err)
-	}
-	u, err := save(passphrase)
-	if err != nil {
-		return nil, err
-	}
-	return &issuedCredentials{User: u, Passphrase: passphrase}, nil
-}
-
-func (m accountManager) apply(ctx context.Context, actor user, command accountCommand) (accountChange, error) {
+// applyAccountCommand performs command through the account manager on behalf
+// of actor.
+func (cfg config) applyAccountCommand(ctx context.Context, actor account.User, command accountCommand) (accountChange, error) {
 	var change accountChange
-	if !actor.Admin {
-		return change, errAdministratorRequired
-	}
+	var credentials account.Credentials
 	var err error
 	switch command.action {
 	case "create":
-		change.Credentials, err = issueUserCredentials(func(password string) (user, error) {
-			return m.store.createUserWithQuota(ctx, command.username, password, command.administrator, command.quota)
-		})
+		credentials, err = cfg.manager.Create(ctx, actor, command.username, command.administrator, command.quota)
 	case "recycle":
-		change.Credentials, err = issueUserCredentials(func(password string) (user, error) {
-			return m.store.recycleUser(ctx, command.id, password)
-		})
+		credentials, err = cfg.manager.Recycle(ctx, actor, command.id)
 	case "purge":
-		err = m.purge(ctx, command.id)
+		err = cfg.manager.Purge(ctx, actor, command.id)
 	case "delete":
-		err = m.store.deleteUser(ctx, command.id, actor.ID)
+		err = cfg.manager.Delete(ctx, actor, command.id)
 	case "quota":
-		err = m.store.setQuota(ctx, command.id, command.quota)
+		err = cfg.manager.SetQuota(ctx, actor, command.id, command.quota)
 	case "reset":
-		change.Credentials, err = issueUserCredentials(func(password string) (user, error) {
-			return m.store.resetPassword(ctx, command.id, password)
-		})
+		credentials, err = cfg.manager.ResetPassword(ctx, actor, command.id)
 		change.ActorPasswordChanged = err == nil && command.id == actor.ID
 	default:
 		err = errors.New("unknown action")
 	}
+	if err == nil && credentials.Passphrase != "" {
+		change.Credentials = &credentials
+	}
 	return change, err
-}
-
-func (m accountManager) purge(ctx context.Context, id int64) error {
-	return m.store.purgeUser(ctx, id, func(slug string) error {
-		return (userStorage{provider: m.storage, slug: slug}).purge(ctx)
-	})
 }

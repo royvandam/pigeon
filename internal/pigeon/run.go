@@ -7,9 +7,11 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 
 	"golang.org/x/term"
 
+	"github.com/royvandam/pigeon/pkg/account"
 	"github.com/royvandam/pigeon/pkg/quota"
 	"github.com/royvandam/pigeon/pkg/storage/local"
 )
@@ -31,7 +33,7 @@ func Run(ctx context.Context, args []string) error {
 	set := map[string]bool{}
 	flags.Visit(func(f *flag.Flag) { set[f.Name] = true })
 
-	s, err := openStore(ctx, *database, defaultPasswordCost)
+	s, err := openStore(ctx, *database, account.DefaultPasswordCost)
 	if err != nil {
 		return fmt.Errorf("open database: %w", err)
 	}
@@ -65,7 +67,7 @@ func Run(ctx context.Context, args []string) error {
 			return string(password), err
 		}
 	}
-	if err := promptInitialAdmin(ctx, s, os.Stdin, os.Stdout, readSecret); err != nil {
+	if err := promptInitialAdmin(ctx, s.accounts, os.Stdin, os.Stdout, readSecret); err != nil {
 		return fmt.Errorf("admin setup: %w", err)
 	}
 	provider, err := local.NewProvider(settings.dir)
@@ -88,7 +90,9 @@ func Run(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	cfg := config{dir: settings.dir, listen: settings.listen, store: s, storage: provider, trustedProxies: trustedProxies, publicURL: publicURL}
+	locks, usage := account.NewLocks(), quota.NewCache(time.Now)
+	cfg := config{dir: settings.dir, listen: settings.listen, store: s, storage: provider, locks: locks, usage: usage,
+		manager: account.NewManager(s.accounts, locks, usage, provider), trustedProxies: trustedProxies, publicURL: publicURL}
 	log.Printf("listening on http://%s", cfg.listen)
 	if publicURL != nil {
 		log.Printf("public URL: %s", publicURL)

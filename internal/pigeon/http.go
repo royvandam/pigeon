@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/royvandam/pigeon/pkg/account"
 	"github.com/royvandam/pigeon/pkg/quota"
 	"github.com/royvandam/pigeon/pkg/storage"
 )
@@ -37,7 +38,7 @@ func storageError(err error) (string, int) {
 		return "disk quota exceeded", http.StatusRequestEntityTooLarge
 	case errors.Is(err, os.ErrNotExist):
 		return "file or folder not found", http.StatusNotFound
-	case errors.Is(err, errInvalidCredentials):
+	case errors.Is(err, account.ErrInvalidCredentials):
 		return "unauthorized", http.StatusUnauthorized
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		return "operation canceled", http.StatusRequestTimeout

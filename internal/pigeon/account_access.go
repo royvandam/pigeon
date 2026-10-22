@@ -3,6 +3,7 @@ package pigeon
 import (
 	"context"
 
+	"github.com/royvandam/pigeon/pkg/account"
 	"github.com/royvandam/pigeon/pkg/quota"
 )
 
@@ -17,17 +18,17 @@ type accountAccess struct {
 	release    func()
 }
 
-func (cfg config) accessAccount(ctx context.Context, u user) (*accountAccess, error) {
-	release, err := cfg.store.lockUploads(ctx, u.ID)
+func (cfg config) accessAccount(ctx context.Context, u account.User) (*accountAccess, error) {
+	release, err := cfg.locks.Lock(ctx, u.ID)
 	if err != nil {
 		return nil, err
 	}
-	quota, err := cfg.store.userQuota(ctx, u)
+	limit, err := cfg.store.accounts.Quota(ctx, u)
 	if err != nil {
 		release()
 		return nil, err
 	}
-	return &accountAccess{Files: cfg.filesFor(u), QuotaBytes: quota, id: u.ID, cache: cfg.store.usage, release: release}, nil
+	return &accountAccess{Files: cfg.filesFor(u), QuotaBytes: limit, id: u.ID, cache: cfg.usage, release: release}, nil
 }
 
 // used returns the account's storage usage, measuring its folder only when no

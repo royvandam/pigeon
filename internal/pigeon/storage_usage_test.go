@@ -16,7 +16,7 @@ import (
 
 // cachedUsage returns the usage cached for account id, and whether there is one.
 func cachedUsage(cfg config, id int64) (int64, bool) {
-	used, _, ok := cfg.store.usage.Cached(id)
+	used, _, ok := cfg.usage.Cached(id)
 	return used, ok
 }
 
@@ -24,10 +24,10 @@ func TestUsageIsMeasuredOnceAndKeptUpToDate(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	cfg := newTestConfig(t, 1000)
-	handler := newServer(cfg).Handler
 	clock := time.Now()
-	cfg.store.usage = quota.NewCache(func() time.Time { return clock })
-	u, err := cfg.store.authenticate(ctx, "Test User", testPassword)
+	setUsageClock(&cfg, func() time.Time { return clock })
+	handler := newServer(cfg).Handler
+	u, err := cfg.store.accounts.Authenticate(ctx, "Test User", testPassword)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,11 +110,11 @@ func TestAdminPageDoesNotCountAnUploadInProgress(t *testing.T) {
 	ctx := context.Background()
 	cfg := newTestConfig(t, 100)
 	clock := time.Now()
-	cfg.store.usage = quota.NewCache(func() time.Time { return clock })
-	if _, err := cfg.store.createUser(ctx, "Admin", testPassword, true); err != nil {
+	setUsageClock(&cfg, func() time.Time { return clock })
+	if _, err := cfg.store.accounts.Create(ctx, "Admin", testPassword, true, quota.DefaultQuota); err != nil {
 		t.Fatal(err)
 	}
-	u, err := cfg.store.authenticate(ctx, "Test User", testPassword)
+	u, err := cfg.store.accounts.Authenticate(ctx, "Test User", testPassword)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,7 @@ func TestAdminPageDoesNotCountAnUploadInProgress(t *testing.T) {
 	if w := serve(newServer(cfg).Handler, r); w.Code != http.StatusOK {
 		t.Fatalf("admin page: %d", w.Code)
 	}
-	used, measured, ok := cfg.store.usage.Cached(u.ID)
+	used, measured, ok := cfg.usage.Cached(u.ID)
 	if !ok || !measured.Equal(clock) || used != 0 {
 		t.Fatalf("admin page cached %d measured at %v, %v during the upload; want 0 measured at %v", used, measured, ok, clock)
 	}
@@ -151,7 +151,7 @@ func TestPurgeAndFailedChangesForgetUsage(t *testing.T) {
 	}
 	ctx := context.Background()
 	cfg := newTestConfig(t, 1000)
-	u, err := cfg.store.authenticate(ctx, "Test User", testPassword)
+	u, err := cfg.store.accounts.Authenticate(ctx, "Test User", testPassword)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,10 +188,10 @@ func TestPurgeAndFailedChangesForgetUsage(t *testing.T) {
 	if _, err := cfg.storedUsage(ctx, u); err != nil {
 		t.Fatal(err)
 	}
-	if err := cfg.store.deleteUser(ctx, u.ID, 999); err != nil {
+	if err := cfg.store.accounts.Delete(ctx, u.ID, 999); err != nil {
 		t.Fatal(err)
 	}
-	if err := cfg.accounts().purge(ctx, u.ID); err != nil {
+	if err := cfg.manager.Purge(ctx, administrator, u.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := cachedUsage(cfg, u.ID); ok {

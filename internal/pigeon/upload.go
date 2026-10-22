@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/royvandam/pigeon/pkg/account"
 	"github.com/royvandam/pigeon/pkg/quota"
 )
 
@@ -54,7 +55,7 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 	// The account lock is held only to check the quota and to publish, so the
 	// account's pages, share links, and file actions do not wait for the body.
 	// The slot keeps this account's uploads streaming one at a time.
-	releaseSlot, err := cfg.store.lockUploadSlot(r.Context(), a.User.ID)
+	releaseSlot, err := cfg.locks.LockUploadSlot(r.Context(), a.User.ID)
 	if err != nil {
 		http.Error(w, "upload canceled", http.StatusRequestTimeout)
 		return
@@ -201,12 +202,12 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 
 // accessUploadAccount locks the account and loads its quota, answering the
 // request itself when that fails.
-func (cfg config) accessUploadAccount(w http.ResponseWriter, r *http.Request, u user) (*accountAccess, bool) {
+func (cfg config) accessUploadAccount(w http.ResponseWriter, r *http.Request, u account.User) (*accountAccess, bool) {
 	access, err := cfg.accessAccount(r.Context(), u)
 	if err == nil {
 		return access, true
 	}
-	if errors.Is(err, errInvalidCredentials) {
+	if errors.Is(err, account.ErrInvalidCredentials) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 	} else if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		http.Error(w, "upload canceled", http.StatusRequestTimeout)

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/royvandam/pigeon/pkg/quota"
 	"github.com/royvandam/pigeon/pkg/storage"
 )
 
@@ -111,7 +112,7 @@ func TestPrivateStagingAndSymlinksCannotBeAccessed(t *testing.T) {
 	if w.Code != http.StatusOK || strings.Contains(w.Body.String(), ".upload-active") || !strings.Contains(w.Body.String(), "20261010T102812Z_old") {
 		t.Fatalf("listing should hide staging and retain legacy folders: %d, %s", w.Code, w.Body)
 	}
-	other, err := cfg.store.createUser(context.Background(), "Other User", testPassword, false)
+	other, err := cfg.store.accounts.Create(context.Background(), "Other User", testPassword, false, quota.DefaultQuota)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -11,17 +11,20 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/royvandam/pigeon/pkg/account"
+	"github.com/royvandam/pigeon/pkg/quota"
 )
 
 func TestAdminGeneratesResetCredentials(t *testing.T) {
 	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	ctx := context.Background()
-	if _, err := cfg.store.createUser(ctx, "Admin", testPassword, true); err != nil {
+	if _, err := cfg.store.accounts.Create(ctx, "Admin", testPassword, true, quota.DefaultQuota); err != nil {
 		t.Fatal(err)
 	}
 	adminCookie, csrf := sessionFor(t, cfg, "Admin")
-	target, err := cfg.store.authenticate(ctx, "Test User", testPassword)
+	target, err := cfg.store.accounts.Authenticate(ctx, "Test User", testPassword)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,12 +61,12 @@ func TestAdminGeneratesResetCredentials(t *testing.T) {
 			if passphrase == previousPassword || w.Header().Get("Cache-Control") != "no-store" || w.Header().Get("Location") != "" || len(w.Result().Cookies()) != 0 || strings.Contains(fmt.Sprint(w.Header()), passphrase) {
 				t.Fatal("reset credential must be fresh and confined to the uncached response body")
 			}
-			fresh, err := cfg.store.authenticate(ctx, target.Username, passphrase)
+			fresh, err := cfg.store.accounts.Authenticate(ctx, target.Username, passphrase)
 			if err != nil || fresh.ID != target.ID || fresh.Admin != target.Admin || fresh.Slug != target.Slug || fresh.QuotaBytes != target.QuotaBytes || fresh.Version != target.Version+1 {
 				t.Fatalf("reset changed account details or issued an unusable credential: %#v, %v", fresh, err)
 			}
 			for _, password := range []string{previousPassword, "client-chosen-password"} {
-				if _, err := cfg.store.authenticate(ctx, target.Username, password); !errors.Is(err, errInvalidCredentials) {
+				if _, err := cfg.store.accounts.Authenticate(ctx, target.Username, password); !errors.Is(err, account.ErrInvalidCredentials) {
 					t.Fatalf("previous or client-supplied password still works: %v", err)
 				}
 			}
@@ -75,11 +78,11 @@ func TestAdminGeneratesResetCredentials(t *testing.T) {
 				t.Fatal("reset credential was not stored as a bcrypt hash")
 			}
 			for _, token := range oldTokens {
-				if _, err := cfg.store.session(ctx, token); !errors.Is(err, errInvalidCredentials) {
+				if _, err := cfg.store.session(ctx, token); !errors.Is(err, account.ErrInvalidCredentials) {
 					t.Fatalf("reset left an existing session valid: %v", err)
 				}
 			}
-			if _, err := cfg.store.createSession(ctx, target); !errors.Is(err, errInvalidCredentials) {
+			if _, err := cfg.store.createSession(ctx, target); !errors.Is(err, account.ErrInvalidCredentials) {
 				t.Fatalf("reset accepted a login using the previous account version: %v", err)
 			}
 			if _, err := cfg.store.session(ctx, adminCookie.Value); err != nil {
@@ -104,7 +107,7 @@ func TestAdminSelfResetShowsCredentialsAfterSigningOut(t *testing.T) {
 	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	ctx := context.Background()
-	admin, err := cfg.store.createUser(ctx, "Admin", testPassword, true)
+	admin, err := cfg.store.accounts.Create(ctx, "Admin", testPassword, true, quota.DefaultQuota)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,14 +132,14 @@ func TestAdminSelfResetShowsCredentialsAfterSigningOut(t *testing.T) {
 		t.Fatal("self-reset did not clear the session cookie or leaked the passphrase into headers")
 	}
 	for _, token := range []string{cookie.Value, otherToken} {
-		if _, err := cfg.store.session(ctx, token); !errors.Is(err, errInvalidCredentials) {
+		if _, err := cfg.store.session(ctx, token); !errors.Is(err, account.ErrInvalidCredentials) {
 			t.Fatalf("self-reset preserved an existing session: %v", err)
 		}
 	}
-	if _, err := cfg.store.authenticate(ctx, admin.Username, testPassword); !errors.Is(err, errInvalidCredentials) {
+	if _, err := cfg.store.accounts.Authenticate(ctx, admin.Username, testPassword); !errors.Is(err, account.ErrInvalidCredentials) {
 		t.Fatal("self-reset preserved the previous password")
 	}
-	if _, err := cfg.store.createSession(ctx, admin); !errors.Is(err, errInvalidCredentials) {
+	if _, err := cfg.store.createSession(ctx, admin); !errors.Is(err, account.ErrInvalidCredentials) {
 		t.Fatalf("self-reset accepted a login already in progress: %v", err)
 	}
 	for _, method := range []string{http.MethodGet, http.MethodPost} {
@@ -151,7 +154,7 @@ func TestAdminSelfResetShowsCredentialsAfterSigningOut(t *testing.T) {
 			t.Fatal("signed-out requests recovered credentials or repeated the reset")
 		}
 	}
-	fresh, err := cfg.store.authenticate(ctx, admin.Username, passphrase)
+	fresh, err := cfg.store.accounts.Authenticate(ctx, admin.Username, passphrase)
 	if err != nil {
 		t.Fatalf("self-reset passphrase cannot sign in: %v", err)
 	}
@@ -164,15 +167,15 @@ func TestAdminRejectedResetsDoNotChangeOrDisplayCredentials(t *testing.T) {
 	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	ctx := context.Background()
-	admin, err := cfg.store.createUser(ctx, "Admin", testPassword, true)
+	admin, err := cfg.store.accounts.Create(ctx, "Admin", testPassword, true, quota.DefaultQuota)
 	if err != nil {
 		t.Fatal(err)
 	}
-	retired, err := cfg.store.createUser(ctx, "Retired", testPassword, false)
+	retired, err := cfg.store.accounts.Create(ctx, "Retired", testPassword, false, quota.DefaultQuota)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := cfg.store.deleteUser(ctx, retired.ID, admin.ID); err != nil {
+	if err := cfg.store.accounts.Delete(ctx, retired.ID, admin.ID); err != nil {
 		t.Fatal(err)
 	}
 	adminCookie, csrf := sessionFor(t, cfg, admin.Username)

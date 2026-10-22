@@ -8,21 +8,16 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
-	"time"
 
+	"github.com/royvandam/pigeon/pkg/account"
 	"github.com/royvandam/pigeon/pkg/database"
-	"github.com/royvandam/pigeon/pkg/quota"
 )
 
 type store struct {
 	db          *sql.DB
-	uploadLocks sync.Map
-	// uploadSlots lets one upload per account stream at a time; see lockUploadSlot.
-	uploadSlots sync.Map
+	accounts    *account.Store
 	progress    sync.Map
-	usage       *quota.Cache
 	authLimiter *authLimiter
-	passwords   passwordHasher
 }
 
 type settings struct {
@@ -53,15 +48,16 @@ func (s settings) validate() error {
 // openStore opens or creates the database. passwordCost is the bcrypt cost for
 // passwords stored from now on; existing hashes keep the cost they were made with.
 func openStore(ctx context.Context, path string, passwordCost int) (*store, error) {
-	passwords, err := newPasswordHasher(passwordCost)
-	if err != nil {
-		return nil, err
-	}
 	db, err := database.Open(ctx, path)
 	if err != nil {
 		return nil, err
 	}
-	s := &store{db: db, usage: quota.NewCache(time.Now), authLimiter: newAuthLimiter(), passwords: passwords}
+	accounts, err := account.NewStore(db, passwordCost)
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	s := &store{db: db, accounts: accounts, authLimiter: newAuthLimiter()}
 	if err := s.initializeSettings(ctx); err != nil {
 		db.Close()
 		return nil, err

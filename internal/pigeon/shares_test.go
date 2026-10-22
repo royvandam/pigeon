@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/royvandam/pigeon/internal/token"
+	"github.com/royvandam/pigeon/pkg/quota"
 	"github.com/royvandam/pigeon/pkg/storage"
 )
 
@@ -152,7 +153,7 @@ func TestShareManagementAuthenticationCSRFAndAccountIsolation(t *testing.T) {
 	cookie, csrf := sessionFor(t, cfg, "Test User")
 	writeStoredFile(t, cfg, "test-user", "same.txt", "first user")
 	link := shareRequest(t, cfg, cookie, csrf, "create", "same.txt")
-	other, err := cfg.store.createUser(context.Background(), "Other", testPassword, false)
+	other, err := cfg.store.accounts.Create(context.Background(), "Other", testPassword, false, quota.DefaultQuota)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -352,17 +353,17 @@ func TestDeletedUsersLosePublicAccessWhileUploadsArePreserved(t *testing.T) {
 	cookie, csrf := sessionFor(t, cfg, "Test User")
 	writeStoredFile(t, cfg, "test-user", "readme.txt", "preserved")
 	link := shareRequest(t, cfg, cookie, csrf, "create", "readme.txt")
-	u, err := cfg.store.authenticate(context.Background(), "Test User", testPassword)
+	u, err := cfg.store.accounts.Authenticate(context.Background(), "Test User", testPassword)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := cfg.store.resetPassword(context.Background(), u.ID, "changed-password"); err != nil {
+	if _, err := cfg.store.accounts.ResetPassword(context.Background(), u.ID, "changed-password"); err != nil {
 		t.Fatal(err)
 	}
 	if w := publicDownload(cfg, http.MethodGet, link); w.Code != http.StatusOK {
 		t.Fatalf("password resets unexpectedly revoked independent shares: %d", w.Code)
 	}
-	if err := cfg.store.deleteUser(context.Background(), u.ID, 999); err != nil {
+	if err := cfg.store.accounts.Delete(context.Background(), u.ID, 999); err != nil {
 		t.Fatal(err)
 	}
 	if w := publicDownload(cfg, http.MethodGet, link); w.Code != http.StatusNotFound {
@@ -422,11 +423,11 @@ func TestPublicDownloadsRecheckRevocationAfterWaitingForStorageLock(t *testing.T
 	writeStoredFile(t, cfg, "test-user", "readme.txt", "shared")
 	link := shareRequest(t, cfg, cookie, csrf, "create", "readme.txt")
 	ctx := context.Background()
-	u, err := cfg.store.authenticate(ctx, "Test User", testPassword)
+	u, err := cfg.store.accounts.Authenticate(ctx, "Test User", testPassword)
 	if err != nil {
 		t.Fatal(err)
 	}
-	unlock, err := cfg.store.lockUploads(ctx, u.ID)
+	unlock, err := cfg.locks.Lock(ctx, u.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

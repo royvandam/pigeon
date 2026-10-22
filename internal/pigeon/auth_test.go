@@ -11,12 +11,15 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/royvandam/pigeon/pkg/account"
+	"github.com/royvandam/pigeon/pkg/quota"
 )
 
 func TestAdminUsesSharedAccountDialogs(t *testing.T) {
 	t.Parallel()
 	cfg := newTestConfig(t, 100)
-	admin, err := cfg.store.createUser(context.Background(), "Admin", testPassword, true)
+	admin, err := cfg.store.accounts.Create(context.Background(), "Admin", testPassword, true, quota.DefaultQuota)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +107,7 @@ func TestBrowserLoginLogout(t *testing.T) {
 	if w.Code != http.StatusSeeOther {
 		t.Fatalf("logout: %d %s", w.Code, w.Body)
 	}
-	if _, err := cfg.store.session(context.Background(), sessionCookie.Value); !errors.Is(err, errInvalidCredentials) {
+	if _, err := cfg.store.session(context.Background(), sessionCookie.Value); !errors.Is(err, account.ErrInvalidCredentials) {
 		t.Fatalf("logout left a valid session: %v", err)
 	}
 }
@@ -140,7 +143,7 @@ func TestAdminPermissionsCSRFAndUserLifecycle(t *testing.T) {
 	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	ctx := context.Background()
-	admin, err := cfg.store.createUser(ctx, "Admin", testPassword, true)
+	admin, err := cfg.store.accounts.Create(ctx, "Admin", testPassword, true, quota.DefaultQuota)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +178,7 @@ func TestAdminPermissionsCSRFAndUserLifecycle(t *testing.T) {
 		t.Fatalf("create user: %d %s", w.Code, w.Body)
 	}
 	passphrase := displayedPassphrase(t, w)
-	alice, err := cfg.store.authenticate(ctx, "Alice Smith", passphrase)
+	alice, err := cfg.store.accounts.Authenticate(ctx, "Alice Smith", passphrase)
 	if err != nil || alice.Admin || alice.Slug != "alice-smith" {
 		t.Fatalf("created user: %#v, %v", alice, err)
 	}
@@ -190,16 +193,16 @@ func TestAdminPermissionsCSRFAndUserLifecycle(t *testing.T) {
 		t.Fatalf("reset user: %d %s", w.Code, w.Body)
 	}
 	resetPassphrase := displayedPassphrase(t, w)
-	if _, err := cfg.store.session(ctx, oldToken); !errors.Is(err, errInvalidCredentials) {
+	if _, err := cfg.store.session(ctx, oldToken); !errors.Is(err, account.ErrInvalidCredentials) {
 		t.Fatalf("password reset did not revoke session: %v", err)
 	}
-	if _, err := cfg.store.createSession(ctx, alice); !errors.Is(err, errInvalidCredentials) {
+	if _, err := cfg.store.createSession(ctx, alice); !errors.Is(err, account.ErrInvalidCredentials) {
 		t.Fatalf("password reset accepted a login already in progress: %v", err)
 	}
-	if _, err := cfg.store.authenticate(ctx, "Alice Smith", passphrase); !errors.Is(err, errInvalidCredentials) {
+	if _, err := cfg.store.accounts.Authenticate(ctx, "Alice Smith", passphrase); !errors.Is(err, account.ErrInvalidCredentials) {
 		t.Fatal("old password still works")
 	}
-	alice, err = cfg.store.authenticate(ctx, "Alice Smith", resetPassphrase)
+	alice, err = cfg.store.accounts.Authenticate(ctx, "Alice Smith", resetPassphrase)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,19 +216,19 @@ func TestAdminPermissionsCSRFAndUserLifecycle(t *testing.T) {
 	if w.Code != http.StatusSeeOther {
 		t.Fatalf("delete user: %d %s", w.Code, w.Body)
 	}
-	if _, err := cfg.store.session(ctx, newToken); !errors.Is(err, errInvalidCredentials) {
+	if _, err := cfg.store.session(ctx, newToken); !errors.Is(err, account.ErrInvalidCredentials) {
 		t.Fatal("deleted user's session still works")
 	}
-	if _, err := cfg.store.authenticate(ctx, "Alice Smith", resetPassphrase); !errors.Is(err, errInvalidCredentials) {
+	if _, err := cfg.store.accounts.Authenticate(ctx, "Alice Smith", resetPassphrase); !errors.Is(err, account.ErrInvalidCredentials) {
 		t.Fatal("deleted user can authenticate")
 	}
-	if err := cfg.store.deleteUser(ctx, admin.ID, admin.ID); !errors.Is(err, errDeleteSelf) {
+	if err := cfg.store.accounts.Delete(ctx, admin.ID, admin.ID); !errors.Is(err, account.ErrDeleteSelf) {
 		t.Fatalf("admin could delete self: %v", err)
 	}
-	if err := cfg.store.deleteUser(ctx, admin.ID, 999); !errors.Is(err, errLastAdmin) {
+	if err := cfg.store.accounts.Delete(ctx, admin.ID, 999); !errors.Is(err, account.ErrLastAdmin) {
 		t.Fatalf("last admin could be deleted: %v", err)
 	}
-	users, err := cfg.store.listUsers(ctx)
+	users, err := activeUsers(ctx, cfg)
 	if err != nil || len(users) != 2 {
 		t.Fatalf("deleted user remains in management list: %#v, %v", users, err)
 	}
@@ -248,7 +251,7 @@ func TestSessionExpirationAndCrossOriginRequests(t *testing.T) {
 	if _, err := cfg.store.db.Exec(`UPDATE sessions SET expires_at = 1`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := cfg.store.session(context.Background(), cookie.Value); !errors.Is(err, errInvalidCredentials) {
+	if _, err := cfg.store.session(context.Background(), cookie.Value); !errors.Is(err, account.ErrInvalidCredentials) {
 		t.Fatal("expired session still works")
 	}
 }
@@ -360,7 +363,7 @@ func TestHTTPSPublicURLSecuresCookiesAndEnablesHSTS(t *testing.T) {
 				t.Fatal(err)
 			}
 			cfg.publicURL = publicURL
-			if _, err := cfg.store.createUser(context.Background(), "Admin", testPassword, true); err != nil {
+			if _, err := cfg.store.accounts.Create(context.Background(), "Admin", testPassword, true, quota.DefaultQuota); err != nil {
 				t.Fatal(err)
 			}
 			handler := newServer(cfg).Handler

@@ -277,13 +277,3 @@ func TestTrustedProxiesSettingIsValidatedAndPersisted(t *testing.T) {
 		t.Fatalf("migrated settings = %#v, %v", got, err)
 	}
 }
-
-func TestNewPasswordsNeedTwelveCharacters(t *testing.T) {
-	t.Parallel()
-	if err := validatePassword("elevenchars"); err == nil {
-		t.Fatal("an 11-character password was accepted")
-	}
-	if err := validatePassword("twelve-chars"); err != nil {
-		t.Fatalf("a 12-character password was rejected: %v", err)
-	}
-}

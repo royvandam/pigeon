@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/royvandam/pigeon/pkg/quota"
 )
 
 func TestUploadSizeBoundaryAndCleanup(t *testing.T) {
@@ -126,7 +128,7 @@ func TestUploadCapsFieldsBeforeFile(t *testing.T) {
 func TestUploadsAreIsolatedAndPreservedOnDeletion(t *testing.T) {
 	t.Parallel()
 	cfg := newTestConfig(t, 100)
-	u, err := cfg.store.createUser(context.Background(), "Other User", testPassword, false)
+	u, err := cfg.store.accounts.Create(context.Background(), "Other User", testPassword, false, quota.DefaultQuota)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +152,7 @@ func TestUploadsAreIsolatedAndPreservedOnDeletion(t *testing.T) {
 			t.Fatalf("wrong user's data saved: %q, %v", data, err)
 		}
 	}
-	if err := cfg.store.deleteUser(context.Background(), u.ID, 999); err != nil {
+	if err := cfg.store.accounts.Delete(context.Background(), u.ID, 999); err != nil {
 		t.Fatal(err)
 	}
 	files, err := readUploadDir(cfg.dir, "other-user")

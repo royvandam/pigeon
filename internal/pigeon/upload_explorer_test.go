@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/royvandam/pigeon/pkg/account"
 )
 
 func TestUploadMergesFoldersAndRejectsExistingFiles(t *testing.T) {
@@ -116,15 +118,15 @@ func TestUploadsRecheckAccountAndQuotaBeforePublishing(t *testing.T) {
 	t.Parallel()
 	for _, tt := range []struct {
 		name   string
-		change func(t *testing.T, cfg config, u user, cookie *http.Cookie, csrf string)
+		change func(t *testing.T, cfg config, u account.User, cookie *http.Cookie, csrf string)
 		status int
 	}{
-		{"quota lowered", func(t *testing.T, cfg config, u user, _ *http.Cookie, _ string) {
-			if err := cfg.store.setQuota(context.Background(), u.ID, 5); err != nil {
+		{"quota lowered", func(t *testing.T, cfg config, u account.User, _ *http.Cookie, _ string) {
+			if err := cfg.store.accounts.SetQuota(context.Background(), u.ID, 5); err != nil {
 				t.Fatal(err)
 			}
 		}, http.StatusRequestEntityTooLarge},
-		{"folders created", func(t *testing.T, cfg config, _ user, cookie *http.Cookie, csrf string) {
+		{"folders created", func(t *testing.T, cfg config, _ account.User, cookie *http.Cookie, csrf string) {
 			for _, name := range []string{"a", "b"} {
 				form := url.Values{"action": {"mkdir"}, "name": {name}, "csrf_token": {csrf}}
 				if w := serve(newServer(cfg).Handler, formRequest("/files", form, cookie)); w.Code != http.StatusSeeOther {
@@ -132,18 +134,18 @@ func TestUploadsRecheckAccountAndQuotaBeforePublishing(t *testing.T) {
 				}
 			}
 		}, http.StatusRequestEntityTooLarge},
-		{"account deleted", func(t *testing.T, cfg config, u user, _ *http.Cookie, _ string) {
-			if err := cfg.store.deleteUser(context.Background(), u.ID, 999); err != nil {
+		{"account deleted", func(t *testing.T, cfg config, u account.User, _ *http.Cookie, _ string) {
+			if err := cfg.store.accounts.Delete(context.Background(), u.ID, 999); err != nil {
 				t.Fatal(err)
 			}
 		}, http.StatusUnauthorized},
-		{"nothing changed", func(*testing.T, config, user, *http.Cookie, string) {}, http.StatusOK},
+		{"nothing changed", func(*testing.T, config, account.User, *http.Cookie, string) {}, http.StatusOK},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			// Nine bytes fit the quota of ten when the upload starts.
 			cfg := newTestConfig(t, 10)
 			cookie, csrf := sessionFor(t, cfg, "Test User")
-			u, err := cfg.store.authenticate(context.Background(), "Test User", testPassword)
+			u, err := cfg.store.accounts.Authenticate(context.Background(), "Test User", testPassword)
 			if err != nil {
 				t.Fatal(err)
 			}

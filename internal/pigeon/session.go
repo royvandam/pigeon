@@ -7,18 +7,19 @@ import (
 	"time"
 
 	"github.com/royvandam/pigeon/internal/token"
+	"github.com/royvandam/pigeon/pkg/account"
 )
 
 const sessionLifetime = 12 * time.Hour
 
 type authentication struct {
-	User      user
+	User      account.User
 	CSRFToken string
 	TokenHash string
 	Basic     bool
 }
 
-func (s *store) createSession(ctx context.Context, u user) (string, error) {
+func (s *store) createSession(ctx context.Context, u account.User) (string, error) {
 	secret, err := token.New()
 	if err != nil {
 		return "", err
@@ -39,14 +40,14 @@ SELECT ?, id, auth_version, ?, ? FROM users WHERE id = ? AND auth_version = ? AN
 		return "", err
 	}
 	if n, err := result.RowsAffected(); err != nil || n == 0 {
-		return "", errInvalidCredentials
+		return "", account.ErrInvalidCredentials
 	}
 	return secret, nil
 }
 
 func (s *store) session(ctx context.Context, secret string) (authentication, error) {
 	if len(secret) != token.Length {
-		return authentication{}, errInvalidCredentials
+		return authentication{}, account.ErrInvalidCredentials
 	}
 	var a authentication
 	a.TokenHash = token.Hash(secret)
@@ -57,7 +58,7 @@ WHERE s.token_hash = ? AND s.expires_at > ? AND u.deleted_at IS NULL AND s.user_
 		a.TokenHash, time.Now().Unix()).
 		Scan(&a.User.ID, &a.User.Username, &a.User.Slug, &a.User.Admin, &a.User.Version, &a.User.QuotaBytes, &a.CSRFToken)
 	if errors.Is(err, sql.ErrNoRows) {
-		return authentication{}, errInvalidCredentials
+		return authentication{}, account.ErrInvalidCredentials
 	}
 	return a, err
 }
