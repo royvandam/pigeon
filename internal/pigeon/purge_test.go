@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/royvandam/pigeon/internal/token"
+	"github.com/royvandam/pigeon/pkg/account"
+	"github.com/royvandam/pigeon/pkg/quota"
 	"github.com/royvandam/pigeon/pkg/storage"
 )
 
@@ -31,7 +33,7 @@ func TestPurgeRemovesUploadsAndCredentialsAndReleasesUsername(t *testing.T) {
 	if _, err := cfg.store.db.Exec(`INSERT INTO shares (token_hash, user_id, path, is_directory, created_at) VALUES (?, ?, 'nested/kept.txt', 0, ?)`, token.Hash(strings.Repeat("b", 43)), u.ID, time.Now().Unix()); err != nil {
 		t.Fatal(err)
 	}
-	if err := cfg.accounts().purge(ctx, u.ID); err != nil {
+	if err := cfg.manager.Purge(ctx, administrator, u.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Lstat(filepath.Join(cfg.dir, u.Slug)); !errors.Is(err, os.ErrNotExist) {
@@ -50,7 +52,7 @@ func TestPurgeRemovesUploadsAndCredentialsAndReleasesUsername(t *testing.T) {
 	if data, err := os.ReadFile(filepath.Join(cfg.dir, "test-user/kept.txt")); err != nil || string(data) != "other user's content" {
 		t.Fatalf("purge changed another account's files: %q, %v", data, err)
 	}
-	fresh, err := cfg.store.createUser(ctx, "Retired_User", "new-account-password", false)
+	fresh, err := cfg.store.accounts.Create(ctx, "Retired_User", "new-account-password", false, quota.DefaultQuota)
 	if err != nil || fresh.Slug != u.Slug || fresh.ID == u.ID {
 		t.Fatalf("purged username or account ID was not safely released: %#v, %v", fresh, err)
 	}
@@ -63,10 +65,10 @@ func TestPurgeRemovesUploadsAndCredentialsAndReleasesUsername(t *testing.T) {
 	if err != nil || len(entries) != 0 {
 		t.Fatalf("new account inherited old uploads: %v, %v", entries, err)
 	}
-	if err := cfg.accounts().purge(ctx, u.ID); !errors.Is(err, errDeletedUserNotFound) {
+	if err := cfg.manager.Purge(ctx, administrator, u.ID); !errors.Is(err, account.ErrDeletedUserNotFound) {
 		t.Fatalf("repeated purge accepted an old ID: %v", err)
 	}
-	if _, err := cfg.store.createSession(ctx, u); !errors.Is(err, errInvalidCredentials) {
+	if _, err := cfg.store.createSession(ctx, u); !errors.Is(err, account.ErrInvalidCredentials) {
 		t.Fatalf("purged identity could create a session: %v", err)
 	}
 }
@@ -77,16 +79,16 @@ func TestPurgeRejectsActiveAccountsAndHandlesMissingUploads(t *testing.T) {
 		t.Run(state, func(t *testing.T) {
 			cfg := newTestConfig(t, 100)
 			ctx := context.Background()
-			u, err := cfg.store.authenticate(ctx, "Test User", testPassword)
+			u, err := cfg.store.accounts.Authenticate(ctx, "Test User", testPassword)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if state == "active" {
 				writeStoredFile(t, cfg, u.Slug, "kept.txt", "preserved")
-				if err := cfg.accounts().purge(ctx, u.ID); !errors.Is(err, errDeletedUserNotFound) {
+				if err := cfg.manager.Purge(ctx, administrator, u.ID); !errors.Is(err, account.ErrDeletedUserNotFound) {
 					t.Fatalf("active account was purged: %v", err)
 				}
-				if _, err := cfg.store.authenticate(ctx, u.Username, testPassword); err != nil {
+				if _, err := cfg.store.accounts.Authenticate(ctx, u.Username, testPassword); err != nil {
 					t.Fatalf("rejected purge changed an active account: %v", err)
 				}
 				if data, err := os.ReadFile(filepath.Join(cfg.dir, u.Slug, "kept.txt")); err != nil || string(data) != "preserved" {
@@ -99,13 +101,13 @@ func TestPurgeRejectsActiveAccountsAndHandlesMissingUploads(t *testing.T) {
 			} else if err := os.Remove(cfg.dir); err != nil { // Created by the provider.
 				t.Fatal(err)
 			}
-			if err := cfg.store.deleteUser(ctx, u.ID, 999); err != nil {
+			if err := cfg.store.accounts.Delete(ctx, u.ID, 999); err != nil {
 				t.Fatal(err)
 			}
-			if err := cfg.accounts().purge(ctx, u.ID); err != nil {
+			if err := cfg.manager.Purge(ctx, administrator, u.ID); err != nil {
 				t.Fatalf("purge requires an unused upload directory: %v", err)
 			}
-			if _, err := cfg.store.createUser(ctx, u.Username, "new-account-password", false); err != nil {
+			if _, err := cfg.store.accounts.Create(ctx, u.Username, "new-account-password", false, quota.DefaultQuota); err != nil {
 				t.Fatalf("username still reserved: %v", err)
 			}
 		})
@@ -127,13 +129,13 @@ func TestPurgeFailuresKeepDeletedAccountReserved(t *testing.T) {
 					t.Fatal(err)
 				}
 			case "storage":
-				cfg.storage = failingRemoval{provider}
+				cfg.manager = account.NewManager(cfg.store.accounts, cfg.locks, cfg.usage, failingRemoval{provider})
 			case "unsafe slug":
 				if _, err := cfg.store.db.Exec(`UPDATE users SET slug = '../outside' WHERE id = ?`, u.ID); err != nil {
 					t.Fatal(err)
 				}
 			}
-			if err := cfg.accounts().purge(ctx, u.ID); err == nil {
+			if err := cfg.manager.Purge(ctx, administrator, u.ID); err == nil {
 				t.Fatal("purging ignored a failure")
 			}
 			var deleted bool
@@ -143,7 +145,7 @@ func TestPurgeFailuresKeepDeletedAccountReserved(t *testing.T) {
 			if data, err := os.ReadFile(filepath.Join(directory, u.Slug, "kept.txt")); err != nil || string(data) != "preserved" {
 				t.Fatalf("failed validation removed uploads: %q, %v", data, err)
 			}
-			if _, err := cfg.store.createUser(ctx, u.Username, "new-account-password", false); !errors.Is(err, errUserConflict) {
+			if _, err := cfg.store.accounts.Create(ctx, u.Username, "new-account-password", false, quota.DefaultQuota); !errors.Is(err, account.ErrUserConflict) {
 				t.Fatalf("failed purge allowed username reuse: %v", err)
 			}
 			if _, err := cfg.store.db.Exec(`DROP TRIGGER IF EXISTS fail_purge`); err != nil {
@@ -152,8 +154,8 @@ func TestPurgeFailuresKeepDeletedAccountReserved(t *testing.T) {
 			if _, err := cfg.store.db.Exec(`UPDATE users SET slug = ? WHERE id = ?`, u.Slug, u.ID); err != nil {
 				t.Fatal(err)
 			}
-			cfg.storage = provider
-			if err := cfg.accounts().purge(ctx, u.ID); err != nil {
+			cfg.manager = account.NewManager(cfg.store.accounts, cfg.locks, cfg.usage, provider)
+			if err := cfg.manager.Purge(ctx, administrator, u.ID); err != nil {
 				t.Fatalf("purge could not be retried: %v", err)
 			}
 		})
@@ -179,7 +181,7 @@ func TestPurgeDoesNotFollowSymbolicLinks(t *testing.T) {
 			if err := os.Symlink(filepath.Join(cfg.dir, "test-user"), link); err != nil {
 				t.Fatal(err)
 			}
-			if err := cfg.accounts().purge(context.Background(), u.ID); err != nil {
+			if err := cfg.manager.Purge(context.Background(), administrator, u.ID); err != nil {
 				t.Fatal(err)
 			}
 			if data, err := os.ReadFile(filepath.Join(cfg.dir, "test-user/kept.txt")); err != nil || string(data) != "preserved" {
@@ -203,19 +205,19 @@ func TestPurgeFileRemovalFailureCanBeRetried(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.Chmod(directory, 0o750) })
-	if err := cfg.accounts().purge(ctx, u.ID); !errors.Is(err, os.ErrPermission) {
+	if err := cfg.manager.Purge(ctx, administrator, u.ID); !errors.Is(err, os.ErrPermission) {
 		t.Fatalf("purge ignored a file removal failure: %v", err)
 	}
-	if id, err := cfg.store.deletedUserIDForUsername(ctx, u.Username); err != nil || id != u.ID {
+	if id, err := cfg.store.accounts.DeletedIDForUsername(ctx, u.Username); err != nil || id != u.ID {
 		t.Fatalf("failed removal freed the account: %d %v", id, err)
 	}
-	if _, err := cfg.store.createUser(ctx, u.Username, "new-account-password", false); !errors.Is(err, errUserConflict) {
+	if _, err := cfg.store.accounts.Create(ctx, u.Username, "new-account-password", false, quota.DefaultQuota); !errors.Is(err, account.ErrUserConflict) {
 		t.Fatalf("failed removal allowed username reuse: %v", err)
 	}
 	if err := os.Chmod(directory, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	if err := cfg.accounts().purge(ctx, u.ID); err != nil {
+	if err := cfg.manager.Purge(ctx, administrator, u.ID); err != nil {
 		t.Fatalf("retry after repairing storage failed: %v", err)
 	}
 }
@@ -226,12 +228,12 @@ func TestPurgeWaitsForUploadsAndSerializesRecycling(t *testing.T) {
 	ctx := context.Background()
 	u := deletedPurgeAccount(t, cfg)
 	writeStoredFile(t, cfg, u.Slug, "kept.txt", "preserved")
-	unlock, err := cfg.store.lockUploads(ctx, u.ID)
+	unlock, err := cfg.locks.Lock(ctx, u.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	waitCtx, cancel := context.WithTimeout(ctx, 20*time.Millisecond)
-	err = cfg.accounts().purge(waitCtx, u.ID)
+	err = cfg.manager.Purge(waitCtx, administrator, u.ID)
 	cancel()
 	unlock()
 	if !errors.Is(err, context.DeadlineExceeded) {
@@ -241,28 +243,30 @@ func TestPurgeWaitsForUploadsAndSerializesRecycling(t *testing.T) {
 		t.Fatalf("canceled purge removed uploads: %v", err)
 	}
 	results := make(chan error, 2)
-	go func() { results <- cfg.accounts().purge(ctx, u.ID) }()
+	var passphrase string // Read after both results arrive.
+	go func() { results <- cfg.manager.Purge(ctx, administrator, u.ID) }()
 	go func() {
-		_, err := cfg.store.recycleUser(ctx, u.ID, "recycled-account-password")
+		credentials, err := cfg.manager.Recycle(ctx, administrator, u.ID)
+		passphrase = credentials.Passphrase
 		results <- err
 	}()
 	successes := 0
 	for range 2 {
 		if err := <-results; err == nil {
 			successes++
-		} else if !errors.Is(err, errDeletedUserNotFound) {
+		} else if !errors.Is(err, account.ErrDeletedUserNotFound) {
 			t.Fatal(err)
 		}
 	}
 	if successes != 1 {
 		t.Fatalf("purge and recycle both changed the account: %d successes", successes)
 	}
-	_, err = cfg.store.authenticate(ctx, u.Username, "recycled-account-password")
+	_, err = cfg.store.accounts.Authenticate(ctx, u.Username, passphrase)
 	if err == nil {
 		if data, err := os.ReadFile(filepath.Join(cfg.dir, u.Slug, "kept.txt")); err != nil || string(data) != "preserved" {
 			t.Fatalf("purge removed a recycled account's uploads: %q, %v", data, err)
 		}
-	} else if !errors.Is(err, errInvalidCredentials) {
+	} else if !errors.Is(err, account.ErrInvalidCredentials) {
 		t.Fatal(err)
 	} else if _, err := os.Stat(filepath.Join(cfg.dir, u.Slug)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("purged account kept its upload directory: %v", err)

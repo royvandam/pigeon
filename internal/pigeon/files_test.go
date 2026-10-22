@@ -14,6 +14,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/royvandam/pigeon/pkg/quota"
 )
 
 func TestExplorerFileAndFolderLifecycle(t *testing.T) {
@@ -180,7 +182,7 @@ func TestFileActionsRejectUnsafePathsAndConflicts(t *testing.T) {
 func TestExplorerAccountIsolationAndCSRF(t *testing.T) {
 	t.Parallel()
 	cfg := newTestConfig(t, 100)
-	other, err := cfg.store.createUser(context.Background(), "Other User", testPassword, false)
+	other, err := cfg.store.accounts.Create(context.Background(), "Other User", testPassword, false, quota.DefaultQuota)
 	if err != nil {
 		t.Fatal(err)
 	}

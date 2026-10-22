@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -20,6 +21,8 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/royvandam/pigeon/pkg/account"
+	"github.com/royvandam/pigeon/pkg/quota"
 	"github.com/royvandam/pigeon/pkg/storage"
 	"github.com/royvandam/pigeon/pkg/storage/local"
 )
@@ -32,7 +35,11 @@ const testPassword = "test-password"
 // testPasswordCost keeps the many password hashes in fixtures fast.
 const testPasswordCost = bcrypt.MinCost
 
-func newTestConfig(t *testing.T, quota int64) config {
+// administrator acts for the tests that change accounts directly. The account
+// manager trusts its caller to have authenticated the actor.
+var administrator = account.User{ID: 999, Username: "Test Administrator", Admin: true}
+
+func newTestConfig(t *testing.T, quotaBytes int64) config {
 	t.Helper()
 	root := t.TempDir()
 	s, err := openStore(context.Background(), filepath.Join(root, "app.db"), testPasswordCost)
@@ -40,7 +47,7 @@ func newTestConfig(t *testing.T, quota int64) config {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { s.db.Close() })
-	if _, err := s.createUserWithQuota(context.Background(), "Test User", testPassword, false, quota); err != nil {
+	if _, err := s.accounts.Create(context.Background(), "Test User", testPassword, false, quotaBytes); err != nil {
 		t.Fatal(err)
 	}
 	provider, err := local.NewProvider(filepath.Join(root, "uploads"))
@@ -49,7 +56,22 @@ func newTestConfig(t *testing.T, quota int64) config {
 	}
 	// A one-byte allocation unit keeps quota arithmetic in tests exact; tests of
 	// the production unit set allocationUnit explicitly.
-	return config{dir: provider.Directory(), store: s, storage: provider, allocationUnit: 1}
+	cfg := config{dir: provider.Directory(), store: s, storage: provider, locks: account.NewLocks(), allocationUnit: 1}
+	setUsageClock(&cfg, time.Now)
+	return cfg
+}
+
+// setUsageClock gives cfg a new usage cache that reads the time from clock.
+// Call it before passing cfg to anything, which copies it.
+func setUsageClock(cfg *config, clock func() time.Time) {
+	cfg.usage = quota.NewCache(clock)
+	cfg.manager = account.NewManager(cfg.store.accounts, cfg.locks, cfg.usage, cfg.storage)
+}
+
+// activeUsers lists the accounts that have not been deleted.
+func activeUsers(ctx context.Context, cfg config) ([]account.User, error) {
+	users, err := cfg.store.accounts.List(ctx)
+	return slices.DeleteFunc(users, func(u account.User) bool { return u.Deleted }), err
 }
 
 func serve(handler http.Handler, r *http.Request) *httptest.ResponseRecorder {
@@ -74,7 +96,7 @@ func sessionFor(t *testing.T, cfg config, username string) (*http.Cookie, string
 
 func sessionForPassword(t *testing.T, cfg config, username, password string) (*http.Cookie, string) {
 	t.Helper()
-	u, err := cfg.store.authenticate(context.Background(), username, password)
+	u, err := cfg.store.accounts.Authenticate(context.Background(), username, password)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,13 +243,13 @@ func publicDownload(cfg config, method, link string) *httptest.ResponseRecorder 
 	return w
 }
 
-func deletedPurgeAccount(t *testing.T, cfg config) user {
+func deletedPurgeAccount(t *testing.T, cfg config) account.User {
 	t.Helper()
-	u, err := cfg.store.createUser(context.Background(), "Retired User", testPassword, false)
+	u, err := cfg.store.accounts.Create(context.Background(), "Retired User", testPassword, false, quota.DefaultQuota)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := cfg.store.deleteUser(context.Background(), u.ID, 999); err != nil {
+	if err := cfg.store.accounts.Delete(context.Background(), u.ID, 999); err != nil {
 		t.Fatal(err)
 	}
 	return u

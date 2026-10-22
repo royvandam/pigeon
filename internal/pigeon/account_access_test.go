@@ -9,29 +9,32 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/royvandam/pigeon/pkg/account"
+	"github.com/royvandam/pigeon/pkg/quota"
 )
 
 func TestReadsRejectOldIdentityAfterPurgeAndUsernameReuse(t *testing.T) {
 	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	ctx := context.Background()
-	old, err := cfg.store.authenticate(ctx, "Test User", testPassword)
+	old, err := cfg.store.accounts.Authenticate(ctx, "Test User", testPassword)
 	if err != nil {
 		t.Fatal(err)
 	}
 	writeStoredFile(t, cfg, old.Slug, "old.txt", "old contents")
-	if err := cfg.store.deleteUser(ctx, old.ID, 999); err != nil {
+	if err := cfg.store.accounts.Delete(ctx, old.ID, 999); err != nil {
 		t.Fatal(err)
 	}
-	if err := cfg.accounts().purge(ctx, old.ID); err != nil {
+	if err := cfg.manager.Purge(ctx, administrator, old.ID); err != nil {
 		t.Fatal(err)
 	}
-	fresh, err := cfg.store.createUser(ctx, old.Username, "replacement-password", false)
+	fresh, err := cfg.store.accounts.Create(ctx, old.Username, "replacement-password", false, quota.DefaultQuota)
 	if err != nil {
 		t.Fatal(err)
 	}
 	writeStoredFile(t, cfg, fresh.Slug, "private.txt", "replacement account's private contents")
-	if download, err := cfg.openPrivateDownload(ctx, old, "private.txt"); !errors.Is(err, errInvalidCredentials) {
+	if download, err := cfg.openPrivateDownload(ctx, old, "private.txt"); !errors.Is(err, account.ErrInvalidCredentials) {
 		if download != nil {
 			download.Close()
 		}
@@ -54,11 +57,11 @@ func TestReadAccessRechecksIdentityAfterWaiting(t *testing.T) {
 	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	ctx := context.Background()
-	u, err := cfg.store.authenticate(ctx, "Test User", testPassword)
+	u, err := cfg.store.accounts.Authenticate(ctx, "Test User", testPassword)
 	if err != nil {
 		t.Fatal(err)
 	}
-	release, err := cfg.store.lockUploads(ctx, u.ID)
+	release, err := cfg.locks.Lock(ctx, u.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,14 +73,14 @@ func TestReadAccessRechecksIdentityAfterWaiting(t *testing.T) {
 		}
 		done <- err
 	}()
-	_, err = cfg.store.resetPassword(ctx, u.ID, "replacement-password")
+	_, err = cfg.store.accounts.ResetPassword(ctx, u.ID, "replacement-password")
 	release()
 	if err != nil {
 		t.Fatal(err)
 	}
 	select {
 	case err := <-done:
-		if !errors.Is(err, errInvalidCredentials) {
+		if !errors.Is(err, account.ErrInvalidCredentials) {
 			t.Fatalf("read accepted credentials revoked while waiting: %v", err)
 		}
 	case <-time.After(5 * time.Second):
@@ -89,7 +92,7 @@ func TestPrivateDownloadReleasesAccessBeforeStreaming(t *testing.T) {
 	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	ctx := context.Background()
-	u, err := cfg.store.authenticate(ctx, "Test User", testPassword)
+	u, err := cfg.store.accounts.Authenticate(ctx, "Test User", testPassword)
 	if err != nil {
 		t.Fatal(err)
 	}

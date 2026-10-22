@@ -6,8 +6,9 @@ The repository uses the applicable directory conventions from
 ```text
 cmd/pigeon/         Executable entry point and signal handling
 internal/pigeon/    Private application code and Go tests
-  wordlists/        Embedded passphrase dictionary and attribution
 internal/token/     Random tokens for sessions, share links, and forms
+pkg/account/        Accounts, passwords, account locks, and lifecycle changes
+  wordlists/        Embedded passphrase dictionary and attribution
 pkg/database/       SQLite connection and schema migrations
 pkg/quota/          Quota rules, usage measurement, and the usage cache
 pkg/storage/        Storage provider interfaces and path rules
@@ -58,16 +59,39 @@ it again: callers hold the account lock while they read or change an entry,
 and entries are measured again after 10 minutes so changes made directly in
 storage still show.
 
+## Accounts
+
+`pkg/account` owns accounts. `account.Store` reads and changes them in the
+database and takes no locks. Usernames are case-insensitive, and each account
+stores its files under a slug made from its username; deleted accounts keep
+both reserved until they are purged. Passwords are hashed with bcrypt, and an
+unknown username is checked against a dummy hash of the same cost, so it takes
+as long as a wrong password. Generated passphrases use the embedded EFF word
+list; its source and license are documented in the
+[passphrase word list attribution](https://github.com/royvandam/pigeon/blob/main/pkg/account/wordlists/README.md).
+
+`account.Locks` serializes the work on each account:
+
+- `Lock` is the account lock. Every read and change of the account's files
+  holds it, as do quota changes, recycling, and purging.
+- `LockUploadSlot` lets one upload per account stream at a time.
+- `LockForRemoval` takes both, so purging and recycling wait for an upload
+  that is still streaming.
+
+`account.Manager` makes the changes an administrator requests: creating,
+deleting, recycling, and purging accounts, resetting passwords, and setting
+quotas. It takes the locks a change needs and coordinates the database with the
+account's files and cached usage. A purge keeps the account reserved until its
+files are removed, so a failure leaves it intact for a retry.
+
 ## Request and storage ownership
 
-Account changes are coordinated by `accountManager` in `accounts.go`; the SQLite
-store owns persistence and transactions. `userStorage` names an account's
-namespace in the storage provider and measures its usage. `accountAccess` locks
-an account and rechecks its identity before both reads and writes; download
-handles release that lock before streaming. Uploads hold the lock only to check the quota and to publish:
-while the body streams into the staging folder they hold the account's upload
-slot instead, which keeps uploads to one account one at a time. Purging and
-recycling take the slot as well. Request body deadlines live in `deadline.go`.
+`userStorage` names an account's namespace in the storage provider and
+measures its usage. `accountAccess` takes the account lock and rechecks the
+account's identity before both reads and writes; download handles release that
+lock before streaming. Uploads hold the lock only to check the quota and to
+publish: while the body streams into the staging folder they hold the upload
+slot instead. Request body deadlines live in `deadline.go`.
 
 HTTP handlers parse requests and render responses, using shared method,
 authentication, and error helpers. Explorer listing and file mutation rules live
@@ -84,14 +108,13 @@ after changing templates or assets.
 connection, which serializes transactions, and migrates the schema for
 accounts, sessions, and share links. Inside `internal/pigeon`, `run.go`
 handles startup, `database.go` persists server settings, `setup.go` handles
-first-run provisioning, and `users.go` manages accounts. `passphrase.go`
-generates credentials using the embedded EFF word list. Its source and license are documented in
-[passphrase word list attribution](https://github.com/royvandam/pigeon/blob/main/internal/pigeon/wordlists/README.md).
+first-run provisioning, and `accounts.go` turns admin page actions into account
+changes.
 `session.go` and `auth.go` handle authentication. `admin.go`, `index.go`, and
 `upload.go` serve user management, the explorer page, and the upload endpoint.
 `files.go` handles explorer requests, and `download.go` serves files and ZIP
 archives. `upload_files.go` streams and publishes batches. `server.go` handles
-routing and shutdown, and `quota.go` checks and changes account quotas.
+routing and shutdown, and `quota.go` formats quotas for forms and headers.
 `upload_progress.go` tracks uploads and serves authenticated progress
 snapshots.
 Size and filename helpers remain separate.

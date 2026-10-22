@@ -1,4 +1,4 @@
-package pigeon
+package account
 
 import (
 	"crypto/rand"
@@ -25,7 +25,9 @@ var passphraseWords = func() []string {
 	return words
 }()
 
-func generatePassphrase() (string, error) {
+// GeneratePassphrase returns four random words from the EFF long word list,
+// separated by hyphens: about 51 bits of entropy.
+func GeneratePassphrase() (string, error) {
 	var words [4]string
 	limit := big.NewInt(int64(len(passphraseWords)))
 	for i := range words {

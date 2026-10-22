@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/royvandam/pigeon/pkg/account"
 )
 
 // Password checks run bcrypt, which costs tens of milliseconds of CPU. Each
@@ -122,24 +124,24 @@ func maxTime(a, b time.Time) time.Time {
 
 // checkPassword verifies credentials for the client that sent r, applying the
 // per-client attempt limit and the server-wide cap on concurrent checks.
-func (cfg config) checkPassword(r *http.Request, username, password string) (user, error) {
+func (cfg config) checkPassword(r *http.Request, username, password string) (account.User, error) {
 	limiter := cfg.store.authLimiter
 	client := r.RemoteAddr // Only unusual listeners provide no IP address.
 	if addr := clientAddress(r, cfg.trustedProxies); addr.IsValid() {
 		client = clientKey(addr)
 	}
 	if err := limiter.take(client); err != nil {
-		return user{}, err
+		return account.User{}, err
 	}
 	select {
 	case limiter.checks <- struct{}{}:
 	case <-r.Context().Done():
 		limiter.refund(client)
-		return user{}, r.Context().Err()
+		return account.User{}, r.Context().Err()
 	}
-	u, err := cfg.store.authenticate(r.Context(), username, password)
+	u, err := cfg.store.accounts.Authenticate(r.Context(), username, password)
 	<-limiter.checks
-	if !errors.Is(err, errInvalidCredentials) {
+	if !errors.Is(err, account.ErrInvalidCredentials) {
 		limiter.refund(client) // Only wrong credentials count against the client.
 	}
 	return u, err

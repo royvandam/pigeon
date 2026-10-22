@@ -13,6 +13,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/royvandam/pigeon/pkg/account"
 	"github.com/royvandam/pigeon/pkg/quota"
 )
 
@@ -20,7 +21,7 @@ func TestDefaultQuotaAndDatabaseMigration(t *testing.T) {
 	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	ctx := context.Background()
-	u, err := cfg.store.authenticate(ctx, "Test User", testPassword)
+	u, err := cfg.store.accounts.Authenticate(ctx, "Test User", testPassword)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,11 +59,11 @@ ALTER TABLE settings ADD COLUMN max_bytes INTEGER NOT NULL DEFAULT 209715200 CHE
 	if err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM pragma_table_info('settings') WHERE name = 'max_bytes')`).Scan(&hasLimit); err != nil || hasLimit {
 		t.Fatalf("single upload limit remains after migration: %t, %v", hasLimit, err)
 	}
-	created, err := s.createUser(ctx, "New User", testPassword, false)
+	created, err := s.accounts.Create(ctx, "New User", testPassword, false, quota.DefaultQuota)
 	if err != nil || created.QuotaBytes != 1<<30 {
 		t.Fatalf("new user's default quota = %#v, %v", created, err)
 	}
-	if err := s.setQuota(ctx, a.User.ID, 12345); err != nil {
+	if err := s.accounts.SetQuota(ctx, a.User.ID, 12345); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.db.Close(); err != nil {
@@ -162,7 +163,7 @@ func TestAdminCanAssignAndChangeQuotas(t *testing.T) {
 	t.Parallel()
 	cfg := newTestConfig(t, 10)
 	ctx := context.Background()
-	if _, err := cfg.store.createUser(ctx, "Admin", testPassword, true); err != nil {
+	if _, err := cfg.store.accounts.Create(ctx, "Admin", testPassword, true, quota.DefaultQuota); err != nil {
 		t.Fatal(err)
 	}
 	cookie, csrf := sessionFor(t, cfg, "Admin")
@@ -173,7 +174,7 @@ func TestAdminCanAssignAndChangeQuotas(t *testing.T) {
 		t.Fatalf("create user with quota: %d, %s", w.Code, w.Body)
 	}
 	passphrase := displayedPassphrase(t, w)
-	u, err := cfg.store.authenticate(ctx, "Quota User", passphrase)
+	u, err := cfg.store.accounts.Authenticate(ctx, "Quota User", passphrase)
 	if err != nil || u.QuotaBytes != 20 {
 		t.Fatalf("assigned quota = %#v, %v", u, err)
 	}
@@ -231,24 +232,9 @@ func TestAdminCanAssignAndChangeQuotas(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("invalid quota accepted: %d", w.Code)
 	}
-	u, err = cfg.store.authenticate(ctx, "Quota User", passphrase)
+	u, err = cfg.store.accounts.Authenticate(ctx, "Quota User", passphrase)
 	if err != nil || u.QuotaBytes != 12 {
 		t.Fatalf("invalid update changed quota: %#v, %v", u, err)
-	}
-}
-
-func TestCanceledRequestsDoNotWaitForTheAccountLock(t *testing.T) {
-	t.Parallel()
-	cfg := newTestConfig(t, 10)
-	unlock, err := cfg.store.lockUploads(context.Background(), 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer unlock()
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if _, err := cfg.store.lockUploads(ctx, 1); !errors.Is(err, context.Canceled) {
-		t.Fatalf("canceled request waited for the quota lock: %v", err)
 	}
 }
 
@@ -299,7 +285,7 @@ func TestQuotaChargesEmptyFilesAndFolders(t *testing.T) {
 	if w.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("empty file beyond quota: %d, %s", w.Code, w.Body)
 	}
-	used, err := cfg.filesFor(user{Slug: "test-user"}).usage(context.Background())
+	used, err := cfg.filesFor(account.User{Slug: "test-user"}).usage(context.Background())
 	if err != nil || used != 16<<10 {
 		t.Fatalf("usage = %d, %v; want the full quota", used, err)
 	}

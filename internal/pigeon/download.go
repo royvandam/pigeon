@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"path"
 
+	"github.com/royvandam/pigeon/pkg/account"
 	"github.com/royvandam/pigeon/pkg/storage"
 )
 
@@ -31,7 +32,7 @@ func (cfg config) handleDownload(w http.ResponseWriter, r *http.Request) {
 	download.ServeHTTP(w, r)
 }
 
-func (cfg config) openPrivateDownload(ctx context.Context, u user, name string) (*storedDownload, error) {
+func (cfg config) openPrivateDownload(ctx context.Context, u account.User, name string) (*storedDownload, error) {
 	access, err := cfg.accessAccount(ctx, u)
 	if err != nil {
 		return nil, err

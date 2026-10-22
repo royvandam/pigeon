@@ -6,11 +6,14 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/royvandam/pigeon/pkg/account"
+	"github.com/royvandam/pigeon/pkg/quota"
 )
 
 // readSecret is used for terminal input without echo. Tests and piped input use in.
-func promptInitialAdmin(ctx context.Context, s *store, in io.Reader, out io.Writer, readSecret func() (string, error)) error {
-	exists, err := s.hasUsers(ctx)
+func promptInitialAdmin(ctx context.Context, accounts *account.Store, in io.Reader, out io.Writer, readSecret func() (string, error)) error {
+	exists, err := accounts.HasUsers(ctx)
 	if err != nil || exists {
 		return err
 	}
@@ -37,7 +40,7 @@ func promptInitialAdmin(ctx context.Context, s *store, in io.Reader, out io.Writ
 		if err != nil {
 			return err
 		}
-		if _, _, _, err := normalizeUsername(username); err != nil {
+		if _, _, _, err := account.NormalizeUsername(username); err != nil {
 			fmt.Fprintln(out, err)
 			continue
 		}
@@ -55,11 +58,11 @@ func promptInitialAdmin(ctx context.Context, s *store, in io.Reader, out io.Writ
 			fmt.Fprintln(out, "Passwords do not match. Try again.")
 			continue
 		}
-		if err := validatePassword(password); err != nil {
+		if err := account.ValidatePassword(password); err != nil {
 			fmt.Fprintln(out, err)
 			continue
 		}
-		u, err := s.createUser(ctx, username, password, true)
+		u, err := accounts.Create(ctx, username, password, true, quota.DefaultQuota)
 		if err != nil {
 			return err
 		}

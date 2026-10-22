@@ -12,6 +12,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/royvandam/pigeon/pkg/quota"
 )
 
 func TestRoutesAndEmbeddedPage(t *testing.T) {
@@ -79,7 +81,7 @@ func TestRunServerReportsListenErrors(t *testing.T) {
 func TestResponsesCarrySecurityHeaders(t *testing.T) {
 	t.Parallel()
 	cfg := newTestConfig(t, 1024)
-	if _, err := cfg.store.createUser(context.Background(), "Admin", testPassword, true); err != nil {
+	if _, err := cfg.store.accounts.Create(context.Background(), "Admin", testPassword, true, quota.DefaultQuota); err != nil {
 		t.Fatal(err)
 	}
 	handler := newServer(cfg).Handler

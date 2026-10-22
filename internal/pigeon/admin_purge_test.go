@@ -12,13 +12,16 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/royvandam/pigeon/pkg/account"
+	"github.com/royvandam/pigeon/pkg/quota"
 )
 
 func TestAdminPurgeAndRecreateAccount(t *testing.T) {
 	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	ctx := context.Background()
-	if _, err := cfg.store.createUser(ctx, "Admin", testPassword, true); err != nil {
+	if _, err := cfg.store.accounts.Create(ctx, "Admin", testPassword, true, quota.DefaultQuota); err != nil {
 		t.Fatal(err)
 	}
 	u := deletedPurgeAccount(t, cfg)
@@ -52,7 +55,7 @@ func TestAdminPurgeAndRecreateAccount(t *testing.T) {
 		t.Fatalf("purged username could not be reused: %d %s", w.Code, w.Body)
 	}
 	passphrase := displayedPassphrase(t, w)
-	fresh, err := cfg.store.authenticate(ctx, u.Username, passphrase)
+	fresh, err := cfg.store.accounts.Authenticate(ctx, u.Username, passphrase)
 	if err != nil || fresh.ID == u.ID {
 		t.Fatalf("recreated account reused the purged identity: %#v %v", fresh, err)
 	}
@@ -61,7 +64,7 @@ func TestAdminPurgeAndRecreateAccount(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("repeated purge succeeded: %d %s", w.Code, w.Body)
 	}
-	if _, err := cfg.store.authenticate(ctx, fresh.Username, passphrase); err != nil {
+	if _, err := cfg.store.accounts.Authenticate(ctx, fresh.Username, passphrase); err != nil {
 		t.Fatalf("repeated purge removed the replacement account: %v", err)
 	}
 }
@@ -70,7 +73,7 @@ func TestAdminPurgeRequiresPermissionAndExplicitPOST(t *testing.T) {
 	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	ctx := context.Background()
-	admin, err := cfg.store.createUser(ctx, "Admin", testPassword, true)
+	admin, err := cfg.store.accounts.Create(ctx, "Admin", testPassword, true, quota.DefaultQuota)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +111,7 @@ func TestAdminPurgeRequiresPermissionAndExplicitPOST(t *testing.T) {
 			if data, err := os.ReadFile(filepath.Join(cfg.dir, u.Slug, "kept.txt")); err != nil || string(data) != "preserved" {
 				t.Fatalf("rejected request removed uploads: %q %v", data, err)
 			}
-			if id, err := cfg.store.deletedUserIDForUsername(ctx, u.Username); err != nil || id != u.ID {
+			if id, err := cfg.store.accounts.DeletedIDForUsername(ctx, u.Username); err != nil || id != u.ID {
 				t.Fatalf("rejected request removed the account: %d %v", id, err)
 			}
 		})
@@ -119,7 +122,7 @@ func TestAdminPurgeFailureKeepsAccountReserved(t *testing.T) {
 	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	ctx := context.Background()
-	if _, err := cfg.store.createUser(ctx, "Admin", testPassword, true); err != nil {
+	if _, err := cfg.store.accounts.Create(ctx, "Admin", testPassword, true, quota.DefaultQuota); err != nil {
 		t.Fatal(err)
 	}
 	u := deletedPurgeAccount(t, cfg)
@@ -133,7 +136,7 @@ func TestAdminPurgeFailureKeepsAccountReserved(t *testing.T) {
 	if w.Code != http.StatusInternalServerError || !strings.Contains(w.Body.String(), "Its username remains reserved") || w.Header().Get("Location") != "" {
 		t.Fatalf("failed purge reported success: %d %s", w.Code, w.Body)
 	}
-	if _, err := cfg.store.createUser(ctx, u.Username, "new-account-password", false); !errors.Is(err, errUserConflict) {
+	if _, err := cfg.store.accounts.Create(ctx, u.Username, "new-account-password", false, quota.DefaultQuota); !errors.Is(err, account.ErrUserConflict) {
 		t.Fatalf("failed purge released the username: %v", err)
 	}
 }

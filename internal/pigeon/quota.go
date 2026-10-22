@@ -1,12 +1,8 @@
 package pigeon
 
 import (
-	"context"
-	"database/sql"
-	"errors"
 	"net/http"
 	"strconv"
-	"sync"
 
 	"github.com/royvandam/pigeon/pkg/quota"
 )
@@ -17,80 +13,6 @@ func parseQuota(value string) (int64, error) {
 		return 0, err
 	}
 	return bytes, quota.Validate(bytes)
-}
-
-// Serialize account storage access and lifecycle changes. Uploads hold this lock
-// for the quota check and again for publication, but not while streaming; reads
-// recheck identity while holding it. Different accounts can proceed concurrently.
-func (s *store) lockUploads(ctx context.Context, id int64) (func(), error) {
-	return lockAccount(ctx, &s.uploadLocks, id)
-}
-
-// lockUploadSlot lets one upload per account stream at a time, so each starts
-// from the quota the previous one left. Take it before lockUploads.
-func (s *store) lockUploadSlot(ctx context.Context, id int64) (func(), error) {
-	return lockAccount(ctx, &s.uploadSlots, id)
-}
-
-// lockAccountAndUploads waits for a streaming upload as well as for the account
-// lock, so purging or recycling never races with an upload's staging folder.
-func (s *store) lockAccountAndUploads(ctx context.Context, id int64) (func(), error) {
-	releaseSlot, err := s.lockUploadSlot(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	release, err := s.lockUploads(ctx, id)
-	if err != nil {
-		releaseSlot()
-		return nil, err
-	}
-	return func() { release(); releaseSlot() }, nil
-}
-
-func lockAccount(ctx context.Context, locks *sync.Map, id int64) (func(), error) {
-	value, _ := locks.LoadOrStore(id, make(chan struct{}, 1))
-	lock := value.(chan struct{})
-	select {
-	case lock <- struct{}{}:
-		return func() { <-lock }, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-}
-
-func (s *store) userQuota(ctx context.Context, u user) (int64, error) {
-	var bytes int64
-	err := s.db.QueryRowContext(ctx, `SELECT quota_bytes FROM users WHERE id = ? AND auth_version = ? AND deleted_at IS NULL`, u.ID, u.Version).Scan(&bytes)
-	if errors.Is(err, sql.ErrNoRows) {
-		return 0, errInvalidCredentials
-	}
-	if err != nil {
-		return 0, err
-	}
-	return bytes, quota.Validate(bytes)
-}
-
-func (s *store) setQuota(ctx context.Context, id, bytes int64) error {
-	if err := quota.Validate(bytes); err != nil {
-		return err
-	}
-	unlock, err := s.lockUploads(ctx, id)
-	if err != nil {
-		return err
-	}
-	defer unlock()
-	result, err := s.db.ExecContext(ctx, `UPDATE users SET quota_bytes = ? WHERE id = ? AND deleted_at IS NULL`, bytes, id)
-	if err != nil {
-		return err
-	}
-	n, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if n == 0 {
-		return errUserNotFound
-	}
-	return nil
 }
 
 func quotaInput(quota int64) string {

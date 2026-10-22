@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/royvandam/pigeon/pkg/account"
 	"github.com/royvandam/pigeon/pkg/quota"
 )
 
@@ -18,16 +19,16 @@ func TestAdminUserRecycling(t *testing.T) {
 	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	ctx := context.Background()
-	admin, err := cfg.store.createUser(ctx, "Admin", testPassword, true)
+	admin, err := cfg.store.accounts.Create(ctx, "Admin", testPassword, true, quota.DefaultQuota)
 	if err != nil {
 		t.Fatal(err)
 	}
-	old, err := cfg.store.createUserWithQuota(ctx, "Élise Smith", testPassword, true, 2<<30)
+	old, err := cfg.store.accounts.Create(ctx, "Élise Smith", testPassword, true, 2<<30)
 	if err != nil {
 		t.Fatal(err)
 	}
 	writeStoredFile(t, cfg, old.Slug, "kept.txt", "preserved")
-	if err := cfg.store.deleteUser(ctx, old.ID, admin.ID); err != nil {
+	if err := cfg.store.accounts.Delete(ctx, old.ID, admin.ID); err != nil {
 		t.Fatal(err)
 	}
 	cookie, csrf := sessionFor(t, cfg, admin.Username)
@@ -44,7 +45,7 @@ func TestAdminUserRecycling(t *testing.T) {
 		if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `id="recycleCandidateTitle"`) || strings.Contains(w.Body.String(), `id="issuedPassphrase"`) {
 			t.Fatalf("reserved name did not offer explicit recycling: %d %s", w.Code, w.Body)
 		}
-		if _, err := cfg.store.authenticate(ctx, old.Username, testPassword); !errors.Is(err, errInvalidCredentials) {
+		if _, err := cfg.store.accounts.Authenticate(ctx, old.Username, testPassword); !errors.Is(err, account.ErrInvalidCredentials) {
 			t.Fatalf("creation automatically restored the account: %v", err)
 		}
 	}
@@ -58,11 +59,11 @@ func TestAdminUserRecycling(t *testing.T) {
 	if w.Header().Get("Cache-Control") != "no-store" || w.Header().Get("Location") != "" || len(w.Result().Cookies()) != 0 {
 		t.Fatal("recycled credential must appear only in an uncached response")
 	}
-	fresh, err := cfg.store.authenticate(ctx, old.Username, passphrase)
+	fresh, err := cfg.store.accounts.Authenticate(ctx, old.Username, passphrase)
 	if err != nil || fresh.ID != old.ID || fresh.Admin != old.Admin || fresh.QuotaBytes != old.QuotaBytes {
 		t.Fatalf("recycled account lost its identity, role or quota: %#v, %v", fresh, err)
 	}
-	if _, err := cfg.store.authenticate(ctx, old.Username, "client-chosen-password"); !errors.Is(err, errInvalidCredentials) {
+	if _, err := cfg.store.accounts.Authenticate(ctx, old.Username, "client-chosen-password"); !errors.Is(err, account.ErrInvalidCredentials) {
 		t.Fatalf("recycling accepted a client supplied password: %v", err)
 	}
 	w = httptest.NewRecorder()
@@ -75,7 +76,7 @@ func TestAdminUserRecycling(t *testing.T) {
 	if w.Code != http.StatusBadRequest || strings.Contains(w.Body.String(), `id="issuedPassphrase"`) {
 		t.Fatal("repeated recycling succeeded or disclosed an unused credential")
 	}
-	if _, err := cfg.store.authenticate(ctx, old.Username, passphrase); err != nil {
+	if _, err := cfg.store.accounts.Authenticate(ctx, old.Username, passphrase); err != nil {
 		t.Fatalf("repeated recycling changed the password: %v", err)
 	}
 }
@@ -84,15 +85,15 @@ func TestAdminRecyclingRequiresPermissionAndExplicitPOST(t *testing.T) {
 	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	ctx := context.Background()
-	admin, err := cfg.store.createUser(ctx, "Admin", testPassword, true)
+	admin, err := cfg.store.accounts.Create(ctx, "Admin", testPassword, true, quota.DefaultQuota)
 	if err != nil {
 		t.Fatal(err)
 	}
-	old, err := cfg.store.createUser(ctx, "Retired", testPassword, false)
+	old, err := cfg.store.accounts.Create(ctx, "Retired", testPassword, false, quota.DefaultQuota)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := cfg.store.deleteUser(ctx, old.ID, admin.ID); err != nil {
+	if err := cfg.store.accounts.Delete(ctx, old.ID, admin.ID); err != nil {
 		t.Fatal(err)
 	}
 	adminCookie, csrf := sessionFor(t, cfg, admin.Username)
@@ -124,7 +125,7 @@ func TestAdminRecyclingRequiresPermissionAndExplicitPOST(t *testing.T) {
 			if w.Code != tt.status || strings.Contains(w.Body.String(), `id="issuedPassphrase"`) {
 				t.Fatalf("unexpected recycling response: %d %s", w.Code, w.Body)
 			}
-			deleted, err := cfg.store.deletedUserIDForUsername(ctx, old.Username)
+			deleted, err := cfg.store.accounts.DeletedIDForUsername(ctx, old.Username)
 			if err != nil || deleted != old.ID {
 				t.Fatalf("rejected request restored the account: %d %v", deleted, err)
 			}
@@ -145,7 +146,7 @@ func TestAdminGeneratesUserCredentials(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := newTestConfig(t, 100)
 			ctx := context.Background()
-			if _, err := cfg.store.createUser(ctx, "Admin", testPassword, true); err != nil {
+			if _, err := cfg.store.accounts.Create(ctx, "Admin", testPassword, true, quota.DefaultQuota); err != nil {
 				t.Fatal(err)
 			}
 			cookie, csrf := sessionFor(t, cfg, "Admin")
@@ -167,11 +168,11 @@ func TestAdminGeneratesUserCredentials(t *testing.T) {
 			if w.Header().Get("Cache-Control") != "no-store" || w.Header().Get("Location") != "" || len(w.Result().Cookies()) != 0 {
 				t.Fatal("generated credential must be in an uncached response, without redirects or cookies")
 			}
-			alice, err := cfg.store.authenticate(ctx, "Alice Smith", passphrase)
+			alice, err := cfg.store.accounts.Authenticate(ctx, "Alice Smith", passphrase)
 			if err != nil || alice.Username != "Alice Smith" || alice.Slug != "alice-smith" || alice.Admin != tt.admin || alice.QuotaBytes != tt.quotaBytes {
 				t.Fatalf("created account does not match the request or displayed credential: %#v, %v", alice, err)
 			}
-			if _, err := cfg.store.authenticate(ctx, "Alice Smith", "client-chosen-password"); !errors.Is(err, errInvalidCredentials) {
+			if _, err := cfg.store.accounts.Authenticate(ctx, "Alice Smith", "client-chosen-password"); !errors.Is(err, account.ErrInvalidCredentials) {
 				t.Fatalf("client supplied password was accepted: %v", err)
 			}
 			var hash []byte
@@ -198,7 +199,7 @@ func TestAdminGeneratesUserCredentials(t *testing.T) {
 			if w.Code != http.StatusBadRequest || strings.Contains(w.Body.String(), `id="issuedPassphrase"`) {
 				t.Fatal("duplicate creation succeeded or displayed an unused credential")
 			}
-			if _, err := cfg.store.authenticate(ctx, "Alice Smith", passphrase); err != nil {
+			if _, err := cfg.store.accounts.Authenticate(ctx, "Alice Smith", passphrase); err != nil {
 				t.Fatalf("duplicate creation changed the existing password: %v", err)
 			}
 		})
@@ -208,7 +209,7 @@ func TestAdminGeneratesUserCredentials(t *testing.T) {
 func TestAdminInvalidCreationDoesNotDisplayCredentials(t *testing.T) {
 	t.Parallel()
 	cfg := newTestConfig(t, 100)
-	if _, err := cfg.store.createUser(context.Background(), "Admin", testPassword, true); err != nil {
+	if _, err := cfg.store.accounts.Create(context.Background(), "Admin", testPassword, true, quota.DefaultQuota); err != nil {
 		t.Fatal(err)
 	}
 	cookie, csrf := sessionFor(t, cfg, "Admin")
@@ -222,7 +223,7 @@ func TestAdminInvalidCreationDoesNotDisplayCredentials(t *testing.T) {
 			t.Fatalf("invalid creation displayed credentials: status %d", w.Code)
 		}
 	}
-	users, err := cfg.store.listUsers(context.Background())
+	users, err := activeUsers(context.Background(), cfg)
 	if err != nil || len(users) != 2 {
 		t.Fatalf("invalid creation added an account: %#v, %v", users, err)
 	}

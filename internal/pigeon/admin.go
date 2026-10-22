@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/royvandam/pigeon/pkg/account"
 	"github.com/royvandam/pigeon/pkg/quota"
 )
 
@@ -34,14 +35,14 @@ type credentialNotice struct {
 }
 
 type adminUser struct {
-	user
+	account.User
 	UsedHuman  string
 	QuotaHuman string
 	QuotaInput string
 }
 
 func (cfg config) renderAdmin(w http.ResponseWriter, r *http.Request, a authentication, data adminPage, status int) {
-	users, err := cfg.store.listAdminUsers(r.Context())
+	users, err := cfg.store.accounts.List(r.Context())
 	if err != nil {
 		http.Error(w, "failed to load users", http.StatusInternalServerError)
 		return
@@ -53,7 +54,7 @@ func (cfg config) renderAdmin(w http.ResponseWriter, r *http.Request, a authenti
 			http.Error(w, "failed to check storage usage", http.StatusInternalServerError)
 			return
 		}
-		row := adminUser{user: u, UsedHuman: humanBytes(used), QuotaHuman: humanBytes(u.QuotaBytes), QuotaInput: quotaInput(u.QuotaBytes)}
+		row := adminUser{User: u, UsedHuman: humanBytes(used), QuotaHuman: humanBytes(u.QuotaBytes), QuotaInput: quotaInput(u.QuotaBytes)}
 		if u.Deleted {
 			deletedRows = append(deletedRows, row)
 			if u.ID == data.RecycleCandidateID {
@@ -77,13 +78,13 @@ func (cfg config) renderAdmin(w http.ResponseWriter, r *http.Request, a authenti
 // storedUsage returns an account's storage usage for display, including deleted
 // accounts, whose folders are kept. It takes the account lock, like every other
 // user of the usage cache, but skips the identity check.
-func (cfg config) storedUsage(ctx context.Context, u user) (int64, error) {
-	release, err := cfg.store.lockUploads(ctx, u.ID)
+func (cfg config) storedUsage(ctx context.Context, u account.User) (int64, error) {
+	release, err := cfg.locks.Lock(ctx, u.ID)
 	if err != nil {
 		return 0, err
 	}
 	defer release()
-	return cfg.store.usage.Usage(ctx, u.ID, cfg.filesFor(u).usage)
+	return cfg.usage.Usage(ctx, u.ID, cfg.filesFor(u).usage)
 }
 
 func (cfg config) handleAdmin(w http.ResponseWriter, r *http.Request) {
@@ -105,19 +106,19 @@ func (cfg config) handleAdmin(w http.ResponseWriter, r *http.Request) {
 		cfg.renderAdmin(w, r, a, adminPage{Error: err.Error()}, http.StatusBadRequest)
 		return
 	}
-	change, err := cfg.accounts().apply(r.Context(), a.User, command)
-	if errors.Is(err, errPassphraseGeneration) {
-		http.Error(w, errPassphraseGeneration.Error(), http.StatusInternalServerError)
+	change, err := cfg.applyAccountCommand(r.Context(), a.User, command)
+	if errors.Is(err, account.ErrPassphraseGeneration) {
+		http.Error(w, account.ErrPassphraseGeneration.Error(), http.StatusInternalServerError)
 		return
 	}
-	if command.action == "purge" && err != nil && !errors.Is(err, errDeletedUserNotFound) {
+	if command.action == "purge" && err != nil && !errors.Is(err, account.ErrDeletedUserNotFound) {
 		log.Printf("purge account %d: %v", command.id, err)
 		cfg.renderAdmin(w, r, a, adminPage{Error: "Unable to finish purging this account. Its username remains reserved. Some uploads may have been removed; resolve the storage problem and try again."}, http.StatusInternalServerError)
 		return
 	}
 	if err != nil {
-		if errors.Is(err, errUserConflict) {
-			id, lookupErr := cfg.store.deletedUserIDForUsername(r.Context(), r.PostForm.Get("username"))
+		if errors.Is(err, account.ErrUserConflict) {
+			id, lookupErr := cfg.store.accounts.DeletedIDForUsername(r.Context(), r.PostForm.Get("username"))
 			if lookupErr == nil {
 				cfg.renderAdmin(w, r, a, adminPage{RecycleCandidateID: id}, http.StatusOK)
 				return

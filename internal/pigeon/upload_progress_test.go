@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/royvandam/pigeon/pkg/quota"
 )
 
 const testUploadID = "0123456789abcdef0123456789abcdef"
@@ -33,7 +35,7 @@ func TestUploadProgressTracksServerWritesAndUserOwnership(t *testing.T) {
 	t.Parallel()
 	cfg := newTestConfig(t, 1<<20)
 	cookie, csrf := sessionFor(t, cfg, "Test User")
-	if _, err := cfg.store.createUser(context.Background(), "Other User", testPassword, false); err != nil {
+	if _, err := cfg.store.accounts.Create(context.Background(), "Other User", testPassword, false, quota.DefaultQuota); err != nil {
 		t.Fatal(err)
 	}
 	otherCookie, _ := sessionFor(t, cfg, "Other User")
@@ -139,7 +141,7 @@ func TestUploadProgressQueuesAndEndsOnCancellation(t *testing.T) {
 	t.Parallel()
 	cfg := newTestConfig(t, 100)
 	cookie, csrf := sessionFor(t, cfg, "Test User")
-	unlock, err := cfg.store.lockUploads(context.Background(), 1)
+	unlock, err := cfg.locks.Lock(context.Background(), 1)
 	if err != nil {
 		t.Fatal(err)
 	}

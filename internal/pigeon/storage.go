@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io/fs"
 
+	"github.com/royvandam/pigeon/pkg/account"
 	"github.com/royvandam/pigeon/pkg/quota"
 	"github.com/royvandam/pigeon/pkg/storage"
 )
@@ -18,7 +19,7 @@ type userStorage struct {
 	unit     int64
 }
 
-func (cfg config) filesFor(u user) userStorage {
+func (cfg config) filesFor(u account.User) userStorage {
 	unit := cfg.allocationUnit
 	if unit <= 0 {
 		unit = quota.DefaultAllocationUnit
