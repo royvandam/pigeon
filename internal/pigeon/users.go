@@ -16,6 +16,7 @@ import (
 	"modernc.org/sqlite"
 	"modernc.org/sqlite/lib"
 
+	"github.com/royvandam/pigeon/internal/token"
 	"github.com/royvandam/pigeon/pkg/quota"
 )
 
@@ -96,7 +97,7 @@ type passwordHasher struct {
 }
 
 func newPasswordHasher(cost int) (passwordHasher, error) {
-	secret, err := randomToken()
+	secret, err := token.New()
 	if err != nil {
 		return passwordHasher{}, err
 	}

@@ -2,13 +2,11 @@ package pigeon
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"time"
+
+	"github.com/royvandam/pigeon/internal/token"
 )
 
 const sessionLifetime = 12 * time.Hour
@@ -20,25 +18,12 @@ type authentication struct {
 	Basic     bool
 }
 
-func randomToken() (string, error) {
-	var b [32]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "", err
-	}
-	return base64.RawURLEncoding.EncodeToString(b[:]), nil
-}
-
-func tokenHash(token string) string {
-	hash := sha256.Sum256([]byte(token))
-	return hex.EncodeToString(hash[:])
-}
-
 func (s *store) createSession(ctx context.Context, u user) (string, error) {
-	token, err := randomToken()
+	secret, err := token.New()
 	if err != nil {
 		return "", err
 	}
-	csrf, err := randomToken()
+	csrf, err := token.New()
 	if err != nil {
 		return "", err
 	}
@@ -49,22 +34,22 @@ func (s *store) createSession(ctx context.Context, u user) (string, error) {
 	result, err := s.db.ExecContext(ctx, `
 INSERT INTO sessions (token_hash, user_id, user_version, csrf_token, expires_at)
 SELECT ?, id, auth_version, ?, ? FROM users WHERE id = ? AND auth_version = ? AND deleted_at IS NULL`,
-		tokenHash(token), csrf, time.Now().Add(sessionLifetime).Unix(), u.ID, u.Version)
+		token.Hash(secret), csrf, time.Now().Add(sessionLifetime).Unix(), u.ID, u.Version)
 	if err != nil {
 		return "", err
 	}
 	if n, err := result.RowsAffected(); err != nil || n == 0 {
 		return "", errInvalidCredentials
 	}
-	return token, nil
+	return secret, nil
 }
 
-func (s *store) session(ctx context.Context, token string) (authentication, error) {
-	if len(token) != 43 {
+func (s *store) session(ctx context.Context, secret string) (authentication, error) {
+	if len(secret) != token.Length {
 		return authentication{}, errInvalidCredentials
 	}
 	var a authentication
-	a.TokenHash = tokenHash(token)
+	a.TokenHash = token.Hash(secret)
 	err := s.db.QueryRowContext(ctx, `
 SELECT u.id, u.username, u.slug, u.is_admin, u.auth_version, u.quota_bytes, s.csrf_token
 FROM sessions s JOIN users u ON u.id = s.user_id

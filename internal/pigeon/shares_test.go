@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/royvandam/pigeon/internal/token"
 	"github.com/royvandam/pigeon/pkg/storage"
 )
 
@@ -49,7 +50,7 @@ func TestShareFileLifecycleAndAnonymousDownload(t *testing.T) {
 	// Only a hash is stored, so the URL is not shown again; creating a link
 	// again replaces it, and the previous URL stops working.
 	var stored string
-	if err := cfg.store.db.QueryRow(`SELECT token_hash FROM shares`).Scan(&stored); err != nil || stored != tokenHash(strings.TrimPrefix(link, "/s/")) {
+	if err := cfg.store.db.QueryRow(`SELECT token_hash FROM shares`).Scan(&stored); err != nil || stored != token.Hash(strings.TrimPrefix(link, "/s/")) {
 		t.Fatalf("stored share token = %q, %v; want its hash", stored, err)
 	}
 	if got, active := shareStatus(t, cfg, cookie, filename); got != "" || !active {
@@ -301,12 +302,12 @@ func TestPlaintextShareTokensAreHashedOnUpgrade(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Recreate the table as older versions stored it, with a plaintext token.
-	token := strings.Repeat("Q", 43)
+	plaintext := strings.Repeat("Q", 43)
 	for _, statement := range []string{
 		`DROP TABLE shares`,
 		`CREATE TABLE shares (token TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   path TEXT NOT NULL, is_directory INTEGER NOT NULL CHECK (is_directory IN (0, 1)), created_at INTEGER NOT NULL, UNIQUE (user_id, path))`,
-		`INSERT INTO shares (token, user_id, path, is_directory, created_at) SELECT '` + token + `', id, 'readme.txt', 0, 0 FROM users`,
+		`INSERT INTO shares (token, user_id, path, is_directory, created_at) SELECT '` + plaintext + `', id, 'readme.txt', 0, 0 FROM users`,
 	} {
 		if _, err := cfg.store.db.Exec(statement); err != nil {
 			t.Fatal(err)
@@ -322,10 +323,10 @@ func TestPlaintextShareTokensAreHashedOnUpgrade(t *testing.T) {
 	defer s.db.Close()
 	cfg.store = s
 	var stored string
-	if err := s.db.QueryRow(`SELECT token_hash FROM shares`).Scan(&stored); err != nil || stored != tokenHash(token) {
+	if err := s.db.QueryRow(`SELECT token_hash FROM shares`).Scan(&stored); err != nil || stored != token.Hash(plaintext) {
 		t.Fatalf("upgraded share token = %q, %v; want its hash", stored, err)
 	}
-	if w := publicDownload(cfg, http.MethodGet, "/s/"+token); w.Code != http.StatusOK || w.Body.String() != "shared" {
+	if w := publicDownload(cfg, http.MethodGet, "/s/"+plaintext); w.Code != http.StatusOK || w.Body.String() != "shared" {
 		t.Fatalf("upgrade broke an existing link: %d, %s", w.Code, w.Body)
 	}
 	if got, active := shareStatus(t, cfg, cookie, "readme.txt"); got != "" || !active {
@@ -340,7 +341,7 @@ func TestPlaintextShareTokensAreHashedOnUpgrade(t *testing.T) {
 	}
 	defer s.db.Close()
 	cfg.store = s
-	if w := publicDownload(cfg, http.MethodGet, "/s/"+token); w.Code != http.StatusOK {
+	if w := publicDownload(cfg, http.MethodGet, "/s/"+plaintext); w.Code != http.StatusOK {
 		t.Fatalf("second start broke an upgraded link: %d", w.Code)
 	}
 }
