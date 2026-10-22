@@ -10,15 +10,14 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/royvandam/pigeon/pkg/quota"
 )
 
 // cachedUsage returns the usage cached for account id, and whether there is one.
 func cachedUsage(cfg config, id int64) (int64, bool) {
-	c := cfg.store.usage
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	entry, ok := c.entries[id]
-	return entry.used, ok
+	used, _, ok := cfg.store.usage.Cached(id)
+	return used, ok
 }
 
 func TestUsageIsMeasuredOnceAndKeptUpToDate(t *testing.T) {
@@ -27,7 +26,7 @@ func TestUsageIsMeasuredOnceAndKeptUpToDate(t *testing.T) {
 	cfg := newTestConfig(t, 1000)
 	handler := newServer(cfg).Handler
 	clock := time.Now()
-	cfg.store.usage.now = func() time.Time { return clock }
+	cfg.store.usage = quota.NewCache(func() time.Time { return clock })
 	u, err := cfg.store.authenticate(ctx, "Test User", testPassword)
 	if err != nil {
 		t.Fatal(err)
@@ -98,8 +97,8 @@ func TestUsageIsMeasuredOnceAndKeptUpToDate(t *testing.T) {
 		}
 	}
 
-	// The account is measured again after usageRemeasureAfter.
-	clock = clock.Add(usageRemeasureAfter)
+	// The account is measured again after quota.RemeasureAfter.
+	clock = clock.Add(quota.RemeasureAfter)
 	page()
 	if used, _ := cachedUsage(cfg, u.ID); used != measured() {
 		t.Fatalf("after remeasuring: cached %d, folder holds %d", used, measured())
@@ -111,7 +110,7 @@ func TestAdminPageDoesNotCountAnUploadInProgress(t *testing.T) {
 	ctx := context.Background()
 	cfg := newTestConfig(t, 100)
 	clock := time.Now()
-	cfg.store.usage.now = func() time.Time { return clock }
+	cfg.store.usage = quota.NewCache(func() time.Time { return clock })
 	if _, err := cfg.store.createUser(ctx, "Admin", testPassword, true); err != nil {
 		t.Fatal(err)
 	}
@@ -124,20 +123,18 @@ func TestAdminPageDoesNotCountAnUploadInProgress(t *testing.T) {
 	finish := startGatedUpload(t, cfg, cookie, csrf, "", uploadFile{"new.txt", "abc"})
 
 	// The upload measured the account when it started. A long upload outlasts
-	// usageRemeasureAfter, so the admin page measures the account again while
+	// quota.RemeasureAfter, so the admin page measures the account again while
 	// the upload's staging folder exists. Counting that folder would charge the
 	// upload twice once it is published.
-	clock = clock.Add(usageRemeasureAfter)
+	clock = clock.Add(quota.RemeasureAfter)
 	r := httptest.NewRequest(http.MethodGet, "/admin", nil)
 	r.AddCookie(adminCookie)
 	if w := serve(newServer(cfg).Handler, r); w.Code != http.StatusOK {
 		t.Fatalf("admin page: %d", w.Code)
 	}
-	cfg.store.usage.mu.Lock()
-	entry, ok := cfg.store.usage.entries[u.ID]
-	cfg.store.usage.mu.Unlock()
-	if !ok || !entry.measured.Equal(clock) || entry.used != 0 {
-		t.Fatalf("admin page cached %+v, %v during the upload; want 0 measured at %v", entry, ok, clock)
+	used, measured, ok := cfg.store.usage.Cached(u.ID)
+	if !ok || !measured.Equal(clock) || used != 0 {
+		t.Fatalf("admin page cached %d measured at %v, %v during the upload; want 0 measured at %v", used, measured, ok, clock)
 	}
 	if w := finish(); w.Code != http.StatusOK || w.Header().Get("X-Quota-Used") != "3" {
 		t.Fatalf("upload: %d, used %s, %s", w.Code, w.Header().Get("X-Quota-Used"), w.Body)

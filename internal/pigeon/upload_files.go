@@ -8,10 +8,9 @@ import (
 	"io/fs"
 	"path"
 
+	"github.com/royvandam/pigeon/pkg/quota"
 	"github.com/royvandam/pigeon/pkg/storage"
 )
-
-var errDiskQuotaExceeded = errors.New("disk quota exceeded")
 
 // Stage files out of sight and publish them only after every multipart part has
 // been validated.
@@ -100,7 +99,7 @@ func (b *uploadBatch) add(ctx context.Context, name string, contents io.Reader) 
 	// Even an empty file needs one unit. File contents may use whole units only.
 	available := b.remaining - b.charged - folders*b.unit
 	if available < b.unit {
-		return errDiskQuotaExceeded
+		return quota.ErrExceeded
 	}
 	out, err := b.stage.Create(name)
 	if err != nil {
@@ -114,7 +113,7 @@ func (b *uploadBatch) add(ctx context.Context, name string, contents io.Reader) 
 		var extra [1]byte
 		_, probeErr := io.ReadFull(contents, extra[:])
 		if probeErr == nil {
-			copyErr = errDiskQuotaExceeded
+			copyErr = quota.ErrExceeded
 		} else if probeErr != io.EOF {
 			copyErr = probeErr
 		}
@@ -135,7 +134,7 @@ func (b *uploadBatch) add(ctx context.Context, name string, contents io.Reader) 
 	}
 	b.files++
 	b.bytes += n
-	b.charged += folders*b.unit + chargedSize(n, b.unit)
+	b.charged += folders*b.unit + quota.Charge(n, b.unit)
 	b.folders += folders
 	b.names = append(b.names, name)
 	return nil

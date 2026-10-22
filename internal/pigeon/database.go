@@ -11,8 +11,11 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"time"
 
 	_ "modernc.org/sqlite"
+
+	"github.com/royvandam/pigeon/pkg/quota"
 )
 
 type store struct {
@@ -21,7 +24,7 @@ type store struct {
 	// uploadSlots lets one upload per account stream at a time; see lockUploadSlot.
 	uploadSlots sync.Map
 	progress    sync.Map
-	usage       *usageCache
+	usage       *quota.Cache
 	authLimiter *authLimiter
 	passwords   passwordHasher
 }
@@ -80,7 +83,7 @@ func openStore(ctx context.Context, path string, passwordCost int) (*store, erro
 	}
 	// A single connection serializes account changes and their transactions.
 	db.SetMaxOpenConns(1)
-	s := &store{db: db, usage: newUsageCache(), authLimiter: newAuthLimiter(), passwords: passwords}
+	s := &store{db: db, usage: quota.NewCache(time.Now), authLimiter: newAuthLimiter(), passwords: passwords}
 	if err := s.initialize(ctx); err != nil {
 		db.Close()
 		return nil, err
@@ -130,7 +133,7 @@ CREATE TABLE IF NOT EXISTS shares (
   created_at INTEGER NOT NULL,
   UNIQUE (user_id, path)
 );
-`, defaultUserQuota))
+`, quota.DefaultQuota))
 	if err != nil {
 		return err
 	}
@@ -139,7 +142,7 @@ CREATE TABLE IF NOT EXISTS shares (
 		return err
 	}
 	if !hasQuota {
-		if _, err := tx.ExecContext(ctx, fmt.Sprintf(`ALTER TABLE users ADD COLUMN quota_bytes INTEGER NOT NULL DEFAULT %d CHECK (quota_bytes > 0)`, defaultUserQuota)); err != nil {
+		if _, err := tx.ExecContext(ctx, fmt.Sprintf(`ALTER TABLE users ADD COLUMN quota_bytes INTEGER NOT NULL DEFAULT %d CHECK (quota_bytes > 0)`, quota.DefaultQuota)); err != nil {
 			return err
 		}
 	}

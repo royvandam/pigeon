@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/royvandam/pigeon/pkg/quota"
 )
 
 func TestDirectoryUploadPreservesHierarchyAndNames(t *testing.T) {
@@ -63,7 +65,7 @@ func TestDirectoryUploadPreservesHierarchyAndNames(t *testing.T) {
 	var charged int64
 	folders := map[string]bool{}
 	for _, file := range files {
-		charged += chargedSize(int64(len(file.contents)), 1)
+		charged += quota.Charge(int64(len(file.contents)), 1)
 		for parent := path.Dir(file.name); parent != "."; parent = path.Dir(parent) {
 			folders[parent] = true
 		}

@@ -18,9 +18,10 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/royvandam/pigeon/pkg/storage"
 	"github.com/royvandam/pigeon/pkg/storage/local"
-	"golang.org/x/crypto/bcrypt"
 )
 
 // Helpers shared by the tests in this package. Keep helpers used by a single

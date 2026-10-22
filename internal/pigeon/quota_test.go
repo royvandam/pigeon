@@ -3,7 +3,6 @@ package pigeon
 import (
 	"context"
 	"errors"
-	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -13,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/royvandam/pigeon/pkg/quota"
 )
 
 func TestDefaultQuotaAndDatabaseMigration(t *testing.T) {
@@ -50,7 +51,7 @@ ALTER TABLE settings ADD COLUMN max_bytes INTEGER NOT NULL DEFAULT 209715200 CHE
 		t.Fatalf("migration changed server settings: %#v, %v", got, err)
 	}
 	a, err := s.session(ctx, token)
-	if err != nil || a.User.QuotaBytes != defaultUserQuota {
+	if err != nil || a.User.QuotaBytes != quota.DefaultQuota {
 		t.Fatalf("migrated user's session/quota = %#v, %v", a, err)
 	}
 	var hasLimit bool
@@ -236,13 +237,8 @@ func TestAdminCanAssignAndChangeQuotas(t *testing.T) {
 	}
 }
 
-func TestQuotaValidationAndCanceledLock(t *testing.T) {
+func TestCanceledRequestsDoNotWaitForTheAccountLock(t *testing.T) {
 	t.Parallel()
-	for _, quota := range []int64{0, -1, math.MaxInt64} {
-		if err := validateQuota(quota); err == nil {
-			t.Errorf("accepted quota %d", quota)
-		}
-	}
 	cfg := newTestConfig(t, 10)
 	unlock, err := cfg.store.lockUploads(context.Background(), 1)
 	if err != nil {
@@ -253,18 +249,6 @@ func TestQuotaValidationAndCanceledLock(t *testing.T) {
 	cancel()
 	if _, err := cfg.store.lockUploads(ctx, 1); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled request waited for the quota lock: %v", err)
-	}
-}
-
-func TestChargedSizeRoundsUpToTheAllocationUnit(t *testing.T) {
-	t.Parallel()
-	for _, tt := range []struct{ size, want int64 }{
-		{0, 4096}, {1, 4096}, {4096, 4096}, {4097, 8192}, {1 << 20, 1 << 20},
-		{math.MaxInt64, math.MaxInt64},
-	} {
-		if got := chargedSize(tt.size, defaultAllocationUnit); got != tt.want {
-			t.Errorf("chargedSize(%d) = %d, want %d", tt.size, got, tt.want)
-		}
 	}
 }
 

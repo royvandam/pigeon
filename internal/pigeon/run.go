@@ -8,8 +8,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/royvandam/pigeon/pkg/storage/local"
 	"golang.org/x/term"
+
+	"github.com/royvandam/pigeon/pkg/quota"
+	"github.com/royvandam/pigeon/pkg/storage/local"
 )
 
 // Run parses the command arguments and serves uploads until ctx is canceled.
@@ -98,7 +100,7 @@ func Run(ctx context.Context, args []string) error {
 		log.Printf("trusted proxies: %s", settings.trustedProxies)
 	}
 	log.Printf("upload dir: %s", cfg.dir)
-	log.Printf("default user quota: %s", humanBytes(defaultUserQuota))
+	log.Printf("default user quota: %s", humanBytes(quota.DefaultQuota))
 
 	if err := runServer(ctx, newServer(cfg)); err != nil {
 		return fmt.Errorf("server error: %w", err)

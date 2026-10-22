@@ -15,6 +15,8 @@ import (
 	"golang.org/x/text/unicode/norm"
 	"modernc.org/sqlite"
 	"modernc.org/sqlite/lib"
+
+	"github.com/royvandam/pigeon/pkg/quota"
 )
 
 var (
@@ -129,11 +131,11 @@ func (s *store) hasUsers(ctx context.Context) (bool, error) {
 }
 
 func (s *store) createUser(ctx context.Context, username, password string, admin bool) (user, error) {
-	return s.createUserWithQuota(ctx, username, password, admin, defaultUserQuota)
+	return s.createUserWithQuota(ctx, username, password, admin, quota.DefaultQuota)
 }
 
-func (s *store) createUserWithQuota(ctx context.Context, username, password string, admin bool, quota int64) (user, error) {
-	if err := validateQuota(quota); err != nil {
+func (s *store) createUserWithQuota(ctx context.Context, username, password string, admin bool, quotaBytes int64) (user, error) {
+	if err := quota.Validate(quotaBytes); err != nil {
 		return user{}, err
 	}
 	display, key, slug, err := normalizeUsername(username)
@@ -146,7 +148,7 @@ func (s *store) createUserWithQuota(ctx context.Context, username, password stri
 	}
 	result, err := s.db.ExecContext(ctx,
 		`INSERT INTO users (username, username_key, slug, password_hash, is_admin, quota_bytes) VALUES (?, ?, ?, ?, ?, ?)`,
-		display, key, slug, hash, admin, quota)
+		display, key, slug, hash, admin, quotaBytes)
 	if err != nil {
 		var sqliteErr *sqlite.Error
 		if errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
@@ -155,7 +157,7 @@ func (s *store) createUserWithQuota(ctx context.Context, username, password stri
 		return user{}, err
 	}
 	id, err := result.LastInsertId()
-	return user{ID: id, Username: display, Slug: slug, Admin: admin, QuotaBytes: quota}, err
+	return user{ID: id, Username: display, Slug: slug, Admin: admin, QuotaBytes: quotaBytes}, err
 }
 
 func (s *store) authenticate(ctx context.Context, username, password string) (user, error) {
