@@ -1,0 +1,17 @@
+{
+  "database": {
+    "path": "pigeon.db"
+  },
+  "storage": {
+    "local": {
+      "directory": "uploads"
+    }
+  },
+  "http": {
+    "listenAddress": "127.0.0.1:8080",
+    "publicURL": "",
+    "trustedProxies": [],
+    "formReadTimeout": "30s",
+    "uploadIdleTimeout": "60s"
+  }
+}

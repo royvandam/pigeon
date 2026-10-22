@@ -4,19 +4,21 @@ The repository uses the applicable directory conventions from
 [`golang-standards/project-layout`](https://github.com/golang-standards/project-layout):
 
 ```text
-cmd/pigeon/         Executable entry point and signal handling
-internal/pigeon/    Startup, first-run setup, and saved server settings
+cmd/pigeon/         Entry point, application configuration, and startup
+configs/            Example configuration file
 internal/size/      Reading and formatting storage sizes
 internal/token/     Random tokens for sessions, share links, and forms
 pkg/account/        Accounts, passwords, account locks, and lifecycle changes
   wordlists/        Embedded passphrase dictionary and attribution
 pkg/auth/           Sign-in sessions and rate-limited password checks
+pkg/configuration/  Configuration file loading and value types
 pkg/database/       SQLite connection and schema migrations
 pkg/files/          Account file operations, downloads, and uploads
 pkg/quota/          Quota rules, usage measurement, and the usage cache
 pkg/share/          Public download links
 pkg/server/         HTTP handlers, pages, and the HTTP server
 pkg/storage/        Storage provider interfaces and path rules
+  configuration/    Choosing a storage provider from configuration
   local/            Storage provider for the local filesystem
 web/                Embedded templates and browser assets
   static/           JavaScript, shared and generated CSS
@@ -31,8 +33,9 @@ mkdocs.yml          Documentation site configuration and navigation
 Go tests stay beside the packages they exercise; additional browser tests live
 under `test/`. The `web` package embeds templates and static files at build time,
 and the application embeds its passphrase word list. A built executable runs
-without the source tree or an asset directory. Packages under `pkg/` can be
-used as a library; the rest of the application stays under `internal/`.
+without the source tree or an asset directory. Packages under `pkg/` form a
+library that `cmd/pigeon` assembles into the server; `internal/` holds helpers
+that are not part of the library's API.
 
 ## Storage providers
 
@@ -70,6 +73,8 @@ storage still show.
 connection, which serializes transactions, and migrates the schema for
 accounts, sessions, and share links. The stores in `pkg/account`, `pkg/auth`,
 and `pkg/share` read and change their tables through the returned `*sql.DB`.
+It also reads and removes the server settings that versions before
+configuration files saved in the database.
 
 ## Accounts
 
@@ -176,13 +181,41 @@ controls. Browser code and common styles live in `web/static/` and are
 embedded into the binary along with the templates. `ActionDialog` uses one
 definition per action and one controller for all dialogs. JavaScript tests run
 the same files served by the application. Rebuild and restart after changing
-templates or assets. SIGINT and SIGTERM allow active requests up to 10 seconds
-to finish.
+templates or assets.
+
+## Configuration
+
+Configuration is declarative and hierarchical, in the style of
+[Buildbarn](https://github.com/buildbarn): each package that builds something
+from settings defines a configuration type for it, and the application
+composes them into one type that mirrors the configuration file:
+
+```go
+type ApplicationConfiguration struct {
+	Database database.Configuration             `json:"database"`
+	Storage  storageconfiguration.Configuration `json:"storage"`
+	HTTP     server.Configuration               `json:"http"`
+}
+```
+
+Configuration types are plain data with JSON field names. Zero values select
+defaults, which the package resolves once when it builds from them, as
+`server.New` does. A choice between implementations is a struct with one
+pointer field per implementation, of which exactly one is set; its factory,
+such as `storageconfiguration.NewProviderFromConfiguration`, builds the chosen
+one. The factory lives in its own package, `pkg/storage/configuration`, so
+that implementations of the storage interfaces can be chosen without import
+cycles; a new provider adds a field there. `pkg/configuration` reads the file
+strictly, rejecting unknown fields, and provides value types such as
+`configuration.Duration`.
 
 ## Startup
 
-`cmd/pigeon/main.go` handles signals and invokes `pigeon.Run`. Inside
-`internal/pigeon`, `run.go` opens the database, applies the command-line
-flags to the saved server settings, runs first-run setup from `setup.go`, and
-builds the storage provider, stores, services, and server from them.
-`database.go` persists the server settings.
+`cmd/pigeon/main.go` is the composition root. It reads the configuration file
+named on the command line and checks the HTTP and storage sections, then opens
+the database. Server settings that earlier versions saved in the database must
+match the configuration before startup continues, and are then removed
+(`legacy.go`). First-run setup in `setup.go` creates the initial
+administrator. Startup then removes uploads left by a crash, builds the stores
+and services, connects them, and runs the server until SIGINT or SIGTERM;
+active requests then get up to 10 seconds to finish.

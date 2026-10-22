@@ -80,5 +80,5 @@ func plainHTTPWarning(listen string, publicURL *url.URL) string {
 		return ""
 	}
 	return fmt.Sprintf("warning: serving plain HTTP on %s; passwords and sessions cross the network unencrypted. "+
-		"Put Pigeon behind an HTTPS reverse proxy and set -public-url https://…, or listen on %s", listen, DefaultListenAddress)
+		"Put Pigeon behind an HTTPS reverse proxy and set http.publicURL to https://… in the configuration file, or listen on %s", listen, DefaultListenAddress)
 }

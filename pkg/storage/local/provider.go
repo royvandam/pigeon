@@ -155,3 +155,8 @@ func randomHex(nbytes int) string {
 	rand.Read(buf) // Never fails, see crypto/rand.Read.
 	return hex.EncodeToString(buf)
 }
+
+// String describes the provider for logs.
+func (p *Provider) String() string {
+	return "local directory " + p.directory
+}

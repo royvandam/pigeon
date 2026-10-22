@@ -9,11 +9,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/royvandam/pigeon/pkg/configuration"
 	"github.com/royvandam/pigeon/pkg/quota"
 )
 
@@ -185,7 +187,7 @@ func TestNewAppliesDefaultsAndRejectsInvalidSettings(t *testing.T) {
 		t.Fatalf("defaults: %+v, %v", s, err)
 	}
 	s, err = New(Configuration{ListenAddress: ":9000", PublicURL: "https://Files.Example.com", TrustedProxies: []string{"::1"},
-		FormReadTimeout: time.Second, UploadIdleTimeout: time.Minute}, Dependencies{})
+		FormReadTimeout: configuration.Duration(time.Second), UploadIdleTimeout: configuration.Duration(time.Minute)}, Dependencies{})
 	if err != nil || s.listen != ":9000" || s.publicURL.String() != "https://files.example.com" || len(s.trustedProxies) != 1 ||
 		s.formTimeout != time.Second || s.uploadTimeout != time.Minute {
 		t.Fatalf("settings: %+v, %v", s, err)
@@ -195,7 +197,7 @@ func TestNewAppliesDefaultsAndRejectsInvalidSettings(t *testing.T) {
 		"listen port out of range":      {ListenAddress: "127.0.0.1:65536"},
 		"public URL with a path":        {PublicURL: "https://files.example.com/pigeon"},
 		"trusted proxy by name":         {TrustedProxies: []string{"proxy.example"}},
-		"negative timeout":              {UploadIdleTimeout: -time.Second},
+		"negative timeout":              {UploadIdleTimeout: configuration.Duration(-time.Second)},
 	} {
 		if _, err := New(cfg, Dependencies{}); err == nil {
 			t.Errorf("%s was accepted", name)
@@ -203,5 +205,18 @@ func TestNewAppliesDefaultsAndRejectsInvalidSettings(t *testing.T) {
 		if err := cfg.Validate(); err == nil {
 			t.Errorf("%s passed validation", name)
 		}
+	}
+}
+
+func TestNormalizeShowsTheSettingsAsApplied(t *testing.T) {
+	t.Parallel()
+	got, err := Configuration{PublicURL: "https://Files.Example.com/", TrustedProxies: []string{" 127.0.0.1", "", "10.1.2.3/8"}}.Normalize()
+	want := Configuration{ListenAddress: DefaultListenAddress, PublicURL: "https://files.example.com", TrustedProxies: []string{"127.0.0.1/32", "10.0.0.0/8"},
+		FormReadTimeout: configuration.Duration(DefaultFormReadTimeout), UploadIdleTimeout: configuration.Duration(DefaultUploadIdleTimeout)}
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("Normalize = %#v, %v; want %#v", got, err, want)
+	}
+	if _, err := (Configuration{ListenAddress: "nowhere"}).Normalize(); err == nil {
+		t.Fatal("normalized an invalid configuration")
 	}
 }
