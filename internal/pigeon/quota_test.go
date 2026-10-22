@@ -13,7 +13,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/royvandam/pigeon/pkg/account"
 	"github.com/royvandam/pigeon/pkg/quota"
 )
 
@@ -239,10 +238,10 @@ func TestAdminCanAssignAndChangeQuotas(t *testing.T) {
 }
 
 // productionUnitConfig uses the real 4 KiB allocation unit (audit A3).
-func productionUnitConfig(t *testing.T, quota int64) config {
+func productionUnitConfig(t *testing.T, quotaBytes int64) config {
 	t.Helper()
-	cfg := newTestConfig(t, quota)
-	cfg.allocationUnit = 0
+	cfg := newTestConfig(t, quotaBytes)
+	wire(&cfg, quota.DefaultAllocationUnit)
 	return cfg
 }
 
@@ -285,7 +284,7 @@ func TestQuotaChargesEmptyFilesAndFolders(t *testing.T) {
 	if w.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("empty file beyond quota: %d, %s", w.Code, w.Body)
 	}
-	used, err := cfg.filesFor(account.User{Slug: "test-user"}).usage(context.Background())
+	used, err := diskUsage(context.Background(), filepath.Join(cfg.dir, "test-user"), quota.DefaultAllocationUnit)
 	if err != nil || used != 16<<10 {
 		t.Fatalf("usage = %d, %v; want the full quota", used, err)
 	}

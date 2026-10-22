@@ -1,11 +1,11 @@
 package pigeon
 
 import (
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
 
-	"github.com/royvandam/pigeon/pkg/quota"
 	"github.com/royvandam/pigeon/pkg/storage"
 )
 
@@ -18,20 +18,15 @@ func (cfg config) handleFiles(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	access, err := cfg.accessAccount(r.Context(), a.User)
+	ctx := r.Context()
+	access, err := cfg.files.Open(ctx, a.User)
 	if err != nil {
 		writeStorageError(w, err)
 		return
 	}
-	defer access.close()
-	tree, err := access.Files.open(r.Context())
-	if err != nil {
-		writeStorageError(w, err)
-		return
-	}
-	defer tree.Close()
+	defer access.Close()
 	if r.Method == http.MethodGet {
-		data, err := readExplorer(r.Context(), tree, r.URL.Query().Get("dir"), a.CSRFToken)
+		data, err := readExplorer(ctx, access, r.URL.Query().Get("dir"), a.CSRFToken)
 		if err != nil {
 			writeStorageError(w, err)
 			return
@@ -40,46 +35,31 @@ func (cfg config) handleFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	directory := r.PostForm.Get("dir")
-	if err := storage.RequireDirectory(r.Context(), tree, directory); err != nil {
+	if err := access.RequireDirectory(ctx, directory); err != nil {
 		writeStorageError(w, err)
 		return
 	}
 	action := r.PostForm.Get("action")
 	source := r.PostForm.Get("path")
-	var change int64 // to the account's usage
-	mutating := false
-	if action == "mkdir" {
-		// A folder uses disk space and an inode, so it is charged like a file.
-		err = access.requireQuota(r.Context(), access.Files.unit)
-		change = access.Files.unit
-	}
-	if err == nil {
-		err = manageFile(r.Context(), tree, action, directory, source, r.PostForm.Get("name"), r.PostForm.Get("destination"), func() error {
-			mutating = true
-			if action == "delete" {
-				// Measure what the deletion frees while the item still exists.
-				removed, err := quota.Measure(r.Context(), tree, source, access.Files.unit)
-				if err != nil {
-					return err
-				}
-				change = -removed
-			}
-			return cfg.store.shares.RevokePath(r.Context(), a.User.ID, source)
-		})
-	}
-	if err != nil && mutating {
-		access.forgetUsage() // A failed deletion may have removed part of a folder.
-	}
-	if err == nil {
-		access.changed(change)
+	switch action {
+	case "mkdir":
+		err = access.Mkdir(ctx, directory, r.PostForm.Get("name"))
+	case "rename":
+		err = access.Rename(ctx, source, r.PostForm.Get("name"))
+	case "move":
+		err = access.Move(ctx, source, r.PostForm.Get("destination"))
+	case "delete":
+		err = access.Delete(ctx, source)
+	default:
+		err = fmt.Errorf("%w: unknown file action", storage.ErrInvalidPath)
 	}
 	if err != nil {
 		message, status := storageError(err)
-		access.close() // Rendering the error page acquires its own read access.
+		access.Close() // Rendering the error page acquires its own read access.
 		cfg.renderIndex(w, r, a, directory, "", message, status)
 		return
 	}
-	if err := storage.RequireDirectory(r.Context(), tree, directory); err != nil {
+	if err := access.RequireDirectory(ctx, directory); err != nil {
 		directory = "" // The API may have moved or removed the viewed folder.
 	}
 	redirect := explorerURL(directory)

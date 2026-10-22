@@ -30,24 +30,18 @@ func (cfg config) handleShares(w http.ResponseWriter, r *http.Request) {
 		writeStorageError(w, err)
 		return
 	}
-	access, err := cfg.accessAccount(r.Context(), a.User)
+	access, err := cfg.files.Open(r.Context(), a.User)
 	if err != nil {
 		writeStorageError(w, err)
 		return
 	}
-	defer access.close()
+	defer access.Close()
 	link, active := "", false
 	if r.Method == http.MethodPost && r.PostForm.Get("action") == "revoke" {
 		// Revoking does not require the item to still exist on disk.
 		err = cfg.store.shares.Revoke(r.Context(), a.User.ID, name)
 	} else {
-		tree, openErr := access.Files.open(r.Context())
-		if openErr != nil {
-			writeStorageError(w, openErr)
-			return
-		}
-		defer tree.Close()
-		info, statErr := tree.Stat(r.Context(), name)
+		info, statErr := access.Stat(r.Context(), name)
 		if statErr != nil {
 			writeStorageError(w, statErr)
 			return
@@ -80,42 +74,6 @@ func (cfg config) handleShares(w http.ResponseWriter, r *http.Request) {
 	}{URL: link, Active: active})
 }
 
-func (cfg config) openSharedDownload(ctx context.Context, token string) (*storedDownload, error) {
-	link, err := cfg.store.shares.Find(ctx, token)
-	if err != nil {
-		return nil, err
-	}
-	unlock, err := cfg.locks.Lock(ctx, link.User.ID)
-	if err != nil {
-		return nil, err
-	}
-	defer unlock()
-	// A revoke or file mutation may have happened while waiting for an upload.
-	link, err = cfg.store.shares.Find(ctx, token)
-	if err != nil {
-		return nil, err
-	}
-	if err := storage.ValidatePath(link.Path); err != nil {
-		return nil, share.ErrNotFound
-	}
-	tree, err := cfg.filesFor(link.User).open(ctx)
-	if err != nil {
-		return nil, share.ErrNotFound
-	}
-	defer tree.Close()
-	download, err := openStoredDownload(ctx, tree, link.Path, link.User.Slug)
-	if err != nil {
-		return nil, share.ErrNotFound
-	}
-	if (download.folder != nil) != link.Directory {
-		download.Close()
-		return nil, share.ErrNotFound
-	}
-	// The file handle/subdirectory root remains bound to this item even if it
-	// moves later. Release the lock before streaming a potentially large file.
-	return download, nil
-}
-
 func (cfg config) handleSharedDownload(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Referrer-Policy", "no-referrer")
@@ -123,7 +81,7 @@ func (cfg config) handleSharedDownload(w http.ResponseWriter, r *http.Request) {
 	if !allowMethods(w, r, http.MethodGet, http.MethodHead) {
 		return
 	}
-	download, err := cfg.openSharedDownload(r.Context(), r.PathValue("token"))
+	download, err := cfg.files.OpenShared(r.Context(), r.PathValue("token"))
 	if errors.Is(err, share.ErrNotFound) {
 		http.NotFound(w, r)
 		return
@@ -138,5 +96,5 @@ func (cfg config) handleSharedDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer download.Close()
-	download.ServeHTTP(w, r)
+	serveDownload(w, r, download)
 }

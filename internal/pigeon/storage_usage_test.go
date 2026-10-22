@@ -163,7 +163,7 @@ func TestPurgeAndFailedChangesForgetUsage(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.Chmod(locked, 0o750) })
-	before, err := cfg.storedUsage(ctx, u)
+	before, err := cfg.files.Usage(ctx, u)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +185,7 @@ func TestPurgeAndFailedChangesForgetUsage(t *testing.T) {
 	if err := os.Chmod(locked, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := cfg.storedUsage(ctx, u); err != nil {
+	if _, err := cfg.files.Usage(ctx, u); err != nil {
 		t.Fatal(err)
 	}
 	if err := cfg.store.accounts.Delete(ctx, u.ID, 999); err != nil {

@@ -208,7 +208,7 @@ func TestUploadProgressExpiration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p.addBytes(42)
+	p.Written(42)
 	p.setState("complete")
 	p.fail() // A successful upload must keep its final state.
 	snapshot, ok := s.uploadProgress(1, testUploadID)

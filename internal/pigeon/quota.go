@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/royvandam/pigeon/pkg/files"
 	"github.com/royvandam/pigeon/pkg/quota"
 )
 
@@ -27,8 +28,8 @@ func quotaInput(quota int64) string {
 	return ""
 }
 
-func setQuotaHeaders(w http.ResponseWriter, limit, used int64) {
-	w.Header().Set("X-Quota-Limit", strconv.FormatInt(limit, 10))
-	w.Header().Set("X-Quota-Used", strconv.FormatInt(used, 10))
-	w.Header().Set("X-Quota-Remaining", strconv.FormatInt(quota.Remaining(limit, used), 10))
+func setQuotaHeaders(w http.ResponseWriter, usage files.Usage) {
+	w.Header().Set("X-Quota-Limit", strconv.FormatInt(usage.Quota, 10))
+	w.Header().Set("X-Quota-Used", strconv.FormatInt(usage.Used, 10))
+	w.Header().Set("X-Quota-Remaining", strconv.FormatInt(usage.Remaining(), 10))
 }

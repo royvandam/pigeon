@@ -11,6 +11,7 @@ pkg/account/        Accounts, passwords, account locks, and lifecycle changes
   wordlists/        Embedded passphrase dictionary and attribution
 pkg/auth/           Sign-in sessions and rate-limited password checks
 pkg/database/       SQLite connection and schema migrations
+pkg/files/          Account file operations, downloads, and uploads
 pkg/quota/          Quota rules, usage measurement, and the usage cache
 pkg/share/          Public download links
 pkg/storage/        Storage provider interfaces and path rules
@@ -61,6 +62,13 @@ it again: callers hold the account lock while they read or change an entry,
 and entries are measured again after 10 minutes so changes made directly in
 storage still show.
 
+## Database
+
+`pkg/database` opens SQLite with foreign keys, WAL journaling, and a single
+connection, which serializes transactions, and migrates the schema for
+accounts, sessions, and share links. The stores in `pkg/account`, `pkg/auth`,
+and `pkg/share` read and change their tables through the returned `*sql.DB`.
+
 ## Accounts
 
 `pkg/account` owns accounts. `account.Store` reads and changes them in the
@@ -108,39 +116,60 @@ item replaces its previous one, and renaming, moving, or deleting an item
 revokes the links for it and everything below it before the path changes, so a
 reused path never revives an old link. Links of deleted accounts stop working.
 
-## Request and storage ownership
+## Account files
 
-`userStorage` names an account's namespace in the storage provider and
-measures its usage. `accountAccess` takes the account lock and rechecks the
-account's identity before both reads and writes; download handles release that
-lock before streaming. Uploads hold the lock only to check the quota and to
-publish: while the body streams into the staging folder they hold the upload
-slot instead. Request body deadlines live in `deadline.go`.
+`pkg/files` reads and changes the files of accounts. `files.Service.Open`
+takes the account lock and checks that the identity it acts for is still
+current, so a request authenticated before a deletion, password change, or
+purge cannot reach the account's files, or those of a new account that reuses
+the username. The returned `files.Access` lists, creates folders, renames,
+moves, deletes, and opens downloads:
 
-HTTP handlers parse requests and render responses, using shared method,
-authentication, and error helpers. Explorer listing and file mutation rules live
-in `explorer.go` and `file_management.go`. Template loading is in `templates.go`;
-templates reuse CSRF and sign-out controls. Browser code and common styles live
-in `web/static/` and are embedded into the binary along with the templates.
-`ActionDialog` uses one definition per action and one controller for all dialogs.
-JavaScript tests run the same files served by the application. Rebuild and restart
-after changing templates or assets.
+- new names are checked for invisible formatting characters;
+- a new folder is charged one allocation unit;
+- renames, moves, and deletions revoke the share links below the changed path
+  after validation and before the change;
+- each change keeps the cached usage up to date, or drops it when a change may
+  have partly failed.
 
+A `files.Download` holds its own handle to the file or folder, so it streams
+after the account lock is released; folders are sent as ZIP archives.
+`files.Service.OpenShared` opens a share link's item under the account lock
+and rechecks the link after waiting for it.
 
-`cmd/pigeon/main.go` handles signals and invokes `pigeon.Run`.
-`pkg/database` opens SQLite with foreign keys, WAL journaling, and a single
-connection, which serializes transactions, and migrates the schema for
-accounts, sessions, and share links. Inside `internal/pigeon`, `run.go`
-handles startup, `database.go` persists server settings, `setup.go` handles
-first-run provisioning, and `accounts.go` turns admin page actions into account
-changes.
-`auth.go` handles sign-in, sign-out, and request authentication, and
-`ratelimit.go` identifies clients behind trusted proxies. `admin.go`, `index.go`, and
-`upload.go` serve user management, the explorer page, and the upload endpoint.
-`files.go` handles explorer requests, and `download.go` serves files and ZIP
-archives. `upload_files.go` streams and publishes batches. `server.go` handles
-routing and shutdown, and `quota.go` formats quotas for forms and headers.
-`upload_progress.go` tracks uploads and serves authenticated progress
-snapshots.
-Size and filename helpers remain separate.
-SIGINT and SIGTERM allow active requests up to 10 seconds to finish.
+An upload is a `files.Upload`. `BeginUpload` takes the account's upload slot,
+which keeps uploads to one account one at a time. `Prepare` takes the account
+lock to check the identity and quota and starts staging files, `Add` stages
+each file while the lock is released, and `Publish` takes the lock again to
+recheck the account and quota before publishing the batch. The account's
+pages, share links, and file actions therefore never wait for an upload's
+body. A `files.Progress` follows the upload's phases and written bytes.
+
+## HTTP application
+
+`cmd/pigeon/main.go` handles signals and invokes `pigeon.Run`. Inside
+`internal/pigeon`, `run.go` handles startup, `database.go` persists server
+settings, and `setup.go` handles first-run provisioning. HTTP handlers parse
+requests, call the packages above, and render responses, using shared method,
+authentication, and error helpers:
+
+- `auth.go` handles sign-in, sign-out, and request authentication, and
+  `ratelimit.go` identifies clients behind trusted proxies;
+- `index.go` and `explorer.go` render the explorer, and `files.go` handles
+  file actions;
+- `download.go` serves files and ZIP archives, and `shares.go` manages and
+  serves share links;
+- `upload.go` streams uploads, and `upload_progress.go` tracks them and serves
+  authenticated progress snapshots;
+- `admin.go` serves user management, and `accounts.go` turns its actions into
+  account changes;
+- `server.go` handles routing and shutdown, `deadline.go` limits slow request
+  bodies, and `quota.go` and `size.go` format quotas and sizes.
+
+Template loading is in `templates.go`; templates reuse CSRF and sign-out
+controls. Browser code and common styles live in `web/static/` and are
+embedded into the binary along with the templates. `ActionDialog` uses one
+definition per action and one controller for all dialogs. JavaScript tests run
+the same files served by the application. Rebuild and restart after changing
+templates or assets. SIGINT and SIGTERM allow active requests up to 10 seconds
+to finish.

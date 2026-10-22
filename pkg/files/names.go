@@ -1,4 +1,4 @@
-package pigeon
+package files
 
 import (
 	"fmt"
@@ -30,6 +30,17 @@ func validateNewName(name string) error {
 		return fmt.Errorf("%w: names cannot contain invisible formatting characters, such as right-to-left overrides", storage.ErrInvalidPath)
 	}
 	return nil
+}
+
+// validateEntryName checks the name of a new folder or a renamed item.
+func validateEntryName(name string) error {
+	if strings.ContainsRune(name, '/') {
+		return fmt.Errorf("%w: enter a name without folder separators", storage.ErrInvalidPath)
+	}
+	if err := storage.ValidatePath(name); err != nil {
+		return err
+	}
+	return validateNewName(name)
 }
 
 // downloadName removes hidden formatting characters from the filename a
