@@ -17,8 +17,10 @@ their outcomes traced later.
   security or Q1 for quality. Include an impact or severity, its location, the
   evidence or reproduction, a recommendation, and a "Done when" check.
 - Keep a status table near the top that links to each finding.
-- Link to source files relative to this folder (`../../internal/...`), so links
-  work on GitHub and in editors.
+- Link to source files with absolute GitHub URLs, such as
+  `https://github.com/royvandam/pigeon/blob/main/internal/...`, so links work
+  both on GitHub and on the documentation site. Use a commit URL for locations
+  that should remain pinned to the reviewed revision.
 
 ## Working through findings
 
