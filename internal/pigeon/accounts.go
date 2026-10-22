@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	"github.com/royvandam/pigeon/pkg/storage"
 )
 
 var (
@@ -14,12 +16,12 @@ var (
 // accountManager coordinates account changes without HTTP or template concerns.
 // The store owns transactions; userStorage owns filesystem operations.
 type accountManager struct {
-	store     *store
-	directory string
+	store   *store
+	storage storage.Provider
 }
 
 func (cfg config) accounts() accountManager {
-	return accountManager{store: cfg.store, directory: cfg.dir}
+	return accountManager{store: cfg.store, storage: cfg.storage}
 }
 
 type accountCommand struct {
@@ -86,6 +88,6 @@ func (m accountManager) apply(ctx context.Context, actor user, command accountCo
 
 func (m accountManager) purge(ctx context.Context, id int64) error {
 	return m.store.purgeUser(ctx, id, func(slug string) error {
-		return (userStorage{directory: m.directory, slug: slug}).purge()
+		return (userStorage{provider: m.storage, slug: slug}).purge(ctx)
 	})
 }

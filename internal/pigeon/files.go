@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/royvandam/pigeon/pkg/storage"
 )
 
 func (cfg config) handleFiles(w http.ResponseWriter, r *http.Request) {
@@ -21,14 +23,14 @@ func (cfg config) handleFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer access.close()
+	tree, err := access.Files.open(r.Context())
+	if err != nil {
+		writeStorageError(w, err)
+		return
+	}
+	defer tree.Close()
 	if r.Method == http.MethodGet {
-		root, err := access.Files.open()
-		if err != nil {
-			writeStorageError(w, err)
-			return
-		}
-		defer root.Close()
-		data, err := readExplorer(root, r.URL.Query().Get("dir"), a.CSRFToken)
+		data, err := readExplorer(r.Context(), tree, r.URL.Query().Get("dir"), a.CSRFToken)
 		if err != nil {
 			writeStorageError(w, err)
 			return
@@ -36,14 +38,8 @@ func (cfg config) handleFiles(w http.ResponseWriter, r *http.Request) {
 		renderTemplate(w, filesTmpl, data, http.StatusOK)
 		return
 	}
-	root, err := access.Files.open()
-	if err != nil {
-		writeStorageError(w, err)
-		return
-	}
-	defer root.Close()
 	directory := r.PostForm.Get("dir")
-	if err := requireDirectory(root, directory); err != nil {
+	if err := storage.RequireDirectory(r.Context(), tree, directory); err != nil {
 		writeStorageError(w, err)
 		return
 	}
@@ -57,11 +53,11 @@ func (cfg config) handleFiles(w http.ResponseWriter, r *http.Request) {
 		change = access.Files.unit
 	}
 	if err == nil {
-		err = manageFile(root, action, directory, source, r.PostForm.Get("name"), r.PostForm.Get("destination"), func() error {
+		err = manageFile(r.Context(), tree, action, directory, source, r.PostForm.Get("name"), r.PostForm.Get("destination"), func() error {
 			mutating = true
 			if action == "delete" {
 				// Measure what the deletion frees while the item still exists.
-				removed, err := measureUsage(r.Context(), root.FS(), source, access.Files.unit)
+				removed, err := measureUsage(r.Context(), tree, source, access.Files.unit)
 				if err != nil {
 					return err
 				}
@@ -82,7 +78,7 @@ func (cfg config) handleFiles(w http.ResponseWriter, r *http.Request) {
 		cfg.renderIndex(w, r, a, directory, "", message, status)
 		return
 	}
-	if err := requireDirectory(root, directory); err != nil {
+	if err := storage.RequireDirectory(r.Context(), tree, directory); err != nil {
 		directory = "" // The API may have moved or removed the viewed folder.
 	}
 	redirect := explorerURL(directory)

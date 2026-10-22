@@ -1,47 +1,40 @@
 package pigeon
 
 import (
+	"context"
 	"errors"
 	"fmt"
-	"os"
+	"io/fs"
 	"path"
-	"path/filepath"
 	"strings"
+
+	"github.com/royvandam/pigeon/pkg/storage"
 )
 
 func validateEntryName(name string) error {
 	if strings.ContainsRune(name, '/') {
-		return fmt.Errorf("%w: enter a name without folder separators", errStoragePath)
+		return fmt.Errorf("%w: enter a name without folder separators", storage.ErrInvalidPath)
 	}
-	if err := validateStoragePath(name, false); err != nil {
+	if err := storage.ValidatePath(name); err != nil {
 		return err
 	}
 	return validateNewName(name)
 }
 
-func manageFile(root *os.Root, action, directory, source, name, destination string, beforeMutation func() error) error {
+func manageFile(ctx context.Context, tree storage.Tree, action, directory, source, name, destination string, beforeMutation func() error) error {
 	if action == "mkdir" {
 		if err := validateEntryName(name); err != nil {
 			return err
 		}
-		target := path.Join(directory, name)
-		if err := validateStoragePath(target, false); err != nil {
-			return err
-		}
-		if _, err := storageInfo(root, target); err == nil {
-			return fmt.Errorf("%w: %q", errFileConflict, target)
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-		return root.Mkdir(filepath.FromSlash(target), 0o750)
+		return tree.Mkdir(ctx, path.Join(directory, name))
 	}
 	if action != "delete" && action != "rename" && action != "move" {
-		return fmt.Errorf("%w: unknown file action", errStoragePath)
+		return fmt.Errorf("%w: unknown file action", storage.ErrInvalidPath)
 	}
-	if err := validateStoragePath(source, false); err != nil {
+	if err := storage.ValidatePath(source); err != nil {
 		return err // Protects the account's root, including recursive deletion.
 	}
-	info, err := storageInfo(root, source)
+	info, err := tree.Stat(ctx, source)
 	if err != nil {
 		return err
 	}
@@ -49,7 +42,7 @@ func manageFile(root *os.Root, action, directory, source, name, destination stri
 		if err := beforeMutation(); err != nil {
 			return err
 		}
-		return root.RemoveAll(filepath.FromSlash(source))
+		return tree.RemoveAll(ctx, source)
 	}
 	var target string
 	if action == "rename" {
@@ -58,23 +51,23 @@ func manageFile(root *os.Root, action, directory, source, name, destination stri
 		}
 		target = path.Join(path.Dir(source), name)
 	} else {
-		if err := requireDirectory(root, destination); err != nil {
+		if err := storage.RequireDirectory(ctx, tree, destination); err != nil {
 			return err
 		}
 		target = path.Join(destination, path.Base(source))
 	}
-	if err := validateStoragePath(target, false); err != nil {
+	if err := storage.ValidatePath(target); err != nil {
 		return err
 	}
 	if source == target {
 		return nil
 	}
 	if info.IsDir() && strings.HasPrefix(target, source+"/") {
-		return fmt.Errorf("%w: a folder cannot be moved inside itself", errStoragePath)
+		return fmt.Errorf("%w: a folder cannot be moved inside itself", storage.ErrInvalidPath)
 	}
-	if _, err := storageInfo(root, target); err == nil {
-		return fmt.Errorf("%w: %q", errFileConflict, target)
-	} else if !errors.Is(err, os.ErrNotExist) {
+	if _, err := tree.Stat(ctx, target); err == nil {
+		return fmt.Errorf("%w: %q", storage.ErrConflict, target)
+	} else if !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
 	// Revoke only after validation, but before changing the path. A failed
@@ -82,5 +75,5 @@ func manageFile(root *os.Root, action, directory, source, name, destination stri
 	if err := beforeMutation(); err != nil {
 		return err
 	}
-	return root.Rename(filepath.FromSlash(source), filepath.FromSlash(target))
+	return tree.Rename(ctx, source, target)
 }

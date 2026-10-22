@@ -26,13 +26,13 @@ func (cfg config) renderIndex(w http.ResponseWriter, r *http.Request, a authenti
 		return
 	}
 	defer access.close()
-	root, err := access.Files.open()
+	tree, err := access.Files.open(r.Context())
 	if err != nil {
 		writeStorageError(w, err)
 		return
 	}
-	defer root.Close()
-	explorer, err := readExplorer(root, directory, a.CSRFToken)
+	defer tree.Close()
+	explorer, err := readExplorer(r.Context(), tree, directory, a.CSRFToken)
 	if err != nil {
 		writeStorageError(w, err)
 		return

@@ -9,6 +9,8 @@ import (
 	"log"
 	"net/http"
 	"time"
+
+	"github.com/royvandam/pigeon/pkg/storage"
 )
 
 var errShareNotFound = errors.New("share link not found")
@@ -101,7 +103,7 @@ func (cfg config) handleShares(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
 		name = r.PostForm.Get("path")
 	}
-	if err := validateStoragePath(name, false); err != nil {
+	if err := storage.ValidatePath(name); err != nil {
 		writeStorageError(w, err)
 		return
 	}
@@ -116,13 +118,13 @@ func (cfg config) handleShares(w http.ResponseWriter, r *http.Request) {
 		// Revoking does not require the item to still exist on disk.
 		err = cfg.store.revokeShare(r.Context(), a.User.ID, name)
 	} else {
-		root, openErr := access.Files.open()
+		tree, openErr := access.Files.open(r.Context())
 		if openErr != nil {
 			writeStorageError(w, openErr)
 			return
 		}
-		defer root.Close()
-		info, statErr := storageInfo(root, name)
+		defer tree.Close()
+		info, statErr := tree.Stat(r.Context(), name)
 		if statErr != nil {
 			writeStorageError(w, statErr)
 			return
@@ -168,15 +170,15 @@ func (cfg config) openSharedDownload(ctx context.Context, token string) (*stored
 	if err != nil {
 		return nil, err
 	}
-	if err := validateStoragePath(link.Path, false); err != nil {
+	if err := storage.ValidatePath(link.Path); err != nil {
 		return nil, errShareNotFound
 	}
-	root, err := cfg.filesFor(link.User).open()
+	tree, err := cfg.filesFor(link.User).open(ctx)
 	if err != nil {
 		return nil, errShareNotFound
 	}
-	defer root.Close()
-	download, err := openStoredDownload(root, link.Path, link.User.Slug)
+	defer tree.Close()
+	download, err := openStoredDownload(ctx, tree, link.Path, link.User.Slug)
 	if err != nil {
 		return nil, errShareNotFound
 	}

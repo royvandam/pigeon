@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/royvandam/pigeon/pkg/storage"
 )
 
 func TestPurgeRemovesUploadsAndCredentialsAndReleasesUsername(t *testing.T) {
@@ -51,11 +53,11 @@ func TestPurgeRemovesUploadsAndCredentialsAndReleasesUsername(t *testing.T) {
 	if err != nil || fresh.Slug != u.Slug || fresh.ID == u.ID {
 		t.Fatalf("purged username or account ID was not safely released: %#v, %v", fresh, err)
 	}
-	root, err := cfg.filesFor(fresh).open()
+	tree, err := cfg.filesFor(fresh).open(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	root.Close()
+	tree.Close()
 	entries, err := os.ReadDir(filepath.Join(cfg.dir, fresh.Slug))
 	if err != nil || len(entries) != 0 {
 		t.Fatalf("new account inherited old uploads: %v, %v", entries, err)
@@ -93,6 +95,8 @@ func TestPurgeRejectsActiveAccountsAndHandlesMissingUploads(t *testing.T) {
 			}
 			if state == "no user directory" {
 				writeStoredFile(t, cfg, "another", "kept.txt", "preserved")
+			} else if err := os.Remove(cfg.dir); err != nil { // Created by the provider.
+				t.Fatal(err)
 			}
 			if err := cfg.store.deleteUser(ctx, u.ID, 999); err != nil {
 				t.Fatal(err)
@@ -115,17 +119,14 @@ func TestPurgeFailuresKeepDeletedAccountReserved(t *testing.T) {
 			ctx := context.Background()
 			u := deletedPurgeAccount(t, cfg)
 			writeStoredFile(t, cfg, u.Slug, "kept.txt", "preserved")
-			directory := cfg.dir
+			directory, provider := cfg.dir, cfg.storage
 			switch failure {
 			case "database":
 				if _, err := cfg.store.db.Exec(`CREATE TRIGGER fail_purge BEFORE DELETE ON users BEGIN SELECT RAISE(ABORT, 'test delete failure'); END`); err != nil {
 					t.Fatal(err)
 				}
 			case "storage":
-				cfg.dir = filepath.Join(t.TempDir(), "not-a-directory")
-				if err := os.WriteFile(cfg.dir, []byte("blocked"), 0o600); err != nil {
-					t.Fatal(err)
-				}
+				cfg.storage = failingRemoval{provider}
 			case "unsafe slug":
 				if _, err := cfg.store.db.Exec(`UPDATE users SET slug = '../outside' WHERE id = ?`, u.ID); err != nil {
 					t.Fatal(err)
@@ -150,7 +151,7 @@ func TestPurgeFailuresKeepDeletedAccountReserved(t *testing.T) {
 			if _, err := cfg.store.db.Exec(`UPDATE users SET slug = ? WHERE id = ?`, u.Slug, u.ID); err != nil {
 				t.Fatal(err)
 			}
-			cfg.dir = directory
+			cfg.storage = provider
 			if err := cfg.accounts().purge(ctx, u.ID); err != nil {
 				t.Fatalf("purge could not be retried: %v", err)
 			}
@@ -265,4 +266,13 @@ func TestPurgeWaitsForUploadsAndSerializesRecycling(t *testing.T) {
 	} else if _, err := os.Stat(filepath.Join(cfg.dir, u.Slug)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("purged account kept its upload directory: %v", err)
 	}
+}
+
+// failingRemoval is a storage provider that cannot remove namespaces.
+type failingRemoval struct {
+	storage.Provider
+}
+
+func (failingRemoval) Remove(context.Context, string) error {
+	return errors.New("storage unavailable")
 }

@@ -65,17 +65,12 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 	progress.setState("preparing")
 	quota := access.QuotaBytes
 	files := access.Files
-	dir, err := files.path()
+	tree, err := files.open(r.Context())
 	if err != nil {
 		writeStorageError(w, err)
 		return
 	}
-	root, err := files.open()
-	if err != nil {
-		writeStorageError(w, err)
-		return
-	}
-	root.Close()
+	defer tree.Close()
 	used, err := access.used(r.Context())
 	if err != nil {
 		http.Error(w, "failed to check storage usage", http.StatusInternalServerError)
@@ -87,7 +82,7 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "disk quota exhausted", http.StatusRequestEntityTooLarge)
 		return
 	}
-	batch, err := newUploadBatch(dir, r.URL.Query().Get("dir"), remaining, files.unit)
+	batch, err := newUploadBatch(r.Context(), tree, r.URL.Query().Get("dir"), remaining, files.unit)
 	if err != nil {
 		writeStorageError(w, err)
 		return
@@ -131,11 +126,11 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		name := disposition["filename"]
-		if err := batch.checkPath(name); err != nil {
+		if err := batch.checkPath(r.Context(), name); err != nil {
 			writeStorageError(w, err)
 			return
 		}
-		if err := batch.add(name, part); err != nil {
+		if err := batch.add(r.Context(), name, part); err != nil {
 			if errors.Is(err, errDiskQuotaExceeded) {
 				http.Error(w, fmt.Sprintf("disk quota exceeded (%s available)", humanBytes(remaining)), http.StatusRequestEntityTooLarge)
 			} else {
@@ -174,7 +169,7 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to check storage usage", http.StatusInternalServerError)
 		return
 	}
-	charged, err := batch.currentCharge()
+	charged, err := batch.currentCharge(r.Context())
 	if err != nil {
 		writeStorageError(w, err)
 		return
@@ -184,7 +179,7 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("disk quota exceeded (%s available)", humanBytes(remainingQuota(quota, used))), http.StatusRequestEntityTooLarge)
 		return
 	}
-	savedName, group, err := batch.publish()
+	savedName, group, err := batch.publish(r.Context())
 	if err != nil {
 		access.forgetUsage() // Publication rolls back, but only as far as it can.
 		writeStorageError(w, err)

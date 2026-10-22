@@ -7,6 +7,8 @@ The repository uses the applicable directory conventions from
 cmd/pigeon/         Executable entry point and signal handling
 internal/pigeon/    Private application code and Go tests
   wordlists/        Embedded passphrase dictionary and attribution
+pkg/storage/        Storage provider interfaces and path rules
+  local/            Storage provider for the local filesystem
 web/                Embedded templates and browser assets
   static/           JavaScript, shared and generated CSS
     fontawesome/    Vendored Font Awesome Free styles, font, and license
@@ -20,16 +22,36 @@ mkdocs.yml          Documentation site configuration and navigation
 Go tests stay beside the packages they exercise; additional browser tests live
 under `test/`. The `web` package embeds templates and static files at build time,
 and the application embeds its passphrase word list. A built executable runs
-without the source tree or an asset directory. There is no public Go library;
-application code stays under `internal/`.
+without the source tree or an asset directory. Packages under `pkg/` can be
+used as a library; the rest of the application stays under `internal/`.
+
+## Storage providers
+
+Account files live behind the `storage.Provider` interface in `pkg/storage`.
+A provider keeps one namespace per account. An open namespace is a
+`storage.Tree` of folders and regular files with slash-separated paths, which
+supports listing, walking, opening files and folders, creating folders,
+renaming, removal, and staged uploads. File information uses the standard
+`io/fs` types. `storage.ValidatePath` holds the path rules every provider
+enforces; names starting with `storage.ReservedPrefix` belong to the provider,
+and listings and walks leave them out.
+
+`pkg/storage/local` stores each namespace as a folder under the upload root.
+Every operation goes through an `os.Root`, which confines it to the account,
+and symbolic links and special files are rejected anywhere in a path. Uploads
+are staged in a reserved folder of the account and renamed into place when
+published, with a rollback if a rename fails. Open files and folders stay bound
+to their item when it is moved, so downloads can stream after the account lock
+is released. At startup, `RemoveStaleUploads` deletes staging folders left by a
+crash. Another backend, such as object storage, implements the same interfaces.
 
 ## Request and storage ownership
 
 Account changes are coordinated by `accountManager` in `accounts.go`; the SQLite
-store owns persistence and transactions. `userStorage` owns account filesystem
-paths, usage checks, and removal. `accountAccess` locks an account and rechecks
-its identity before both reads and writes; download handles release that lock
-before streaming. Uploads hold the lock only to check the quota and to publish:
+store owns persistence and transactions. `userStorage` names an account's
+namespace in the storage provider and measures its usage. `accountAccess` locks
+an account and rechecks its identity before both reads and writes; download
+handles release that lock before streaming. Uploads hold the lock only to check the quota and to publish:
 while the body streams into the staging folder they hold the account's upload
 slot instead, which keeps uploads to one account one at a time. Purging and
 recycling take the slot as well. Request body deadlines live in `deadline.go`.

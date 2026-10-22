@@ -1,13 +1,13 @@
 package pigeon
 
 import (
-	"errors"
-	"io/fs"
+	"context"
 	"net/url"
-	"os"
 	"path"
 	"sort"
 	"strings"
+
+	"github.com/royvandam/pigeon/pkg/storage"
 )
 
 type fileEntry struct {
@@ -39,37 +39,20 @@ func explorerURL(directory string) string {
 	return "/?" + url.Values{"dir": {directory}}.Encode()
 }
 
-func readExplorer(root *os.Root, directory, csrf string) (explorerData, error) {
+func readExplorer(ctx context.Context, tree storage.Tree, directory, csrf string) (explorerData, error) {
 	data := explorerData{Directory: directory, CSRFToken: csrf}
-	if err := requireDirectory(root, directory); err != nil {
-		return data, err
-	}
-	listingPath := directory
-	if listingPath == "" {
-		listingPath = "."
-	}
-	entries, err := fs.ReadDir(root.FS(), listingPath)
+	items, err := tree.List(ctx, directory)
 	if err != nil {
 		return data, err
 	}
-	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), stagingPrefix) {
-			continue
-		}
-		name := path.Join(directory, entry.Name())
-		info, err := storageInfo(root, name)
-		if errors.Is(err, os.ErrNotExist) { // Another request may have moved it.
-			continue
-		}
-		if err != nil {
-			return data, err
-		}
+	for _, info := range items {
+		name := path.Join(directory, info.Name())
 		size := "—"
 		if !info.IsDir() {
 			size = humanBytes(info.Size())
 		}
 		data.Entries = append(data.Entries, fileEntry{
-			Name: entry.Name(), Path: name, Directory: info.IsDir(), Size: size,
+			Name: info.Name(), Path: name, Directory: info.IsDir(), Size: size,
 			Modified:    info.ModTime().Local().Format("2006-01-02 15:04"),
 			BrowseURL:   explorerURL(name),
 			DownloadURL: "/download?" + url.Values{"path": {name}}.Encode(),

@@ -18,6 +18,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/royvandam/pigeon/pkg/storage"
+	"github.com/royvandam/pigeon/pkg/storage/local"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -40,9 +42,13 @@ func newTestConfig(t *testing.T, quota int64) config {
 	if _, err := s.createUserWithQuota(context.Background(), "Test User", testPassword, false, quota); err != nil {
 		t.Fatal(err)
 	}
+	provider, err := local.NewProvider(filepath.Join(root, "uploads"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	// A one-byte allocation unit keeps quota arithmetic in tests exact; tests of
 	// the production unit set allocationUnit explicitly.
-	return config{dir: filepath.Join(root, "uploads"), store: s, allocationUnit: 1}
+	return config{dir: provider.Directory(), store: s, storage: provider, allocationUnit: 1}
 }
 
 func serve(handler http.Handler, r *http.Request) *httptest.ResponseRecorder {
@@ -112,7 +118,7 @@ func readUploadDir(root, slug string) ([]os.DirEntry, error) {
 
 func stagingFolders(t *testing.T, cfg config) []string {
 	t.Helper()
-	matches, err := filepath.Glob(filepath.Join(cfg.dir, "test-user", stagingPrefix+"*"))
+	matches, err := filepath.Glob(filepath.Join(cfg.dir, "test-user", storage.ReservedPrefix+"*"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,4 +277,14 @@ func startGatedUpload(t *testing.T, cfg config, cookie *http.Cookie, csrf, direc
 	}
 	t.Cleanup(func() { finish() })
 	return finish
+}
+
+// diskUsage measures the folder dir, which is not charged itself, as the
+// usage cache would.
+func diskUsage(ctx context.Context, dir string, unit int64) (int64, error) {
+	provider, err := local.NewProvider(filepath.Dir(dir))
+	if err != nil {
+		return 0, err
+	}
+	return userStorage{provider: provider, slug: filepath.Base(dir), unit: unit}.usage(ctx)
 }
