@@ -7,6 +7,8 @@ The repository uses the applicable directory conventions from
 cmd/pigeon/         Executable entry point and signal handling
 internal/pigeon/    Private application code and Go tests
   wordlists/        Embedded passphrase dictionary and attribution
+internal/token/     Random tokens for sessions, share links, and forms
+pkg/database/       SQLite connection and schema migrations
 pkg/quota/          Quota rules, usage measurement, and the usage cache
 pkg/storage/        Storage provider interfaces and path rules
   local/            Storage provider for the local filesystem
@@ -78,10 +80,12 @@ after changing templates or assets.
 
 
 `cmd/pigeon/main.go` handles signals and invokes `pigeon.Run`.
-Inside `internal/pigeon`, `run.go` handles startup, `database.go` persists
-settings and the schema, `setup.go` handles first-run provisioning, and
-`users.go` manages accounts. `passphrase.go` generates credentials using the
-embedded EFF word list. Its source and license are documented in
+`pkg/database` opens SQLite with foreign keys, WAL journaling, and a single
+connection, which serializes transactions, and migrates the schema for
+accounts, sessions, and share links. Inside `internal/pigeon`, `run.go`
+handles startup, `database.go` persists server settings, `setup.go` handles
+first-run provisioning, and `users.go` manages accounts. `passphrase.go`
+generates credentials using the embedded EFF word list. Its source and license are documented in
 [passphrase word list attribution](https://github.com/royvandam/pigeon/blob/main/internal/pigeon/wordlists/README.md).
 `session.go` and `auth.go` handle authentication. `admin.go`, `index.go`, and
 `upload.go` serve user management, the explorer page, and the upload endpoint.

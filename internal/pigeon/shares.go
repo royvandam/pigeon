@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/royvandam/pigeon/internal/token"
 	"github.com/royvandam/pigeon/pkg/storage"
 )
 
@@ -36,7 +37,7 @@ WHERE s.user_id = ? AND s.path = ? AND u.auth_version = ? AND u.deleted_at IS NU
 // createShare returns a new link for name, replacing any existing one, whose
 // URL then stops working.
 func (s *store) createShare(ctx context.Context, u user, name string, directory bool) (string, error) {
-	token, err := randomToken()
+	secret, err := token.New()
 	if err != nil {
 		return "", err
 	}
@@ -45,7 +46,7 @@ INSERT INTO shares (token_hash, user_id, path, is_directory, created_at)
 SELECT ?, id, ?, ?, ? FROM users WHERE id = ? AND auth_version = ? AND deleted_at IS NULL
 ON CONFLICT(user_id, path) DO UPDATE SET
   token_hash = excluded.token_hash, is_directory = excluded.is_directory, created_at = excluded.created_at`,
-		tokenHash(token), name, directory, time.Now().Unix(), u.ID, u.Version)
+		token.Hash(secret), name, directory, time.Now().Unix(), u.ID, u.Version)
 	if err != nil {
 		return "", err
 	}
@@ -54,7 +55,7 @@ ON CONFLICT(user_id, path) DO UPDATE SET
 	} else if n == 0 {
 		return "", errInvalidCredentials
 	}
-	return "/s/" + token, nil
+	return "/s/" + secret, nil
 }
 
 func (s *store) revokeShare(ctx context.Context, id int64, name string) error {
@@ -70,18 +71,18 @@ DELETE FROM shares WHERE user_id = ? AND (path = ? OR substr(path, 1, length(?) 
 	return err
 }
 
-func (s *store) findShare(ctx context.Context, token string) (shareLink, error) {
-	if len(token) != 43 {
+func (s *store) findShare(ctx context.Context, secret string) (shareLink, error) {
+	if len(secret) != token.Length {
 		return shareLink{}, errShareNotFound
 	}
-	bytes, err := base64.RawURLEncoding.DecodeString(token)
+	bytes, err := base64.RawURLEncoding.DecodeString(secret)
 	if err != nil || len(bytes) != 32 {
 		return shareLink{}, errShareNotFound
 	}
 	var link shareLink
 	err = s.db.QueryRowContext(ctx, `
 SELECT u.id, u.slug, s.path, s.is_directory FROM shares s JOIN users u ON u.id = s.user_id
-WHERE s.token_hash = ? AND u.deleted_at IS NULL`, tokenHash(token)).
+WHERE s.token_hash = ? AND u.deleted_at IS NULL`, token.Hash(secret)).
 		Scan(&link.User.ID, &link.User.Slug, &link.Path, &link.Directory)
 	if errors.Is(err, sql.ErrNoRows) {
 		return shareLink{}, errShareNotFound

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/royvandam/pigeon/internal/token"
 )
 
 func TestRecycleUserPreservesAccountAndRevokesPreviousAccess(t *testing.T) {
@@ -37,10 +39,10 @@ func TestRecycleUserPreservesAccountAndRevokesPreviousAccess(t *testing.T) {
 			}
 
 			// Simulate credentials left behind by an earlier application version.
-			if _, err := cfg.store.db.Exec(`INSERT INTO sessions (token_hash, user_id, user_version, csrf_token, expires_at) VALUES (?, ?, ?, ?, ?)`, tokenHash(cookie.Value), old.ID, old.Version, csrf, time.Now().Add(time.Hour).Unix()); err != nil {
+			if _, err := cfg.store.db.Exec(`INSERT INTO sessions (token_hash, user_id, user_version, csrf_token, expires_at) VALUES (?, ?, ?, ?, ?)`, token.Hash(cookie.Value), old.ID, old.Version, csrf, time.Now().Add(time.Hour).Unix()); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := cfg.store.db.Exec(`INSERT INTO shares (token_hash, user_id, path, is_directory, created_at) VALUES (?, ?, ?, 0, ?)`, tokenHash(strings.TrimPrefix(link, "/s/")), old.ID, "project/readme.txt", time.Now().Unix()); err != nil {
+			if _, err := cfg.store.db.Exec(`INSERT INTO shares (token_hash, user_id, path, is_directory, created_at) VALUES (?, ?, ?, 0, ?)`, token.Hash(strings.TrimPrefix(link, "/s/")), old.ID, "project/readme.txt", time.Now().Unix()); err != nil {
 				t.Fatal(err)
 			}
 			fresh, err := cfg.store.recycleUser(ctx, old.ID, "fresh-recycled-password")
@@ -171,7 +173,7 @@ func TestRecycleUserWaitsForUploadsAndRollsBackCleanupFailures(t *testing.T) {
 	}
 	unlock()
 	unlock = nil
-	if _, err := cfg.store.db.Exec(`INSERT INTO sessions (token_hash, user_id, user_version, csrf_token, expires_at) VALUES (?, ?, ?, ?, ?)`, tokenHash(cookie.Value), old.ID, old.Version, csrf, time.Now().Add(time.Hour).Unix()); err != nil {
+	if _, err := cfg.store.db.Exec(`INSERT INTO sessions (token_hash, user_id, user_version, csrf_token, expires_at) VALUES (?, ?, ?, ?, ?)`, token.Hash(cookie.Value), old.ID, old.Version, csrf, time.Now().Add(time.Hour).Unix()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := cfg.store.db.Exec(`CREATE TRIGGER fail_recycle BEFORE DELETE ON sessions BEGIN SELECT RAISE(ABORT, 'test cleanup failure'); END`); err != nil {

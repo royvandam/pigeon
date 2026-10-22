@@ -6,6 +6,8 @@ import (
 	"log"
 	"net/http"
 	"time"
+
+	"github.com/royvandam/pigeon/internal/token"
 )
 
 const (
@@ -15,7 +17,7 @@ const (
 )
 
 func validCSRF(expected, provided string) bool {
-	return len(expected) == 43 && subtle.ConstantTimeCompare([]byte(expected), []byte(provided)) == 1
+	return len(expected) == token.Length && subtle.ConstantTimeCompare([]byte(expected), []byte(provided)) == 1
 }
 
 func (cfg config) parseForm(w http.ResponseWriter, r *http.Request) bool {
@@ -133,14 +135,14 @@ func (cfg config) handleLogin(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}
-		token, err := randomToken()
+		csrf, err := token.New()
 		if err != nil {
 			http.Error(w, "login unavailable", http.StatusInternalServerError)
 			return
 		}
-		http.SetCookie(w, &http.Cookie{Name: loginCookieName, Value: token, Path: "/login", HttpOnly: true,
+		http.SetCookie(w, &http.Cookie{Name: loginCookieName, Value: csrf, Path: "/login", HttpOnly: true,
 			Secure: cfg.secureCookies(r), SameSite: http.SameSiteStrictMode, MaxAge: 600})
-		renderTemplate(w, loginTmpl, loginPage{CSRFToken: token}, http.StatusOK)
+		renderTemplate(w, loginTmpl, loginPage{CSRFToken: csrf}, http.StatusOK)
 	case http.MethodPost:
 		if !cfg.sameOrigin(r) || !cfg.parseForm(w, r) {
 			if !cfg.sameOrigin(r) {
