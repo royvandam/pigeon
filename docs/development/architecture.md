@@ -5,7 +5,8 @@ The repository uses the applicable directory conventions from
 
 ```text
 cmd/pigeon/         Executable entry point and signal handling
-internal/pigeon/    Private application code and Go tests
+internal/pigeon/    Startup, first-run setup, and saved server settings
+internal/size/      Reading and formatting storage sizes
 internal/token/     Random tokens for sessions, share links, and forms
 pkg/account/        Accounts, passwords, account locks, and lifecycle changes
   wordlists/        Embedded passphrase dictionary and attribution
@@ -14,6 +15,7 @@ pkg/database/       SQLite connection and schema migrations
 pkg/files/          Account file operations, downloads, and uploads
 pkg/quota/          Quota rules, usage measurement, and the usage cache
 pkg/share/          Public download links
+pkg/server/         HTTP handlers, pages, and the HTTP server
 pkg/storage/        Storage provider interfaces and path rules
   local/            Storage provider for the local filesystem
 web/                Embedded templates and browser assets
@@ -145,26 +147,29 @@ recheck the account and quota before publishing the batch. The account's
 pages, share links, and file actions therefore never wait for an upload's
 body. A `files.Progress` follows the upload's phases and written bytes.
 
-## HTTP application
+## HTTP server
 
-`cmd/pigeon/main.go` handles signals and invokes `pigeon.Run`. Inside
-`internal/pigeon`, `run.go` handles startup, `database.go` persists server
-settings, and `setup.go` handles first-run provisioning. HTTP handlers parse
+`pkg/server` serves the web interface and HTTP API. `server.New` takes the
+server's settings as a `server.Configuration`, validates them, and resolves
+defaults once, and takes the services it uses as `server.Dependencies`. The
+resulting `server.Server` holds only what its handlers need; `Handler` routes
+requests through the security-header and logging middleware, and `Run` serves
+until its context ends. Handlers are methods of the server. They parse
 requests, call the packages above, and render responses, using shared method,
 authentication, and error helpers:
 
 - `auth.go` handles sign-in, sign-out, and request authentication, and
-  `ratelimit.go` identifies clients behind trusted proxies;
+  `client.go` identifies clients behind trusted proxies;
 - `index.go` and `explorer.go` render the explorer, and `files.go` handles
   file actions;
 - `download.go` serves files and ZIP archives, and `shares.go` manages and
   serves share links;
-- `upload.go` streams uploads, and `upload_progress.go` tracks them and serves
-  authenticated progress snapshots;
+- `upload.go` streams uploads, and `upload_progress.go` tracks their progress
+  for the browser and serves authenticated snapshots;
 - `admin.go` serves user management, and `accounts.go` turns its actions into
   account changes;
 - `server.go` handles routing and shutdown, `deadline.go` limits slow request
-  bodies, and `quota.go` and `size.go` format quotas and sizes.
+  bodies, and `quota.go` formats quotas for forms and headers.
 
 Template loading is in `templates.go`; templates reuse CSRF and sign-out
 controls. Browser code and common styles live in `web/static/` and are
@@ -173,3 +178,11 @@ definition per action and one controller for all dialogs. JavaScript tests run
 the same files served by the application. Rebuild and restart after changing
 templates or assets. SIGINT and SIGTERM allow active requests up to 10 seconds
 to finish.
+
+## Startup
+
+`cmd/pigeon/main.go` handles signals and invokes `pigeon.Run`. Inside
+`internal/pigeon`, `run.go` opens the database, applies the command-line
+flags to the saved server settings, runs first-run setup from `setup.go`, and
+builds the storage provider, stores, services, and server from them.
+`database.go` persists the server settings.

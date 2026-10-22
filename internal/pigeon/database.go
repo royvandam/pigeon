@@ -4,23 +4,18 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"net"
 	"path/filepath"
-	"strconv"
-	"sync"
+	"strings"
 
 	"github.com/royvandam/pigeon/pkg/account"
-	"github.com/royvandam/pigeon/pkg/auth"
 	"github.com/royvandam/pigeon/pkg/database"
-	"github.com/royvandam/pigeon/pkg/share"
+	"github.com/royvandam/pigeon/pkg/server"
 )
 
+// store is the database, with its accounts and the server settings.
 type store struct {
 	db       *sql.DB
 	accounts *account.Store
-	sessions *auth.Sessions
-	shares   *share.Store
-	progress sync.Map
 }
 
 type settings struct {
@@ -30,22 +25,16 @@ type settings struct {
 	publicURL      string // external origin, such as https://files.example.com
 }
 
+// server returns the settings of the HTTP server.
+func (s settings) server() server.Configuration {
+	return server.Configuration{ListenAddress: s.listen, PublicURL: s.publicURL, TrustedProxies: strings.Split(s.trustedProxies, ",")}
+}
+
 func (s settings) validate() error {
 	if s.dir == "" {
 		return fmt.Errorf("upload directory cannot be empty")
 	}
-	_, port, err := net.SplitHostPort(s.listen)
-	if err != nil {
-		return fmt.Errorf("invalid listen address: %w", err)
-	}
-	if _, err := strconv.ParseUint(port, 10, 16); err != nil {
-		return fmt.Errorf("invalid listen port: %w", err)
-	}
-	if _, err := parseTrustedProxies(s.trustedProxies); err != nil {
-		return err
-	}
-	_, err = parsePublicURL(s.publicURL)
-	return err
+	return s.server().Validate()
 }
 
 // openStore opens or creates the database. passwordCost is the bcrypt cost for
@@ -60,7 +49,7 @@ func openStore(ctx context.Context, path string, passwordCost int) (*store, erro
 		db.Close()
 		return nil, err
 	}
-	s := &store{db: db, accounts: accounts, sessions: auth.NewSessions(db), shares: share.NewStore(db)}
+	s := &store{db: db, accounts: accounts}
 	if err := s.initializeSettings(ctx); err != nil {
 		db.Close()
 		return nil, err
@@ -117,7 +106,7 @@ CREATE TABLE IF NOT EXISTS settings (
 	}
 	if _, err := tx.ExecContext(ctx,
 		`INSERT OR IGNORE INTO settings (id, uploads_dir, listen) VALUES (1, ?, ?)`,
-		dir, defaultListen); err != nil {
+		dir, server.DefaultListenAddress); err != nil {
 		return err
 	}
 	return tx.Commit()
