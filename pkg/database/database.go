@@ -18,10 +18,20 @@ import (
 	"github.com/royvandam/pigeon/pkg/quota"
 )
 
+// Configuration chooses the database.
+type Configuration struct {
+	// Path is the SQLite database file. A relative path is resolved from the
+	// working directory at startup.
+	Path string `json:"path"`
+}
+
 // Open opens the SQLite database at path, creating it and its parent folders
 // if needed, and migrates its schema. A relative path is resolved from the
 // current working directory.
 func Open(ctx context.Context, path string) (*sql.DB, error) {
+	if path == "" {
+		return nil, errors.New("database path cannot be empty")
+	}
 	path, err := filepath.Abs(path)
 	if err != nil {
 		return nil, err

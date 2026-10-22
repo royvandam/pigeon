@@ -1,11 +1,21 @@
 # Troubleshooting
 
+## The server does not start
+
+Pigeon checks its configuration file at startup and names the setting it
+rejects, such as `http: invalid listen address` or `unknown field "listen"`.
+Compare the file with the [configuration reference](administration/configuration.md).
+When upgrading from a version that used command-line flags, Pigeon lists the
+settings saved in the database that the file must carry over; see
+[upgrading from command-line flags](administration/configuration.md#upgrading-from-command-line-flags).
+
 ## The server asks for an administrator again
 
-Check the `-db` path and working directory. The default `./pigeon.db` can select
-a new database if you start from a different directory. Stop the process and
-restart it with the intended absolute database path. Do not complete setup in
-the empty database if you intended to use an existing installation.
+Check `database.path` in the configuration file and the working directory. A
+relative path such as `pigeon.db` can select a new database if you start from
+a different directory. Stop the process and restart it with the intended
+absolute database path. Do not complete setup in the empty database if you
+intended to use an existing installation.
 
 ## Another device cannot connect
 
@@ -22,15 +32,15 @@ on all devices.
 
 After repeated failed attempts, wait for the `Retry-After` interval before
 trying again. If many users behind a proxy share the same limit, set
-`-trusted-proxies` to the proxy's addresses so Pigeon can identify clients.
+`http.trustedProxies` to the proxy's addresses so Pigeon can identify clients.
 See [sign-in throttling](administration/deployment.md#sign-in-throttling-and-reverse-proxies).
 
 ## A form or upload returns HTTP 403
 
 Reload the page and sign in again if the session expired. Browser form
 requests require a CSRF token. Behind a reverse proxy, check the public
-`Host` header and `-public-url`; an incorrect origin is also rejected.
-If `-public-url` is HTTPS, use HTTPS in the browser so it can send Secure
+`Host` header and `http.publicURL`; an incorrect origin is also rejected.
+If `http.publicURL` is HTTPS, use HTTPS in the browser so it can send Secure
 cookies.
 
 ## An upload returns HTTP 409
@@ -53,10 +63,12 @@ raise the proxy's body limit; the nginx example in the
 
 ## An upload stalls or returns HTTP 408
 
-Pigeon stops reading an upload after 60 seconds without incoming data.
-Ordinary form bodies must arrive within 30 seconds. Check network interruptions
-and proxy timeouts. Stream request bodies through the proxy rather than
-buffering the complete upload first.
+By default, Pigeon stops reading an upload after 60 seconds without incoming
+data, and ordinary form bodies must arrive within 30 seconds. Check network
+interruptions and proxy timeouts. Stream request bodies through the proxy
+rather than buffering the complete upload first. For slow links, raise
+`http.uploadIdleTimeout` or `http.formReadTimeout` in the
+[configuration](administration/configuration.md).
 
 Progress counts file bytes processed by the server, so buffering can delay the
 bar even if the browser has sent data. **Finishing…** means the server has not

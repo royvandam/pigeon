@@ -95,3 +95,41 @@ func TestOlderDatabasesAreMigrated(t *testing.T) {
 		db.Close()
 	}
 }
+
+func TestLegacySettingsAreReadFromEverySchemaVersion(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	db := open(t, filepath.Join(t.TempDir(), "pigeon.db"))
+	if s, err := ReadLegacySettings(ctx, db); err != nil || s != nil {
+		t.Fatalf("a new database has legacy settings: %#v, %v", s, err)
+	}
+	// The first versions saved only the upload folder and listen address.
+	if _, err := db.Exec(`CREATE TABLE settings (id INTEGER PRIMARY KEY CHECK (id = 1), uploads_dir TEXT NOT NULL, listen TEXT NOT NULL);
+INSERT INTO settings (id, uploads_dir, listen) VALUES (1, '/srv/pigeon/uploads', ':8080')`); err != nil {
+		t.Fatal(err)
+	}
+	s, err := ReadLegacySettings(ctx, db)
+	if err != nil || s == nil || *s != (LegacySettings{UploadDirectory: "/srv/pigeon/uploads", ListenAddress: ":8080"}) {
+		t.Fatalf("oldest settings = %#v, %v", s, err)
+	}
+	if _, err := db.Exec(`ALTER TABLE settings ADD COLUMN trusted_proxies TEXT NOT NULL DEFAULT '127.0.0.1';
+ALTER TABLE settings ADD COLUMN public_url TEXT NOT NULL DEFAULT 'https://files.example.com'`); err != nil {
+		t.Fatal(err)
+	}
+	s, err = ReadLegacySettings(ctx, db)
+	want := LegacySettings{UploadDirectory: "/srv/pigeon/uploads", ListenAddress: ":8080", TrustedProxies: "127.0.0.1", PublicURL: "https://files.example.com"}
+	if err != nil || s == nil || *s != want {
+		t.Fatalf("latest settings = %#v, %v", s, err)
+	}
+	for range 2 {
+		if err := DropLegacySettings(ctx, db); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if s, err := ReadLegacySettings(ctx, db); err != nil || s != nil {
+		t.Fatalf("dropped settings = %#v, %v", s, err)
+	}
+	if _, err := Open(ctx, ""); err == nil {
+		t.Fatal("opened a database without a path")
+	}
+}

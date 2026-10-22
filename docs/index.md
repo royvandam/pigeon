@@ -7,8 +7,9 @@ self-hosted Go server with individual accounts, per-user storage and disk
 quotas, an administrator interface, and shareable download links.
 
 The server streams uploads to disk and embeds its web interface in the
-executable. It uses SQLite for accounts and settings, so running it requires
-one binary, a database, and an upload directory.
+executable. It reads its settings from a JSON configuration file and keeps
+accounts in SQLite, so running it requires one binary, a configuration file, a
+database, and an upload directory.
 
 ## Start here
 

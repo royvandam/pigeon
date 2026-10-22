@@ -19,6 +19,7 @@ import (
 
 	"github.com/royvandam/pigeon/pkg/account"
 	"github.com/royvandam/pigeon/pkg/auth"
+	"github.com/royvandam/pigeon/pkg/configuration"
 	"github.com/royvandam/pigeon/pkg/files"
 	"github.com/royvandam/pigeon/pkg/share"
 )
@@ -38,16 +39,18 @@ const (
 // Configuration holds a server's settings. Zero values select the defaults.
 type Configuration struct {
 	// ListenAddress is the host:port to serve plain HTTP on.
-	ListenAddress string
+	ListenAddress string `json:"listenAddress"`
 	// PublicURL is the origin people use, such as https://files.example.com,
 	// or empty when unknown. HTTPS makes cookies Secure and enables HSTS.
-	PublicURL string
+	PublicURL string `json:"publicURL"`
 	// TrustedProxies are the IP addresses and CIDR ranges of reverse proxies
 	// whose X-Forwarded-For header identifies clients.
-	TrustedProxies []string
-	// FormReadTimeout and UploadIdleTimeout limit slow request bodies.
-	FormReadTimeout   time.Duration
-	UploadIdleTimeout time.Duration
+	TrustedProxies []string `json:"trustedProxies"`
+	// FormReadTimeout limits how long a form body may take to arrive.
+	FormReadTimeout configuration.Duration `json:"formReadTimeout"`
+	// UploadIdleTimeout limits how long an upload may go without receiving
+	// body data.
+	UploadIdleTimeout configuration.Duration `json:"uploadIdleTimeout"`
 }
 
 // Dependencies are the services a server uses.
@@ -101,6 +104,28 @@ func (cfg Configuration) Validate() error {
 	return new(Server).configure(cfg)
 }
 
+// Normalize returns cfg as the server would apply it: with defaults for zero
+// values, the public URL as an origin with a lowercase host, and trusted
+// proxies as CIDR ranges.
+func (cfg Configuration) Normalize() (Configuration, error) {
+	var s Server
+	if err := s.configure(cfg); err != nil {
+		return Configuration{}, err
+	}
+	normalized := Configuration{
+		ListenAddress:     s.listen,
+		FormReadTimeout:   configuration.Duration(s.formTimeout),
+		UploadIdleTimeout: configuration.Duration(s.uploadTimeout),
+	}
+	if s.publicURL != nil {
+		normalized.PublicURL = s.publicURL.String()
+	}
+	for _, prefix := range s.trustedProxies {
+		normalized.TrustedProxies = append(normalized.TrustedProxies, prefix.String())
+	}
+	return normalized, nil
+}
+
 // configure applies the settings in cfg, with defaults for zero values.
 func (s *Server) configure(cfg Configuration) error {
 	s.listen = cmp.Or(cfg.ListenAddress, DefaultListenAddress)
@@ -111,8 +136,8 @@ func (s *Server) configure(cfg Configuration) error {
 	if _, err := strconv.ParseUint(port, 10, 16); err != nil {
 		return fmt.Errorf("invalid listen port: %w", err)
 	}
-	s.formTimeout = cmp.Or(cfg.FormReadTimeout, DefaultFormReadTimeout)
-	s.uploadTimeout = cmp.Or(cfg.UploadIdleTimeout, DefaultUploadIdleTimeout)
+	s.formTimeout = cmp.Or(time.Duration(cfg.FormReadTimeout), DefaultFormReadTimeout)
+	s.uploadTimeout = cmp.Or(time.Duration(cfg.UploadIdleTimeout), DefaultUploadIdleTimeout)
 	if s.formTimeout < 0 || s.uploadTimeout < 0 {
 		return errors.New("timeouts cannot be negative")
 	}

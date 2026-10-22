@@ -11,13 +11,13 @@ Install Go **1.26.10 or newer**, or enter the development environment with
 `nix-shell`, then run from the repository root:
 
 ```sh
-go run ./cmd/pigeon -listen 127.0.0.1:8080
+go run ./cmd/pigeon configs/pigeon.json
 ```
 
 Follow the terminal prompts to create the initial administrator, then open
 <http://127.0.0.1:8080>. The password needs at least 12 characters and at most
-72 bytes. Data defaults to `./pigeon.db` and `./uploads`; settings are saved in
-the database. Accounts start with a 1 GiB quota.
+72 bytes. Settings come from the JSON configuration file; the example keeps
+data in `./pigeon.db` and `./uploads`. Accounts start with a 1 GiB quota.
 
 For access from other devices, use an
 [HTTPS reverse proxy](docs/administration/deployment.md).

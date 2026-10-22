@@ -20,10 +20,12 @@ git clone https://github.com/royvandam/pigeon.git
 cd pigeon
 # Optional, when using Nix:
 nix-shell
-go run ./cmd/pigeon -listen 127.0.0.1:8080
+go run ./cmd/pigeon configs/pigeon.json
 ```
 
-Run commands from the repository root. On the first run, enter an administrator
+Run commands from the repository root. The example configuration keeps the
+database and uploads in the working directory, as `pigeon.db` and `uploads/`,
+and listens on `127.0.0.1:8080`. On the first run, enter an administrator
 username, a password, and its confirmation. The password needs at least 12
 characters and at most 72 bytes; terminal password entry is hidden. Setup
 finishes before the HTTP listener starts. Later starts reuse the saved accounts
@@ -37,27 +39,34 @@ folder, and downloading an item. Open `/admin` to
 
 ```sh
 go build -o bin/pigeon ./cmd/pigeon
-./bin/pigeon -db ./pigeon.db -dir ./uploads -listen 127.0.0.1:8080
+./bin/pigeon configs/pigeon.json
 ```
 
 Templates, browser assets, and the passphrase dictionary are embedded at build
 time. The executable can run without the source tree. It still needs its
-database and upload directory; keep both on persistent storage.
+configuration file, database, and upload directory; keep the data on
+persistent storage.
 
 ## Choose where data lives
 
-The defaults are `./pigeon.db`, `./uploads`, and `127.0.0.1:8080`. The database
-path is relative to the working directory; use absolute paths for a service:
+Paths in the configuration file are relative to the working directory. For a
+service, copy the example to a fixed location and use absolute paths:
 
-```sh
-./bin/pigeon -db /srv/pigeon/pigeon.db \
-  -dir /srv/pigeon/uploads -listen 127.0.0.1:8080
+```json
+{
+  "database": {"path": "/srv/pigeon/pigeon.db"},
+  "storage": {"local": {"directory": "/srv/pigeon/uploads"}},
+  "http": {"listenAddress": "127.0.0.1:8080"}
+}
 ```
 
-`-dir` and `-listen` are saved in that database. Later starts need only the same
-`-db` argument. The initial administrator, like other accounts, starts with a
-1 GiB quota. See [configuration](administration/configuration.md) for all flags
-and [disk quotas](administration/quotas.md) for how usage is counted.
+```sh
+./bin/pigeon /etc/pigeon/pigeon.json
+```
+
+The initial administrator, like other accounts, starts with a 1 GiB quota. See
+[configuration](administration/configuration.md) for all settings and
+[disk quotas](administration/quotas.md) for how usage is counted.
 
 ## Automated provisioning
 
@@ -72,6 +81,6 @@ has an account, setup no longer reads these values.
 The default listener accepts connections only from the local machine. To
 serve other devices, follow [HTTPS and reverse proxies](administration/deployment.md).
 Pigeon itself serves HTTP; the reverse proxy terminates TLS. Set
-`-public-url` to the HTTPS origin before using accounts over the network.
+`http.publicURL` to the HTTPS origin before using accounts over the network.
 
 For common setup and upload problems, see [troubleshooting](troubleshooting.md).

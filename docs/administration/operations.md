@@ -7,13 +7,13 @@ process for each upload root; several processes sharing the same folders are
 not coordinated. Use a dedicated operating-system account with read and write
 access to the database directory and the upload root.
 
-For a service, use an absolute `-db` path and a fixed working directory. A
-different relative database path can create an empty database and trigger
-first-run setup again. Saved settings include an absolute upload directory.
-See [configuration](configuration.md) before relocating data.
+For a service, keep the configuration file in a fixed place, such as
+`/etc/pigeon/pigeon.json`, and use absolute paths in it. A relative database
+path resolved from another working directory can create an empty database and
+trigger first-run setup again. See [configuration](configuration.md) before
+relocating data.
 
-Pigeon logs its listen address, upload directory, and requests to standard
-error. `SIGINT` and `SIGTERM` allow active requests up to 10 seconds to finish
+Pigeon logs its listen address, storage, and requests to standard error. `SIGINT` and `SIGTERM` allow active requests up to 10 seconds to finish
 before shutdown. Give a service manager more than 10 seconds to stop it.
 
 ## What to back up
@@ -22,13 +22,14 @@ Keep a matching copy of both:
 
 | Data | Contents |
 | --- | --- |
-| SQLite database, selected with `-db` | Accounts, password hashes, roles, quotas, sessions, share token hashes, server settings, and deleted account records |
-| Upload root, saved through `-dir` | Each account's files and folders, plus any legacy shared-password uploads |
+| SQLite database, at `database.path` | Accounts, password hashes, roles, quotas, sessions, share token hashes, and deleted account records |
+| Upload root, at `storage.local.directory` | Each account's files and folders, plus any legacy shared-password uploads |
 
-Also keep your executable or its source revision and reverse proxy
-configuration. Treat backups as private: they contain uploaded files and
-account information. A restored database restores its saved account and link
-state, including links or accounts revoked after the backup was taken.
+Also keep the configuration file, your executable or its source revision, and
+the reverse proxy configuration. Treat backups as private: they contain
+uploaded files and account information. A restored database restores its saved
+account and link state, including links or accounts revoked after the backup
+was taken.
 
 ## Take a consistent backup
 
@@ -58,8 +59,8 @@ provided by `nix-shell` or can be installed separately.
    data directory. Do not mix the restored database with old `-wal` or `-shm`
    sidecars from another database.
 3. Give the service account access to the restored files and directories.
-4. Start Pigeon with the restored `-db` path. If the upload root moved, supply
-   `-dir /new/path/uploads` so the saved absolute path is updated.
+4. If the database or upload root moved, update `database.path` and
+   `storage.local.directory` in the configuration file. Start Pigeon with it.
 5. Check sign-in, a private download, an upload, and the administrator page.
 
 Test restores periodically in an isolated instance. Keep that instance bound
@@ -72,7 +73,8 @@ holds; revoke or replace links where needed after a restore.
 1. Back up the database and upload root together.
 2. Build the desired revision with the Go version declared in its `go.mod`.
 3. Stop the old process and replace its executable.
-4. Start with the same database path and verify the server and file operations.
+4. Start with the same configuration file and verify the server and file
+   operations.
 
 Database migrations run automatically at startup. Retain the pre-upgrade
 backup: an older binary may not understand a migrated database. A rollback
@@ -94,3 +96,7 @@ executable.
   defaults. Review the listener and [HTTPS configuration](deployment.md).
 - Earlier plaintext share tokens are converted to hashes on startup without
   changing working links.
+- Server settings came from command-line flags and were saved in the database.
+  They now come from the configuration file. The first start with it checks
+  the saved settings against the file and removes them once they match; see
+  [upgrading from command-line flags](configuration.md#upgrading-from-command-line-flags).

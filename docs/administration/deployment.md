@@ -19,29 +19,35 @@ IPv4 address or IPv6 /64 network. At most one password check per CPU runs at a
 time.
 
 Behind a reverse proxy, every request arrives from the proxy's address. List the
-proxy with `-trusted-proxies` so the server reads the client address from the
-`X-Forwarded-For` header the proxy sets. It accepts comma-separated IP addresses
-and CIDR ranges. The header is ignored on requests from any other address, so
-clients cannot spoof it. List only the proxies' own addresses: a client
-connecting from inside a trusted range could otherwise supply its own address.
-Like `-dir` and `-listen`, the value is saved; `-trusted-proxies=` clears it.
+proxy in `http.trustedProxies` so the server reads the client address from the
+`X-Forwarded-For` header the proxy sets. It accepts IP addresses and CIDR
+ranges. The header is ignored on requests from any other address, so clients
+cannot spoof it. List only the proxies' own addresses: a client connecting from
+inside a trusted range could otherwise supply its own address.
 
-```sh
-go run ./cmd/pigeon -listen 127.0.0.1:8080 -trusted-proxies 127.0.0.1,::1
+```json
+"http": {
+  "listenAddress": "127.0.0.1:8080",
+  "trustedProxies": ["127.0.0.1", "::1"]
+}
 ```
 
 ## Serving over HTTPS
 
 Passwords, passphrases, and session cookies must not cross a network
 unencrypted. Pigeon serves plain HTTP; put a TLS-terminating reverse proxy in
-front of it and tell Pigeon the address people use:
+front of it and tell Pigeon the address people use in its
+[configuration](configuration.md):
 
-```sh
-go run ./cmd/pigeon -listen 127.0.0.1:8080 \
-  -public-url https://files.example.com -trusted-proxies 127.0.0.1,::1
+```json
+"http": {
+  "listenAddress": "127.0.0.1:8080",
+  "publicURL": "https://files.example.com",
+  "trustedProxies": ["127.0.0.1", "::1"]
+}
 ```
 
-When `-public-url` uses HTTPS:
+When `http.publicURL` uses HTTPS:
 
 - every cookie is marked `Secure`;
 - every response sends `Strict-Transport-Security: max-age=31536000`, even
@@ -51,8 +57,8 @@ When `-public-url` uses HTTPS:
 
 HSTS covers only this host, not its subdomains. Once browsers have seen it, they
 refuse plain HTTP for the host for a year, so enable it only when HTTPS works.
-The setting is saved like the others; `-public-url=` clears it. The URL must be
-an origin without a path, because Pigeon's routes live at the root.
+The URL must be an origin without a path, because Pigeon's routes live at the
+root.
 
 [Caddy](https://caddyserver.com) obtains and renews certificates automatically.
 It keeps the `Host` header, replaces any client-supplied `X-Forwarded-For` with
