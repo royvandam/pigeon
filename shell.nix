@@ -10,5 +10,6 @@ pkgs.mkShell {
     sqlite
     nodejs
     gh
+    python3
   ];
 }
