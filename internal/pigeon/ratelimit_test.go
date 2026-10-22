@@ -6,12 +6,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"net/netip"
 	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/royvandam/pigeon/pkg/auth"
 )
 
 func basicRequest(remote, password string) *http.Request {
@@ -27,7 +28,7 @@ func limitedConfig(t *testing.T) config {
 	t.Helper()
 	cfg := newTestConfig(t, 100)
 	now := time.Now()
-	cfg.store.authLimiter.now = func() time.Time { return now }
+	cfg.authenticator = auth.NewAuthenticator(cfg.store.accounts, func() time.Time { return now })
 	return cfg
 }
 
@@ -36,7 +37,7 @@ func TestFailedPasswordChecksAreLimitedPerClient(t *testing.T) {
 	cfg := limitedConfig(t)
 	handler := newServer(cfg).Handler
 	attacker := "198.51.100.7:4000"
-	for i := range authAttemptBurst {
+	for i := range auth.AttemptBurst {
 		if w := serve(handler, basicRequest(attacker, "wrong-password")); w.Code != http.StatusUnauthorized {
 			t.Fatalf("attempt %d: %d", i+1, w.Code)
 		}
@@ -56,66 +57,21 @@ func TestFailedPasswordChecksAreLimitedPerClient(t *testing.T) {
 
 func TestSuccessfulPasswordChecksAreNotLimited(t *testing.T) {
 	t.Parallel()
-	cfg := newTestConfig(t, 100)
+	cfg := limitedConfig(t)
 	handler := newServer(cfg).Handler
-	for i := range authAttemptBurst + 2 {
+	for i := range auth.AttemptBurst + 2 {
 		if w := serve(handler, basicRequest("198.51.100.7:4000", testPassword)); w.Code != http.StatusOK {
 			t.Fatalf("API request %d with valid credentials: %d", i+1, w.Code)
 		}
 	}
-	if len(cfg.store.authLimiter.recovered) != 0 {
-		t.Fatalf("successful checks left limiter state: %v", cfg.store.authLimiter.recovered)
-	}
-}
-
-func TestPasswordAttemptsRecoverOverTime(t *testing.T) {
-	t.Parallel()
-	limiter := newAuthLimiter()
-	now := time.Unix(1_000_000, 0)
-	limiter.now = func() time.Time { return now }
-	for range authAttemptBurst {
-		if err := limiter.take("client"); err != nil {
-			t.Fatal(err)
+	// The client still has all of its attempts for wrong passwords.
+	for i := range auth.AttemptBurst {
+		if w := serve(handler, basicRequest("198.51.100.7:4000", "wrong-password")); w.Code != http.StatusUnauthorized {
+			t.Fatalf("failed attempt %d after successful ones: %d", i+1, w.Code)
 		}
 	}
-	var limited *tooManyAttemptsError
-	if err := limiter.take("client"); !errors.As(err, &limited) || limited.seconds() != 6 || limited.wait() != "6 seconds" {
-		t.Fatalf("exhausted client: %v", err)
-	}
-	now = now.Add(authAttemptInterval / 2)
-	if err := limiter.take("client"); !errors.As(err, &limited) || limited.seconds() != 3 {
-		t.Fatalf("half recovered: %v", err)
-	}
-	now = now.Add(authAttemptInterval/2 - time.Second)
-	if err := limiter.take("client"); !errors.As(err, &limited) || limited.wait() != "1 second" {
-		t.Fatalf("one second from recovery: %v", err)
-	}
-	now = now.Add(time.Second)
-	if err := limiter.take("client"); err != nil {
-		t.Fatalf("one attempt should have recovered: %v", err)
-	}
-	now = now.Add(authAttemptBurst * authAttemptInterval)
-	limiter.prune(now)
-	if len(limiter.recovered) != 0 {
-		t.Fatalf("recovered clients were not forgotten: %v", limiter.recovered)
-	}
-}
-
-func TestLimiterRefusesNewClientsWhenFull(t *testing.T) {
-	t.Parallel()
-	limiter := newAuthLimiter()
-	now := time.Unix(1_000_000, 0)
-	limiter.now = func() time.Time { return now }
-	for i := range authClientLimit {
-		limiter.recovered[netip.AddrFrom4([4]byte{10, byte(i >> 16), byte(i >> 8), byte(i)}).String()] = now.Add(authAttemptInterval)
-	}
-	var limited *tooManyAttemptsError
-	if err := limiter.take("new-client"); !errors.As(err, &limited) {
-		t.Fatalf("new client admitted beyond the tracking limit: %v", err)
-	}
-	now = now.Add(authAttemptInterval)
-	if err := limiter.take("new-client"); err != nil {
-		t.Fatalf("recovered clients should be pruned to admit new ones: %v", err)
+	if w := serve(handler, basicRequest("198.51.100.7:4000", "wrong-password")); w.Code != http.StatusTooManyRequests {
+		t.Fatalf("attempt beyond the limit: %d", w.Code)
 	}
 }
 
@@ -138,7 +94,7 @@ func TestLoginFormIsLimited(t *testing.T) {
 		r.RemoteAddr = "198.51.100.7:4000"
 		return serve(handler, r)
 	}
-	for i := range authAttemptBurst {
+	for i := range auth.AttemptBurst {
 		if w := login("wrong-password"); w.Code != http.StatusUnauthorized {
 			t.Fatalf("attempt %d: %d", i+1, w.Code)
 		}
@@ -147,24 +103,6 @@ func TestLoginFormIsLimited(t *testing.T) {
 	if w.Code != http.StatusTooManyRequests || w.Header().Get("Retry-After") == "" ||
 		!strings.Contains(w.Body.String(), "Too many sign-in attempts. Try again in 6 seconds.") {
 		t.Fatalf("limited sign-in: %d %v %s", w.Code, w.Header(), w.Body)
-	}
-}
-
-func TestPasswordCheckWaitsForCapacityAndReturnsAttemptOnCancel(t *testing.T) {
-	t.Parallel()
-	cfg := newTestConfig(t, 100)
-	limiter := cfg.store.authLimiter
-	for range cap(limiter.checks) {
-		limiter.checks <- struct{}{}
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
-	r := basicRequest("198.51.100.7:4000", testPassword).WithContext(ctx)
-	if _, err := cfg.checkPassword(r, "Test User", testPassword); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("check ran beyond the concurrency cap: %v", err)
-	}
-	if len(limiter.recovered) != 0 {
-		t.Fatalf("a canceled check used an attempt: %v", limiter.recovered)
 	}
 }
 
@@ -208,7 +146,7 @@ func TestForwardedClientsBehindTrustedProxyAreLimitedSeparately(t *testing.T) {
 		r.Header.Set("X-Forwarded-For", client)
 		return serve(handler, r).Code
 	}
-	for range authAttemptBurst {
+	for range auth.AttemptBurst {
 		request("198.51.100.7", "wrong-password")
 	}
 	if code := request("198.51.100.7", "wrong-password"); code != http.StatusTooManyRequests {
@@ -223,7 +161,7 @@ func TestIPv6ClientsShareTheirSlash64Limit(t *testing.T) {
 	t.Parallel()
 	cfg := limitedConfig(t)
 	handler := newServer(cfg).Handler
-	for i := range authAttemptBurst {
+	for i := range auth.AttemptBurst {
 		remote := fmt.Sprintf("[2001:db8:1:2::%x]:4000", i+1)
 		serve(handler, basicRequest(remote, "wrong-password"))
 	}

@@ -3,6 +3,7 @@ package pigeon
 import (
 	"net/http"
 
+	"github.com/royvandam/pigeon/pkg/auth"
 	"github.com/royvandam/pigeon/pkg/quota"
 )
 
@@ -23,7 +24,7 @@ func (cfg config) handleIndex(w http.ResponseWriter, r *http.Request) {
 	cfg.renderIndex(w, r, a, r.URL.Query().Get("dir"), messages[r.URL.Query().Get("result")], "", http.StatusOK)
 }
 
-func (cfg config) renderIndex(w http.ResponseWriter, r *http.Request, a authentication, directory, message, fileError string, status int) {
+func (cfg config) renderIndex(w http.ResponseWriter, r *http.Request, a auth.Authentication, directory, message, fileError string, status int) {
 	access, err := cfg.accessAccount(r.Context(), a.User)
 	if err != nil {
 		writeStorageError(w, err)

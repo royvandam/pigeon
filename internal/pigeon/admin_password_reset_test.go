@@ -42,7 +42,7 @@ func TestAdminGeneratesResetCredentials(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			var oldTokens []string
 			for range 2 {
-				token, err := cfg.store.createSession(ctx, target)
+				token, err := cfg.store.sessions.Create(ctx, target)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -78,14 +78,14 @@ func TestAdminGeneratesResetCredentials(t *testing.T) {
 				t.Fatal("reset credential was not stored as a bcrypt hash")
 			}
 			for _, token := range oldTokens {
-				if _, err := cfg.store.session(ctx, token); !errors.Is(err, account.ErrInvalidCredentials) {
+				if _, err := cfg.store.sessions.Lookup(ctx, token); !errors.Is(err, account.ErrInvalidCredentials) {
 					t.Fatalf("reset left an existing session valid: %v", err)
 				}
 			}
-			if _, err := cfg.store.createSession(ctx, target); !errors.Is(err, account.ErrInvalidCredentials) {
+			if _, err := cfg.store.sessions.Create(ctx, target); !errors.Is(err, account.ErrInvalidCredentials) {
 				t.Fatalf("reset accepted a login using the previous account version: %v", err)
 			}
-			if _, err := cfg.store.session(ctx, adminCookie.Value); err != nil {
+			if _, err := cfg.store.sessions.Lookup(ctx, adminCookie.Value); err != nil {
 				t.Fatalf("reset signed out the administrator of a different account: %v", err)
 			}
 			if download := publicDownload(cfg, http.MethodGet, link); download.Code != http.StatusOK || download.Body.String() != "preserved" {
@@ -112,7 +112,7 @@ func TestAdminSelfResetShowsCredentialsAfterSigningOut(t *testing.T) {
 		t.Fatal(err)
 	}
 	cookie, csrf := sessionFor(t, cfg, admin.Username)
-	otherToken, err := cfg.store.createSession(ctx, admin)
+	otherToken, err := cfg.store.sessions.Create(ctx, admin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,14 +132,14 @@ func TestAdminSelfResetShowsCredentialsAfterSigningOut(t *testing.T) {
 		t.Fatal("self-reset did not clear the session cookie or leaked the passphrase into headers")
 	}
 	for _, token := range []string{cookie.Value, otherToken} {
-		if _, err := cfg.store.session(ctx, token); !errors.Is(err, account.ErrInvalidCredentials) {
+		if _, err := cfg.store.sessions.Lookup(ctx, token); !errors.Is(err, account.ErrInvalidCredentials) {
 			t.Fatalf("self-reset preserved an existing session: %v", err)
 		}
 	}
 	if _, err := cfg.store.accounts.Authenticate(ctx, admin.Username, testPassword); !errors.Is(err, account.ErrInvalidCredentials) {
 		t.Fatal("self-reset preserved the previous password")
 	}
-	if _, err := cfg.store.createSession(ctx, admin); !errors.Is(err, account.ErrInvalidCredentials) {
+	if _, err := cfg.store.sessions.Create(ctx, admin); !errors.Is(err, account.ErrInvalidCredentials) {
 		t.Fatalf("self-reset accepted a login already in progress: %v", err)
 	}
 	for _, method := range []string{http.MethodGet, http.MethodPost} {
@@ -158,7 +158,7 @@ func TestAdminSelfResetShowsCredentialsAfterSigningOut(t *testing.T) {
 	if err != nil {
 		t.Fatalf("self-reset passphrase cannot sign in: %v", err)
 	}
-	if _, err := cfg.store.createSession(ctx, fresh); err != nil {
+	if _, err := cfg.store.sessions.Create(ctx, fresh); err != nil {
 		t.Fatalf("self-reset prevented signing in with the new credential: %v", err)
 	}
 }
@@ -180,7 +180,7 @@ func TestAdminRejectedResetsDoNotChangeOrDisplayCredentials(t *testing.T) {
 	}
 	adminCookie, csrf := sessionFor(t, cfg, admin.Username)
 	userCookie, userCSRF := sessionFor(t, cfg, "Test User")
-	a, err := cfg.store.session(ctx, userCookie.Value)
+	a, err := cfg.store.sessions.Lookup(ctx, userCookie.Value)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,7 +239,7 @@ WHEN OLD.user_id = ` + targetID + ` BEGIN SELECT RAISE(ABORT, 'session cleanup f
 	if !bytes.Equal(hash, originalHash) || version != a.User.Version {
 		t.Fatal("rejected resets or a rolled-back reset changed the password or version")
 	}
-	if _, err := cfg.store.session(ctx, userCookie.Value); err != nil {
+	if _, err := cfg.store.sessions.Lookup(ctx, userCookie.Value); err != nil {
 		t.Fatalf("rejected reset invalidated the existing session: %v", err)
 	}
 }

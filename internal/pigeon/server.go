@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/royvandam/pigeon/pkg/account"
+	"github.com/royvandam/pigeon/pkg/auth"
 	"github.com/royvandam/pigeon/pkg/quota"
 	"github.com/royvandam/pigeon/pkg/storage"
 )
@@ -30,6 +31,8 @@ type config struct {
 	locks   *account.Locks
 	usage   *quota.Cache
 	manager *account.Manager
+	// authenticator checks passwords and limits failed attempts.
+	authenticator *auth.Authenticator
 	// allocationUnit is the minimum quota charge per file and folder; zero
 	// selects quota.DefaultAllocationUnit. Tests use 1 to keep byte arithmetic exact.
 	allocationUnit int64

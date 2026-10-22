@@ -68,7 +68,7 @@ func TestPurgeRemovesUploadsAndCredentialsAndReleasesUsername(t *testing.T) {
 	if err := cfg.manager.Purge(ctx, administrator, u.ID); !errors.Is(err, account.ErrDeletedUserNotFound) {
 		t.Fatalf("repeated purge accepted an old ID: %v", err)
 	}
-	if _, err := cfg.store.createSession(ctx, u); !errors.Is(err, account.ErrInvalidCredentials) {
+	if _, err := cfg.store.sessions.Create(ctx, u); !errors.Is(err, account.ErrInvalidCredentials) {
 		t.Fatalf("purged identity could create a session: %v", err)
 	}
 }

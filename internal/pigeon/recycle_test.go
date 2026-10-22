@@ -58,10 +58,10 @@ func TestRecycleUserPreservesAccountAndRevokesPreviousAccess(t *testing.T) {
 			if _, err := cfg.store.accounts.Authenticate(ctx, old.Username, testPassword); !errors.Is(err, account.ErrInvalidCredentials) {
 				t.Fatalf("old password works after recycling: %v", err)
 			}
-			if _, err := cfg.store.session(ctx, cookie.Value); !errors.Is(err, account.ErrInvalidCredentials) {
+			if _, err := cfg.store.sessions.Lookup(ctx, cookie.Value); !errors.Is(err, account.ErrInvalidCredentials) {
 				t.Fatalf("old session works after recycling: %v", err)
 			}
-			if _, err := cfg.store.createSession(ctx, old); !errors.Is(err, account.ErrInvalidCredentials) {
+			if _, err := cfg.store.sessions.Create(ctx, old); !errors.Is(err, account.ErrInvalidCredentials) {
 				t.Fatalf("login started before deletion survived recycling: %v", err)
 			}
 			if _, err := cfg.store.accounts.Quota(ctx, old); !errors.Is(err, account.ErrInvalidCredentials) {

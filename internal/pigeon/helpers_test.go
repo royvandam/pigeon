@@ -22,6 +22,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/royvandam/pigeon/pkg/account"
+	"github.com/royvandam/pigeon/pkg/auth"
 	"github.com/royvandam/pigeon/pkg/quota"
 	"github.com/royvandam/pigeon/pkg/storage"
 	"github.com/royvandam/pigeon/pkg/storage/local"
@@ -56,7 +57,8 @@ func newTestConfig(t *testing.T, quotaBytes int64) config {
 	}
 	// A one-byte allocation unit keeps quota arithmetic in tests exact; tests of
 	// the production unit set allocationUnit explicitly.
-	cfg := config{dir: provider.Directory(), store: s, storage: provider, locks: account.NewLocks(), allocationUnit: 1}
+	cfg := config{dir: provider.Directory(), store: s, storage: provider, locks: account.NewLocks(),
+		authenticator: auth.NewAuthenticator(s.accounts, time.Now), allocationUnit: 1}
 	setUsageClock(&cfg, time.Now)
 	return cfg
 }
@@ -100,11 +102,11 @@ func sessionForPassword(t *testing.T, cfg config, username, password string) (*h
 	if err != nil {
 		t.Fatal(err)
 	}
-	token, err := cfg.store.createSession(context.Background(), u)
+	token, err := cfg.store.sessions.Create(context.Background(), u)
 	if err != nil {
 		t.Fatal(err)
 	}
-	a, err := cfg.store.session(context.Background(), token)
+	a, err := cfg.store.sessions.Lookup(context.Background(), token)
 	if err != nil {
 		t.Fatal(err)
 	}
