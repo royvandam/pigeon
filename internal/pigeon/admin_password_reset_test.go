@@ -29,7 +29,7 @@ func TestAdminGeneratesResetCredentials(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeStoredFile(t, cfg, target.Slug, "kept.txt", "preserved")
-	link, err := cfg.store.createShare(ctx, target, "kept.txt", false)
+	link, err := createShare(ctx, cfg, target, "kept.txt", false)
 	if err != nil {
 		t.Fatal(err)
 	}

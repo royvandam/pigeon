@@ -439,7 +439,7 @@ func TestPublicDownloadsRecheckRevocationAfterWaitingForStorageLock(t *testing.T
 		t.Fatalf("public download did not wait for storage: %d", w.Code)
 	case <-time.After(30 * time.Millisecond):
 	}
-	if err := cfg.store.revokeShare(ctx, u.ID, "readme.txt"); err != nil {
+	if err := cfg.store.shares.Revoke(ctx, u.ID, "readme.txt"); err != nil {
 		unlock()
 		t.Fatal(err)
 	}
