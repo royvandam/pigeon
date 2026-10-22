@@ -20,7 +20,7 @@ are relative to the authenticated user's storage root.
 Authenticate using HTTP Basic authentication with a username and password:
 
 ```sh
-curl --user 'Roy Van Dijk' --form 'file=@document.pdf' http://127.0.0.1:8080/upload
+curl --user 'Jane Doe' --form 'file=@document.pdf' http://127.0.0.1:8080/upload
 ```
 
 Curl prompts for the password and sends it with the first request. Requests
@@ -52,7 +52,7 @@ To preserve a directory hierarchy, set each part's
 filename to its slash-separated relative path:
 
 ```sh
-curl --user 'Roy Van Dijk' \
+curl --user 'Jane Doe' \
   --form 'file=@project/readme.txt;filename=project/readme.txt' \
   --form 'file=@project/docs/guide.pdf;filename=project/docs/guide.pdf' \
   http://127.0.0.1:8080/upload
@@ -112,7 +112,7 @@ support byte ranges; directory ZIPs are generated as they stream.
 Use query encoding when paths contain spaces or other special characters:
 
 ```sh
-curl --fail-with-body --user 'Roy Van Dijk' --get \
+curl --fail-with-body --user 'Jane Doe' --get \
   --data-urlencode 'path=Archive/docs/report.pdf' \
   --output report.pdf http://127.0.0.1:8080/download
 ```
@@ -132,7 +132,7 @@ is not supported.
 For example, create a link to an existing file:
 
 ```sh
-curl --fail-with-body --user 'Roy Van Dijk' \
+curl --fail-with-body --user 'Jane Doe' \
   --data-urlencode 'action=create' \
   --data-urlencode 'path=Archive/docs/report.pdf' \
   http://127.0.0.1:8080/shares
@@ -168,9 +168,9 @@ destinations with HTTP 409. The user root cannot be renamed, moved, or deleted.
 For example, create a destination and upload there:
 
 ```sh
-curl --user 'Roy Van Dijk' --data-urlencode 'action=mkdir' \
+curl --user 'Jane Doe' --data-urlencode 'action=mkdir' \
   --data-urlencode 'name=Archive' http://127.0.0.1:8080/files
-curl --user 'Roy Van Dijk' --form 'file=@document.pdf' \
+curl --user 'Jane Doe' --form 'file=@document.pdf' \
   'http://127.0.0.1:8080/upload?dir=Archive'
 ```
 
@@ -188,7 +188,7 @@ The header is optional for clients that do not need progress.
 For example, start an upload with a fresh ID:
 
 ```sh
-curl --fail-with-body --user 'Roy Van Dijk' \
+curl --fail-with-body --user 'Jane Doe' \
   --header 'X-Upload-ID: example-upload-0001' \
   --form 'file=@document.pdf' http://127.0.0.1:8080/upload
 ```
@@ -196,7 +196,7 @@ curl --fail-with-body --user 'Roy Van Dijk' \
 While it runs, poll from another terminal with the same account:
 
 ```sh
-curl --fail-with-body --user 'Roy Van Dijk' --get \
+curl --fail-with-body --user 'Jane Doe' --get \
   --data-urlencode 'id=example-upload-0001' \
   http://127.0.0.1:8080/upload-progress
 ```
