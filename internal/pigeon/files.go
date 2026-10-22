@@ -64,7 +64,7 @@ func (cfg config) handleFiles(w http.ResponseWriter, r *http.Request) {
 				}
 				change = -removed
 			}
-			return cfg.store.revokePathShares(r.Context(), a.User.ID, source)
+			return cfg.store.shares.RevokePath(r.Context(), a.User.ID, source)
 		})
 	}
 	if err != nil && mutating {

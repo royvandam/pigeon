@@ -12,12 +12,14 @@ import (
 	"github.com/royvandam/pigeon/pkg/account"
 	"github.com/royvandam/pigeon/pkg/auth"
 	"github.com/royvandam/pigeon/pkg/database"
+	"github.com/royvandam/pigeon/pkg/share"
 )
 
 type store struct {
 	db       *sql.DB
 	accounts *account.Store
 	sessions *auth.Sessions
+	shares   *share.Store
 	progress sync.Map
 }
 
@@ -58,7 +60,7 @@ func openStore(ctx context.Context, path string, passwordCost int) (*store, erro
 		db.Close()
 		return nil, err
 	}
-	s := &store{db: db, accounts: accounts, sessions: auth.NewSessions(db)}
+	s := &store{db: db, accounts: accounts, sessions: auth.NewSessions(db), shares: share.NewStore(db)}
 	if err := s.initializeSettings(ctx); err != nil {
 		db.Close()
 		return nil, err

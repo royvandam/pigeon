@@ -313,3 +313,9 @@ func diskUsage(ctx context.Context, dir string, unit int64) (int64, error) {
 	}
 	return userStorage{provider: provider, slug: filepath.Base(dir), unit: unit}.usage(ctx)
 }
+
+// createShare creates a link for u's item at name and returns its URL path.
+func createShare(ctx context.Context, cfg config, u account.User, name string, directory bool) (string, error) {
+	secret, err := cfg.store.shares.Create(ctx, u, name, directory)
+	return "/s/" + secret, err
+}

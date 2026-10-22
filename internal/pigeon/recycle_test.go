@@ -67,7 +67,7 @@ func TestRecycleUserPreservesAccountAndRevokesPreviousAccess(t *testing.T) {
 			if _, err := cfg.store.accounts.Quota(ctx, old); !errors.Is(err, account.ErrInvalidCredentials) {
 				t.Fatalf("request started before deletion survived recycling: %v", err)
 			}
-			if _, err := cfg.store.createShare(ctx, old, "project/readme.txt", false); !errors.Is(err, account.ErrInvalidCredentials) {
+			if _, err := createShare(ctx, cfg, old, "project/readme.txt", false); !errors.Is(err, account.ErrInvalidCredentials) {
 				t.Fatalf("stale account can create a share: %v", err)
 			}
 			if w := publicDownload(cfg, http.MethodGet, link); w.Code != http.StatusNotFound {
@@ -82,7 +82,7 @@ func TestRecycleUserPreservesAccountAndRevokesPreviousAccess(t *testing.T) {
 			if data, err := os.ReadFile(filepath.Join(cfg.dir, fresh.Slug, "project/readme.txt")); err != nil || string(data) != "preserved" {
 				t.Fatalf("recycling changed uploads: %q, %v", data, err)
 			}
-			newLink, err := cfg.store.createShare(ctx, fresh, "project/readme.txt", false)
+			newLink, err := createShare(ctx, cfg, fresh, "project/readme.txt", false)
 			if err != nil || newLink == link {
 				t.Fatalf("new share reused an old token: %q, %v", newLink, err)
 			}

@@ -12,6 +12,7 @@ pkg/account/        Accounts, passwords, account locks, and lifecycle changes
 pkg/auth/           Sign-in sessions and rate-limited password checks
 pkg/database/       SQLite connection and schema migrations
 pkg/quota/          Quota rules, usage measurement, and the usage cache
+pkg/share/          Public download links
 pkg/storage/        Storage provider interfaces and path rules
   local/            Storage provider for the local filesystem
 web/                Embedded templates and browser assets
@@ -98,6 +99,14 @@ and `auth.ClientKey` groups IPv6 clients by their /64 network.
 `auth.Sessions` stores browser sessions as hashes of their tokens, each with a
 CSRF token. A session lasts 12 hours and ends when the account is deleted or
 its password changes.
+
+## Share links
+
+`pkg/share` stores public download links. Only a hash of each token is kept,
+so a leaked database or backup yields no working links. Creating a link for an
+item replaces its previous one, and renaming, moving, or deleting an item
+revokes the links for it and everything below it before the path changes, so a
+reused path never revives an old link. Links of deleted accounts stop working.
 
 ## Request and storage ownership
 
