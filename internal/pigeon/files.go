@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/royvandam/pigeon/pkg/quota"
 	"github.com/royvandam/pigeon/pkg/storage"
 )
 
@@ -57,7 +58,7 @@ func (cfg config) handleFiles(w http.ResponseWriter, r *http.Request) {
 			mutating = true
 			if action == "delete" {
 				// Measure what the deletion frees while the item still exists.
-				removed, err := measureUsage(r.Context(), tree, source, access.Files.unit)
+				removed, err := quota.Measure(r.Context(), tree, source, access.Files.unit)
 				if err != nil {
 					return err
 				}

@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/royvandam/pigeon/pkg/quota"
 )
 
 func TestAdminUserRecycling(t *testing.T) {
@@ -137,7 +139,7 @@ func TestAdminGeneratesUserCredentials(t *testing.T) {
 		admin       bool
 		quotaBytes  int64
 	}{
-		{name: "default quota", quotaBytes: defaultUserQuota},
+		{name: "default quota", quotaBytes: quota.DefaultQuota},
 		{name: "custom quota and administrator", quota: "2GB", admin: true, quotaBytes: 2 << 30},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

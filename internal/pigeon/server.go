@@ -26,7 +26,7 @@ type config struct {
 	store   *store
 	storage storage.Provider
 	// allocationUnit is the minimum quota charge per file and folder; zero
-	// selects defaultAllocationUnit. Tests use 1 to keep byte arithmetic exact.
+	// selects quota.DefaultAllocationUnit. Tests use 1 to keep byte arithmetic exact.
 	allocationUnit int64
 	// formReadTimeout and uploadIdleTimeout limit slow request bodies; zero
 	// selects the defaults in deadline.go.

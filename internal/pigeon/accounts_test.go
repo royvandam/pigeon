@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/royvandam/pigeon/pkg/quota"
 )
 
 func TestAccountManagerRequiresAdministrator(t *testing.T) {
@@ -15,7 +17,7 @@ func TestAccountManagerRequiresAdministrator(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, action := range []string{"create", "delete", "reset", "quota", "recycle", "purge"} {
-		change, err := cfg.accounts().apply(ctx, u, accountCommand{action: action, id: u.ID, username: "Unauthorized", quota: defaultUserQuota})
+		change, err := cfg.accounts().apply(ctx, u, accountCommand{action: action, id: u.ID, username: "Unauthorized", quota: quota.DefaultQuota})
 		if !errors.Is(err, errAdministratorRequired) || change.Credentials != nil || change.ActorPasswordChanged {
 			t.Fatalf("regular user could perform %s: %#v %v", action, change, err)
 		}

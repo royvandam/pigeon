@@ -28,7 +28,7 @@ func (s *store) purgeUser(ctx context.Context, id int64, removeUploads func(stri
 		return err
 	}
 	err = removeUploads(slug)
-	s.usage.forget(id) // Even a failed removal may have deleted some files.
+	s.usage.Forget(id) // Even a failed removal may have deleted some files.
 	if err != nil {
 		return err
 	}

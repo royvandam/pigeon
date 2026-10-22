@@ -7,6 +7,7 @@ The repository uses the applicable directory conventions from
 cmd/pigeon/         Executable entry point and signal handling
 internal/pigeon/    Private application code and Go tests
   wordlists/        Embedded passphrase dictionary and attribution
+pkg/quota/          Quota rules, usage measurement, and the usage cache
 pkg/storage/        Storage provider interfaces and path rules
   local/            Storage provider for the local filesystem
 web/                Embedded templates and browser assets
@@ -45,6 +46,16 @@ to their item when it is moved, so downloads can stream after the account lock
 is released. At startup, `RemoveStaleUploads` deletes staging folders left by a
 crash. Another backend, such as object storage, implements the same interfaces.
 
+## Quotas and usage
+
+`pkg/quota` holds the quota rules. Every file and folder is charged at least
+one allocation unit, 4 KiB by default, and file sizes are rounded up to whole
+units. `quota.Measure` walks a storage tree to compute an account's usage, and
+`quota.Cache` keeps each account's usage up to date so requests need not walk
+it again: callers hold the account lock while they read or change an entry,
+and entries are measured again after 10 minutes so changes made directly in
+storage still show.
+
 ## Request and storage ownership
 
 Account changes are coordinated by `accountManager` in `accounts.go`; the SQLite
@@ -76,8 +87,8 @@ embedded EFF word list. Its source and license are documented in
 `upload.go` serve user management, the explorer page, and the upload endpoint.
 `files.go` handles explorer requests, and `download.go` serves files and ZIP
 archives. `upload_files.go` streams and publishes batches. `server.go` handles
-routing and shutdown; `quota.go` enforces quotas, and `storage_usage.go` measures
-usage. `upload_progress.go` tracks uploads and serves authenticated progress
+routing and shutdown, and `quota.go` checks and changes account quotas.
+`upload_progress.go` tracks uploads and serves authenticated progress
 snapshots.
 Size and filename helpers remain separate.
 SIGINT and SIGTERM allow active requests up to 10 seconds to finish.

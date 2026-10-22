@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io/fs"
 
+	"github.com/royvandam/pigeon/pkg/quota"
 	"github.com/royvandam/pigeon/pkg/storage"
 )
 
@@ -20,7 +21,7 @@ type userStorage struct {
 func (cfg config) filesFor(u user) userStorage {
 	unit := cfg.allocationUnit
 	if unit <= 0 {
-		unit = defaultAllocationUnit
+		unit = quota.DefaultAllocationUnit
 	}
 	return userStorage{provider: cfg.storage, slug: u.Slug, unit: unit}
 }
@@ -40,7 +41,7 @@ func (files userStorage) usage(ctx context.Context) (int64, error) {
 		return 0, err
 	}
 	defer tree.Close()
-	return measureUsage(ctx, tree, "", files.unit)
+	return quota.Measure(ctx, tree, "", files.unit)
 }
 
 func (files userStorage) purge(ctx context.Context) error {

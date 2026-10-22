@@ -4,28 +4,19 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
-	"math"
 	"net/http"
 	"strconv"
 	"sync"
+
+	"github.com/royvandam/pigeon/pkg/quota"
 )
 
-const defaultUserQuota = int64(1 << 30)
-
-func validateQuota(quota int64) error {
-	if quota <= 0 || quota > math.MaxInt64-multipartOverhead {
-		return fmt.Errorf("quota must be positive and allow for multipart overhead")
-	}
-	return nil
-}
-
 func parseQuota(value string) (int64, error) {
-	quota, err := parseSize(value)
+	bytes, err := parseSize(value)
 	if err != nil {
 		return 0, err
 	}
-	return quota, validateQuota(quota)
+	return bytes, quota.Validate(bytes)
 }
 
 // Serialize account storage access and lifecycle changes. Uploads hold this lock
@@ -68,19 +59,19 @@ func lockAccount(ctx context.Context, locks *sync.Map, id int64) (func(), error)
 }
 
 func (s *store) userQuota(ctx context.Context, u user) (int64, error) {
-	var quota int64
-	err := s.db.QueryRowContext(ctx, `SELECT quota_bytes FROM users WHERE id = ? AND auth_version = ? AND deleted_at IS NULL`, u.ID, u.Version).Scan(&quota)
+	var bytes int64
+	err := s.db.QueryRowContext(ctx, `SELECT quota_bytes FROM users WHERE id = ? AND auth_version = ? AND deleted_at IS NULL`, u.ID, u.Version).Scan(&bytes)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, errInvalidCredentials
 	}
 	if err != nil {
 		return 0, err
 	}
-	return quota, validateQuota(quota)
+	return bytes, quota.Validate(bytes)
 }
 
-func (s *store) setQuota(ctx context.Context, id, quota int64) error {
-	if err := validateQuota(quota); err != nil {
+func (s *store) setQuota(ctx context.Context, id, bytes int64) error {
+	if err := quota.Validate(bytes); err != nil {
 		return err
 	}
 	unlock, err := s.lockUploads(ctx, id)
@@ -88,7 +79,7 @@ func (s *store) setQuota(ctx context.Context, id, quota int64) error {
 		return err
 	}
 	defer unlock()
-	result, err := s.db.ExecContext(ctx, `UPDATE users SET quota_bytes = ? WHERE id = ? AND deleted_at IS NULL`, quota, id)
+	result, err := s.db.ExecContext(ctx, `UPDATE users SET quota_bytes = ? WHERE id = ? AND deleted_at IS NULL`, bytes, id)
 	if err != nil {
 		return err
 	}
@@ -100,13 +91,6 @@ func (s *store) setQuota(ctx context.Context, id, quota int64) error {
 		return errUserNotFound
 	}
 	return nil
-}
-
-func remainingQuota(quota, used int64) int64 {
-	if used >= quota {
-		return 0
-	}
-	return quota - used
 }
 
 func quotaInput(quota int64) string {
@@ -121,8 +105,8 @@ func quotaInput(quota int64) string {
 	return ""
 }
 
-func setQuotaHeaders(w http.ResponseWriter, quota, used int64) {
-	w.Header().Set("X-Quota-Limit", strconv.FormatInt(quota, 10))
+func setQuotaHeaders(w http.ResponseWriter, limit, used int64) {
+	w.Header().Set("X-Quota-Limit", strconv.FormatInt(limit, 10))
 	w.Header().Set("X-Quota-Used", strconv.FormatInt(used, 10))
-	w.Header().Set("X-Quota-Remaining", strconv.FormatInt(remainingQuota(quota, used), 10))
+	w.Header().Set("X-Quota-Remaining", strconv.FormatInt(quota.Remaining(limit, used), 10))
 }

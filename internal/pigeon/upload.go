@@ -9,9 +9,12 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+
+	"github.com/royvandam/pigeon/pkg/quota"
 )
 
-const multipartOverhead = int64(10 << 20)
+// multipartOverhead allows for the framing of an upload beyond its files.
+const multipartOverhead = quota.Headroom
 
 func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 	if !allowMethods(w, r, http.MethodPost) {
@@ -63,7 +66,7 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer access.close()
 	progress.setState("preparing")
-	quota := access.QuotaBytes
+	limit := access.QuotaBytes
 	files := access.Files
 	tree, err := files.open(r.Context())
 	if err != nil {
@@ -76,8 +79,8 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to check storage usage", http.StatusInternalServerError)
 		return
 	}
-	remaining := remainingQuota(quota, used)
-	setQuotaHeaders(w, quota, used)
+	remaining := quota.Remaining(limit, used)
+	setQuotaHeaders(w, limit, used)
 	if remaining < files.unit {
 		http.Error(w, "disk quota exhausted", http.StatusRequestEntityTooLarge)
 		return
@@ -131,7 +134,7 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := batch.add(r.Context(), name, part); err != nil {
-			if errors.Is(err, errDiskQuotaExceeded) {
+			if errors.Is(err, quota.ErrExceeded) {
 				http.Error(w, fmt.Sprintf("disk quota exceeded (%s available)", humanBytes(remaining)), http.StatusRequestEntityTooLarge)
 			} else {
 				var fileErr *os.PathError
@@ -163,7 +166,7 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer access.close()
-	quota = access.QuotaBytes
+	limit = access.QuotaBytes
 	used, err = access.used(r.Context()) // Staging folders are never counted.
 	if err != nil {
 		http.Error(w, "failed to check storage usage", http.StatusInternalServerError)
@@ -174,9 +177,9 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 		writeStorageError(w, err)
 		return
 	}
-	setQuotaHeaders(w, quota, used)
-	if remainingQuota(quota, used) < charged {
-		http.Error(w, fmt.Sprintf("disk quota exceeded (%s available)", humanBytes(remainingQuota(quota, used))), http.StatusRequestEntityTooLarge)
+	setQuotaHeaders(w, limit, used)
+	if quota.Remaining(limit, used) < charged {
+		http.Error(w, fmt.Sprintf("disk quota exceeded (%s available)", humanBytes(quota.Remaining(limit, used))), http.StatusRequestEntityTooLarge)
 		return
 	}
 	savedName, group, err := batch.publish(r.Context())
@@ -189,7 +192,7 @@ func (cfg config) handleUpload(w http.ResponseWriter, r *http.Request) {
 	progress.setState("complete")
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	setQuotaHeaders(w, quota, used+charged)
+	setQuotaHeaders(w, limit, used+charged)
 	fmt.Fprintf(w, "ok\nsaved_as=%s\nbytes=%d\n", savedName, batch.bytes)
 	if group {
 		fmt.Fprintf(w, "files=%d\n", batch.files)

@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/royvandam/pigeon/pkg/quota"
 )
 
 type adminPage struct {
@@ -81,7 +83,7 @@ func (cfg config) storedUsage(ctx context.Context, u user) (int64, error) {
 		return 0, err
 	}
 	defer release()
-	return cfg.store.usage.usage(ctx, u.ID, cfg.filesFor(u))
+	return cfg.store.usage.Usage(ctx, u.ID, cfg.filesFor(u).usage)
 }
 
 func (cfg config) handleAdmin(w http.ResponseWriter, r *http.Request) {
@@ -154,7 +156,7 @@ func parseAccountCommand(form url.Values) (accountCommand, error) {
 	case "create":
 		command.username = form.Get("username")
 		command.administrator = form.Get("admin") == "on"
-		command.quota = defaultUserQuota
+		command.quota = quota.DefaultQuota
 		if value := strings.TrimSpace(form.Get("quota")); value != "" {
 			quota, err := parseQuota(value)
 			if err != nil {
