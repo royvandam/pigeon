@@ -11,10 +11,13 @@ import (
 
 	"golang.org/x/term"
 
+	"github.com/royvandam/pigeon/internal/size"
 	"github.com/royvandam/pigeon/pkg/account"
 	"github.com/royvandam/pigeon/pkg/auth"
 	"github.com/royvandam/pigeon/pkg/files"
 	"github.com/royvandam/pigeon/pkg/quota"
+	"github.com/royvandam/pigeon/pkg/server"
+	"github.com/royvandam/pigeon/pkg/share"
 	"github.com/royvandam/pigeon/pkg/storage/local"
 )
 
@@ -24,7 +27,7 @@ func Run(ctx context.Context, args []string) error {
 	var (
 		database = flags.String("db", "./pigeon.db", "SQLite database for users and server settings")
 		dir      = flags.String("dir", "", "Set and persist the upload directory (initial default: ./uploads)")
-		listen   = flags.String("listen", "", "Set and persist the listen address (initial default: "+defaultListen+")")
+		listen   = flags.String("listen", "", "Set and persist the listen address (initial default: "+server.DefaultListenAddress+")")
 		proxies  = flags.String("trusted-proxies", "", "Set and persist comma-separated reverse proxy addresses or CIDR ranges whose X-Forwarded-For header identifies clients; an empty value clears them")
 		public   = flags.String("public-url", "", "Set and persist the origin people use, such as https://files.example.com; HTTPS makes cookies Secure and enables HSTS; an empty value clears it")
 	)
@@ -84,33 +87,22 @@ func Run(ctx context.Context, args []string) error {
 		log.Printf("warning: could not remove every unfinished upload: %v", err)
 	}
 
-	trustedProxies, err := parseTrustedProxies(settings.trustedProxies)
-	if err != nil {
-		return err
-	}
-	publicURL, err := parsePublicURL(settings.publicURL)
-	if err != nil {
-		return err
-	}
 	locks, usage := account.NewLocks(), quota.NewCache(time.Now)
-	fileService := files.NewService(provider, s.accounts, locks, usage, s.shares, quota.DefaultAllocationUnit)
-	cfg := config{dir: settings.dir, listen: settings.listen, store: s, storage: provider, locks: locks, usage: usage,
-		manager: account.NewManager(s.accounts, locks, usage, provider), authenticator: auth.NewAuthenticator(s.accounts, time.Now),
-		files: fileService, trustedProxies: trustedProxies, publicURL: publicURL}
-	log.Printf("listening on http://%s", cfg.listen)
-	if publicURL != nil {
-		log.Printf("public URL: %s", publicURL)
+	sessions, shares := auth.NewSessions(s.db), share.NewStore(s.db)
+	srv, err := server.New(settings.server(), server.Dependencies{
+		Accounts:      s.accounts,
+		Manager:       account.NewManager(s.accounts, locks, usage, provider),
+		Authenticator: auth.NewAuthenticator(s.accounts, time.Now),
+		Sessions:      sessions,
+		Shares:        shares,
+		Files:         files.NewService(provider, s.accounts, locks, usage, shares, quota.DefaultAllocationUnit),
+	})
+	if err != nil {
+		return err
 	}
-	if warning := plainHTTPWarning(cfg.listen, publicURL); warning != "" {
-		log.Print(warning)
-	}
-	if len(trustedProxies) > 0 {
-		log.Printf("trusted proxies: %s", settings.trustedProxies)
-	}
-	log.Printf("upload dir: %s", cfg.dir)
-	log.Printf("default user quota: %s", humanBytes(quota.DefaultQuota))
-
-	if err := runServer(ctx, newServer(cfg)); err != nil {
+	log.Printf("upload dir: %s", provider.Directory())
+	log.Printf("default user quota: %s", size.Format(quota.DefaultQuota))
+	if err := srv.Run(ctx); err != nil {
 		return fmt.Errorf("server error: %w", err)
 	}
 	return nil

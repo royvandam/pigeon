@@ -1,0 +1,36 @@
+package server
+
+import (
+	"net/http"
+	"strconv"
+
+	"github.com/royvandam/pigeon/internal/size"
+	"github.com/royvandam/pigeon/pkg/files"
+	"github.com/royvandam/pigeon/pkg/quota"
+)
+
+func parseQuota(value string) (int64, error) {
+	bytes, err := size.Parse(value)
+	if err != nil {
+		return 0, err
+	}
+	return bytes, quota.Validate(bytes)
+}
+
+func quotaInput(quota int64) string {
+	for _, unit := range []struct {
+		bytes int64
+		name  string
+	}{{1 << 40, "TB"}, {1 << 30, "GB"}, {1 << 20, "MB"}, {1 << 10, "KB"}, {1, "B"}} {
+		if quota%unit.bytes == 0 {
+			return strconv.FormatInt(quota/unit.bytes, 10) + unit.name
+		}
+	}
+	return ""
+}
+
+func setQuotaHeaders(w http.ResponseWriter, usage files.Usage) {
+	w.Header().Set("X-Quota-Limit", strconv.FormatInt(usage.Quota, 10))
+	w.Header().Set("X-Quota-Used", strconv.FormatInt(usage.Used, 10))
+	w.Header().Set("X-Quota-Remaining", strconv.FormatInt(usage.Remaining(), 10))
+}
