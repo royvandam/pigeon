@@ -27,3 +27,15 @@ updates:
     groups:
       github-actions:
         patterns: ["*"]
+
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: docs
+    groups:
+      documentation:
+        patterns: ["*"]

@@ -1,0 +1,84 @@
+site_name: Pigeon
+site_description: Self-hosted file sharing with individual accounts and disk quotas.
+site_url: https://royvandam.github.io/pigeon/
+repo_url: https://github.com/royvandam/pigeon
+repo_name: royvandam/pigeon
+edit_uri: edit/main/docs/
+docs_dir: docs
+site_dir: site
+strict: true
+
+theme:
+  name: material
+  language: en
+  logo: assets/logo.webp
+  favicon: assets/logo.webp
+  font: false
+  icon:
+    repo: fontawesome/brands/github
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: white
+      accent: teal
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: teal
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - search.highlight
+    - search.suggest
+    - content.code.copy
+
+plugins:
+  - search
+
+markdown_extensions:
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences
+
+validation:
+  nav:
+    omitted_files: warn
+    not_found: warn
+  links:
+    not_found: warn
+    anchors: warn
+    unrecognized_links: warn
+
+nav:
+  - Overview: index.md
+  - Installation: getting-started.md
+  - User guide:
+      - Files and uploads: guide/files.md
+      - Sharing downloads: guide/sharing.md
+  - Administration:
+      - Configuration: administration/configuration.md
+      - HTTPS and reverse proxies: administration/deployment.md
+      - Accounts: administration/accounts.md
+      - Disk quotas: administration/quotas.md
+      - Backups and upgrades: administration/operations.md
+      - Security: administration/security.md
+  - HTTP API: reference/api.md
+  - Troubleshooting: troubleshooting.md
+  - Development:
+      - Contributing: development/contributing.md
+      - Architecture: development/architecture.md
+      - VS Code over SSH: development/editor.md
+      - Documentation: development/documentation.md
+  - Audits:
+      - Review archive: audit/README.md
+      - Security (2026-10-17): audit/2026-10-17-security.md
+      - Code quality (2026-10-20): audit/2026-10-20-quality.md
