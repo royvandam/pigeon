@@ -13,9 +13,35 @@ import (
 	"github.com/royvandam/pigeon/pkg/storage"
 )
 
-// tree is a namespace, or a folder in one, opened through an os.Root.
+// tree is a namespace, or a folder in one, opened through an os.Root. base is
+// the folder's path in its namespace, or "" for the namespace itself.
 type tree struct {
 	root *os.Root
+	base string
+}
+
+// namespacePath returns the path that name has in the namespace. It joins
+// without cleaning, so validation still sees every element of name.
+func (t *tree) namespacePath(name string) string {
+	switch {
+	case t.base == "":
+		return name
+	case name == "":
+		return t.base
+	default:
+		return t.base + "/" + name
+	}
+}
+
+// validate checks name as the path it has in the namespace. Some rules of
+// storage.ValidatePath depend on where a path starts, such as the one against
+// Windows drive letters, so checking name on its own would reject items in a
+// folder that the namespace accepts. The top folder, "", is never valid.
+func (t *tree) validate(name string) error {
+	if name == "" {
+		return storage.ValidatePath(name)
+	}
+	return storage.ValidatePath(t.namespacePath(name))
 }
 
 func native(name string) string {
@@ -32,7 +58,7 @@ func (t *tree) stat(name string) (fs.FileInfo, error) {
 	if name == "" {
 		return t.root.Stat(".")
 	}
-	if err := storage.ValidatePath(name); err != nil {
+	if err := t.validate(name); err != nil {
 		return nil, err
 	}
 	var info fs.FileInfo
@@ -167,11 +193,11 @@ func (t *tree) Sub(ctx context.Context, dir string) (storage.Tree, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &tree{root: root}, nil
+	return &tree{root: root, base: t.namespacePath(dir)}, nil
 }
 
 func (t *tree) Mkdir(ctx context.Context, name string) error {
-	if err := storage.ValidatePath(name); err != nil {
+	if err := t.validate(name); err != nil {
 		return err
 	}
 	if err := t.requireAbsent(name); err != nil {
@@ -182,7 +208,7 @@ func (t *tree) Mkdir(ctx context.Context, name string) error {
 
 func (t *tree) Rename(ctx context.Context, oldName, newName string) error {
 	for _, name := range []string{oldName, newName} {
-		if err := storage.ValidatePath(name); err != nil {
+		if err := t.validate(name); err != nil {
 			return err
 		}
 	}
@@ -196,7 +222,7 @@ func (t *tree) Rename(ctx context.Context, oldName, newName string) error {
 }
 
 func (t *tree) RemoveAll(ctx context.Context, name string) error {
-	if err := storage.ValidatePath(name); err != nil {
+	if err := t.validate(name); err != nil {
 		return err // Protects the top folder from recursive deletion.
 	}
 	if _, err := t.stat(name); err != nil {
