@@ -405,3 +405,70 @@ func TestUploadsPublishAllFilesOrNone(t *testing.T) {
 		t.Fatalf("published file: %q, %v", data, err)
 	}
 }
+
+// Only the first element of a namespace path may not look like a Windows
+// drive, so a folder must check names as paths in the namespace.
+func TestSubtreesAcceptTheNamesOfTheirNamespace(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	p := newTestProvider(t)
+	tree := createTree(t, p, "alice")
+	writeFile(t, p.Directory(), "alice/project/C:notes.txt", "payload")
+	writeFile(t, p.Directory(), "alice/project/D:deeper/z.txt", "later file")
+	if _, err := tree.Stat(ctx, "project/C:notes.txt"); err != nil {
+		t.Fatalf("namespace path: %v", err)
+	}
+	project, err := tree.Sub(ctx, "project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer project.Close()
+	if got := walked(t, project, ""); !slices.Equal(got, []string{"", "C:notes.txt", "D:deeper", "D:deeper/z.txt"}) {
+		t.Fatalf("walk = %q", got)
+	}
+	file, err := project.Open(ctx, "C:notes.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := io.ReadAll(file)
+	file.Close()
+	if err != nil || string(data) != "payload" {
+		t.Fatalf("contents = %q, %v", data, err)
+	}
+	deeper, err := project.Sub(ctx, "D:deeper")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer deeper.Close()
+	if _, err := deeper.Stat(ctx, "z.txt"); err != nil {
+		t.Fatalf("nested folder: %v", err)
+	}
+	if err := project.Mkdir(ctx, "E:new"); err != nil {
+		t.Fatalf("new folder in a subtree: %v", err)
+	}
+	if err := project.Rename(ctx, "E:new", "F:renamed"); err != nil {
+		t.Fatalf("rename in a subtree: %v", err)
+	}
+	if err := project.RemoveAll(ctx, "F:renamed"); err != nil {
+		t.Fatalf("removal in a subtree: %v", err)
+	}
+	// The namespace rules still apply in full: at the top of the namespace,
+	// and to every element in a subtree.
+	if err := tree.Mkdir(ctx, "C:top"); !errors.Is(err, storage.ErrInvalidPath) {
+		t.Fatalf("a drive-like name at the top: %v", err)
+	}
+	for _, name := range []string{"../escape", "./a", "a//b", ".upload-1", "x/.upload-1"} {
+		if _, err := project.Stat(ctx, name); !errors.Is(err, storage.ErrInvalidPath) {
+			t.Errorf("Stat(%q) in a subtree = %v", name, err)
+		}
+	}
+	for _, remove := range []func() error{
+		func() error { return project.RemoveAll(ctx, "") },
+		func() error { return project.Rename(ctx, "", "moved") },
+		func() error { return project.Mkdir(ctx, "") },
+	} {
+		if err := remove(); !errors.Is(err, storage.ErrInvalidPath) {
+			t.Errorf("changed the top of a subtree: %v", err)
+		}
+	}
+}

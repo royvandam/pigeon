@@ -4,7 +4,7 @@
 // a Tree of folders and regular files. Paths in a tree are slash-separated and
 // relative to its top folder, which is the empty path. Implementations confine
 // every operation to the tree it was opened for, and enforce the path rules of
-// ValidatePath.
+// ValidatePath on each path as it is in the namespace.
 //
 // Callers serialize changes to an account's tree; providers need not guard
 // against concurrent changes to the same tree.
@@ -52,7 +52,8 @@ type Tree interface {
 	Open(ctx context.Context, name string) (File, error)
 	// Sub opens folder dir as a tree of its own. The new tree stays bound to
 	// the folder until it is closed, even if the folder is renamed, moved, or
-	// deleted.
+	// deleted. It checks paths as the paths they have in the namespace, so it
+	// accepts every item in the folder that the namespace accepts.
 	Sub(ctx context.Context, dir string) (Tree, error)
 	// Mkdir creates folder name in an existing parent folder.
 	Mkdir(ctx context.Context, name string) error

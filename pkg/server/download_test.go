@@ -143,3 +143,58 @@ func TestPrivateStagingAndSymlinksCannotBeAccessed(t *testing.T) {
 		t.Fatalf("other user's data was changed: %q, %v", data, err)
 	}
 }
+
+// zipContents reads every file in a ZIP archive.
+func zipContents(t *testing.T, body []byte) map[string]string {
+	t.Helper()
+	archive, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents := make(map[string]string)
+	for _, file := range archive.File {
+		reader, err := file.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := io.ReadAll(reader)
+		reader.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		contents[file.Name] = string(data)
+	}
+	return contents
+}
+
+// Names are checked as paths in the account, where only the first element can
+// look like a Windows drive. A folder download must accept the same names
+// inside the folder.
+func TestFolderDownloadsIncludeEveryUploadedName(t *testing.T) {
+	t.Parallel()
+	srv := newTestServer(t, 1000)
+	cookie, csrf := sessionFor(t, srv, "Test User")
+	handler := srv.Handler()
+	upload := uploadFilesRequest(t, uploadFile{"project/C:notes.txt", "payload"}, uploadFile{"project/z.txt", "later file"})
+	if w := serve(handler, upload); w.Code != http.StatusOK {
+		t.Fatalf("upload: %d, %s", w.Code, w.Body)
+	}
+	link := shareRequest(t, srv, cookie, csrf, "create", "project")
+	private := httptest.NewRequest(http.MethodGet, "/download?path=project", nil)
+	private.AddCookie(cookie)
+	for name, r := range map[string]*http.Request{
+		"private download": private,
+		"share link":       httptest.NewRequest(http.MethodGet, link, nil),
+	} {
+		w := serve(handler, r)
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s: %d, %s", name, w.Code, w.Body)
+		}
+		contents := zipContents(t, w.Body.Bytes())
+		for entry, want := range map[string]string{"project/C:notes.txt": "payload", "project/z.txt": "later file"} {
+			if got, exists := contents[entry]; !exists || got != want {
+				t.Errorf("%s: ZIP entry %s = %q, exists=%t; want %q", name, entry, got, exists, want)
+			}
+		}
+	}
+}
