@@ -23,8 +23,8 @@ func hiddenFormatCharacter(r rune) bool {
 }
 
 // validateNewName checks a name being created by an upload, new folder, or
-// rename. Paths to existing items skip this check, so files stored before it
-// existed stay accessible.
+// rename. Paths to existing items skip this check, so files placed in the upload
+// root by other means, such as copying, stay accessible.
 func validateNewName(name string) error {
 	if strings.IndexFunc(name, hiddenFormatCharacter) >= 0 {
 		return fmt.Errorf("%w: names cannot contain invisible formatting characters, such as right-to-left overrides", storage.ErrInvalidPath)
@@ -44,7 +44,8 @@ func validateEntryName(name string) error {
 }
 
 // downloadName removes hidden formatting characters from the filename a
-// download suggests, so older files with such names cannot disguise their type.
+// download suggests, so existing files with such names cannot disguise their
+// type.
 func downloadName(name string) string {
 	cleaned := strings.Map(func(r rune) rune {
 		if hiddenFormatCharacter(r) {

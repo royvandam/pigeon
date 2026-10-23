@@ -12,7 +12,7 @@ pkg/account/        Accounts, passwords, account locks, and lifecycle changes
   wordlists/        Embedded passphrase dictionary and attribution
 pkg/auth/           Sign-in sessions and rate-limited password checks
 pkg/configuration/  Configuration file loading and value types
-pkg/database/       SQLite connection and schema migrations
+pkg/database/       SQLite connection and versioned schema
 pkg/files/          Account file operations, downloads, and uploads
 pkg/quota/          Quota rules, usage measurement, and the usage cache
 pkg/share/          Public download links
@@ -70,11 +70,16 @@ storage still show.
 ## Database
 
 `pkg/database` opens SQLite with foreign keys, WAL journaling, and a single
-connection, which serializes transactions, and migrates the schema for
-accounts, sessions, and share links. The stores in `pkg/account`, `pkg/auth`,
-and `pkg/share` read and change their tables through the returned `*sql.DB`.
-It also reads and removes the server settings that versions before
-configuration files saved in the database.
+connection, which serializes transactions, and creates the schema for
+accounts, sessions, and share links in a new database. The stores in
+`pkg/account`, `pkg/auth`, and `pkg/share` read and change their tables through
+the returned `*sql.DB`.
+
+The schema has a version, `database.SchemaVersion`, kept in the database as
+`PRAGMA user_version`. Opening a database from a later release, or one without
+a version that already has tables, fails rather than guessing at its contents.
+A release that changes the schema raises the version and adds a numbered step
+that converts databases from the previous one.
 
 ## Accounts
 
@@ -213,9 +218,7 @@ strictly, rejecting unknown fields, and provides value types such as
 
 `cmd/pigeon/main.go` is the composition root. It reads the configuration file
 named on the command line and checks the HTTP and storage sections, then opens
-the database. Server settings that earlier versions saved in the database must
-match the configuration before startup continues, and are then removed
-(`legacy.go`). First-run setup in `setup.go` creates the initial
-administrator. Startup then removes uploads left by a crash, builds the stores
-and services, connects them, and runs the server until SIGINT or SIGTERM;
-active requests then get up to 10 seconds to finish.
+the database. First-run setup in `setup.go` creates the initial administrator.
+Startup then removes uploads left by a crash, builds the stores and services,
+connects them, and runs the server until SIGINT or SIGTERM; active requests
+then get up to 10 seconds to finish.

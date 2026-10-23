@@ -61,6 +61,4 @@ permanently deletes the account and its uploads, including empty folders and
 unfinished upload files, and releases its username and normalized folder name.
 If file removal fails, the account stays deleted and its name stays reserved;
 some files may already have been removed. Correct the storage problem and retry
-the purge to finish it. Files uploaded by the previous shared-password
-implementation remain in the upload root; they are not automatically assigned
-to an account.
+the purge to finish it.

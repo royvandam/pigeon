@@ -104,13 +104,13 @@ func TestPrivateStagingAndSymlinksCannotBeAccessed(t *testing.T) {
 	srv := newTestServer(t, 100)
 	cookie, csrf := sessionFor(t, srv, "Test User")
 	writeStoredFile(t, srv, "test-user", ".upload-active/secret.txt", "in progress")
-	writeStoredFile(t, srv, "test-user", "20261010T102812Z_old/project/a.txt", "legacy upload")
+	writeStoredFile(t, srv, "test-user", "archive/project/a.txt", "archived upload")
 	r := httptest.NewRequest(http.MethodGet, "/files", nil)
 	r.AddCookie(cookie)
 	w := httptest.NewRecorder()
 	srv.handleFiles(w, r)
-	if w.Code != http.StatusOK || strings.Contains(w.Body.String(), ".upload-active") || !strings.Contains(w.Body.String(), "20261010T102812Z_old") {
-		t.Fatalf("listing should hide staging and retain legacy folders: %d, %s", w.Code, w.Body)
+	if w.Code != http.StatusOK || strings.Contains(w.Body.String(), ".upload-active") || !strings.Contains(w.Body.String(), "archive") {
+		t.Fatalf("listing should hide staging and show other folders: %d, %s", w.Code, w.Body)
 	}
 	other, err := srv.accounts.Create(context.Background(), "Other User", testPassword, false, quota.DefaultQuota)
 	if err != nil {

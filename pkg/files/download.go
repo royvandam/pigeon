@@ -104,7 +104,7 @@ func (s *Service) OpenShared(ctx context.Context, secret string) (*Download, err
 }
 
 // Name is the filename the download suggests, without hidden formatting
-// characters, so older files with such names cannot disguise their type. A
+// characters, so existing files with such names cannot disguise their type. A
 // folder's archive adds .zip.
 func (d *Download) Name() string {
 	return downloadName(d.name)

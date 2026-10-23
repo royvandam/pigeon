@@ -53,10 +53,6 @@ func TestRunNeedsOneConfigurationFile(t *testing.T) {
 	if err := run(ctx, []string{"-h"}, input(t, ""), io.Discard); !errors.Is(err, flag.ErrHelp) {
 		t.Errorf("help: %v", err)
 	}
-	// Flags of earlier versions now belong in the configuration file.
-	if err := run(ctx, []string{"-db", "pigeon.db"}, input(t, ""), io.Discard); err == nil || !strings.Contains(err.Error(), "-db") {
-		t.Errorf("an old flag: %v", err)
-	}
 }
 
 func TestRunRejectsInvalidConfigurationsBeforeCreatingTheDatabase(t *testing.T) {

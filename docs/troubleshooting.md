@@ -5,9 +5,6 @@
 Pigeon checks its configuration file at startup and names the setting it
 rejects, such as `http: invalid listen address` or `unknown field "listen"`.
 Compare the file with the [configuration reference](administration/configuration.md).
-When upgrading from a version that used command-line flags, Pigeon lists the
-settings saved in the database that the file must carry over; see
-[upgrading from command-line flags](administration/configuration.md#upgrading-from-command-line-flags).
 
 ## The server asks for an administrator again
 

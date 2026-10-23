@@ -135,7 +135,8 @@ func (up *Upload) checkPath(ctx context.Context, name string) error {
 	if err := storage.ValidatePath(name); err != nil {
 		return err
 	}
-	// Only the uploaded path is new; the destination folder may be older.
+	// Only the uploaded path is new; the destination folder may already exist
+	// with a name this rule would reject.
 	if err := validateNewName(name); err != nil {
 		return err
 	}

@@ -17,8 +17,7 @@ is therefore shown only once, right after **Create link**; copy it then.
 Opening **Share** again shows that a link is active and offers **Replace link**,
 which creates a new URL and disables the old one, or **Revoke link**. If
 clipboard access is unavailable, the dialog selects the URL so you can copy it
-manually. Databases from earlier versions are upgraded on start: their links
-keep working, and their tokens are replaced by hashes.
+manually.
 
 ## Changes that affect access
 

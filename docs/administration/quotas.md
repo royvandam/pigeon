@@ -42,5 +42,3 @@ simultaneously. Run one server process per upload root.
 A quota may be reduced below current usage: existing files are
 preserved and new uploads are blocked until usage falls below the quota or an
 admin raises it.
-
-For changes from older quota settings, see [older installations](operations.md#older-installations).
