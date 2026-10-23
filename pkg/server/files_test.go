@@ -229,7 +229,7 @@ func TestExplorerAccountIsolationAndCSRF(t *testing.T) {
 	}
 }
 
-func TestNewNamesRejectHiddenFormatCharactersAndOlderNamesStayAccessible(t *testing.T) {
+func TestNewNamesRejectHiddenFormatCharactersAndExistingNamesStayAccessible(t *testing.T) {
 	t.Parallel()
 	srv := newTestServer(t, 1000)
 	cookie, csrf := sessionFor(t, srv, "Test User")
@@ -237,7 +237,7 @@ func TestNewNamesRejectHiddenFormatCharactersAndOlderNamesStayAccessible(t *test
 	rightToLeftOverride := string(rune(0x202E))
 	spoofed := "invoice" + rightToLeftOverride + "fdp.exe" // Displays as invoiceexe.pdf.
 	folder := "old" + rightToLeftOverride + "redlof"
-	writeStoredFile(t, srv, "test-user", spoofed, "older upload")
+	writeStoredFile(t, srv, "test-user", spoofed, "existing upload")
 	writeStoredFile(t, srv, "test-user", folder+"/inside.txt", "inside")
 	writeStoredFile(t, srv, "test-user", "plain.txt", "plain")
 	action := func(form url.Values) *httptest.ResponseRecorder {
@@ -269,20 +269,20 @@ func TestNewNamesRejectHiddenFormatCharactersAndOlderNamesStayAccessible(t *test
 		}
 	}
 
-	// Files stored before the rule are listed, downloaded under a cleaned name,
+	// Existing files with such names are listed, downloaded under a cleaned name,
 	// shared, and can be moved, renamed to a safe name, or deleted.
 	if w := get("/files"); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), spoofed) {
-		t.Fatalf("listing older names: %d", w.Code)
+		t.Fatalf("listing existing names: %d", w.Code)
 	}
 	w := get("/download?" + url.Values{"path": {spoofed}}.Encode())
 	_, params, err := mime.ParseMediaType(w.Header().Get("Content-Disposition"))
-	if w.Code != http.StatusOK || w.Body.String() != "older upload" || params["filename"] != "invoicefdp.exe" || err != nil {
-		t.Fatalf("download of an older name: %d, %q, %v", w.Code, w.Header().Get("Content-Disposition"), err)
+	if w.Code != http.StatusOK || w.Body.String() != "existing upload" || params["filename"] != "invoicefdp.exe" || err != nil {
+		t.Fatalf("download of an existing name: %d, %q, %v", w.Code, w.Header().Get("Content-Disposition"), err)
 	}
 	w = get("/download?" + url.Values{"path": {folder}}.Encode())
 	_, params, err = mime.ParseMediaType(w.Header().Get("Content-Disposition"))
 	if w.Code != http.StatusOK || params["filename"] != "oldredlof.zip" || err != nil {
-		t.Fatalf("folder download of an older name: %d, %q, %v", w.Code, w.Header().Get("Content-Disposition"), err)
+		t.Fatalf("folder download of an existing name: %d, %q, %v", w.Code, w.Header().Get("Content-Disposition"), err)
 	}
 	archive, err := zip.NewReader(bytes.NewReader(w.Body.Bytes()), int64(w.Body.Len()))
 	if err != nil {
@@ -294,7 +294,7 @@ func TestNewNamesRejectHiddenFormatCharactersAndOlderNamesStayAccessible(t *test
 		}
 	}
 	if w := get("/shares?" + url.Values{"path": {spoofed}}.Encode()); w.Code != http.StatusOK {
-		t.Fatalf("share lookup for an older name: %d %s", w.Code, w.Body)
+		t.Fatalf("share lookup for an existing name: %d %s", w.Code, w.Body)
 	}
 	for _, form := range []url.Values{
 		{"action": {"mkdir"}, "dir": {folder}, "name": {"sub"}},
@@ -303,7 +303,7 @@ func TestNewNamesRejectHiddenFormatCharactersAndOlderNamesStayAccessible(t *test
 		{"action": {"delete"}, "path": {folder}},
 	} {
 		if w := action(form); w.Code != http.StatusSeeOther {
-			t.Errorf("action %q on an older name: %d %s", form, w.Code, w.Body)
+			t.Errorf("action %q on an existing name: %d %s", form, w.Code, w.Body)
 		}
 	}
 }

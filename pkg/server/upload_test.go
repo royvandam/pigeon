@@ -161,25 +161,11 @@ func TestUploadsAreIsolatedAndPreservedOnDeletion(t *testing.T) {
 	}
 }
 
-func TestSharedPasswordHeaderNoLongerAuthenticates(t *testing.T) {
-	t.Parallel()
-	srv := newTestServer(t, 100)
-	body := &readTrackingBody{}
-	r := httptest.NewRequest(http.MethodPost, "/upload", nil)
-	r.Body = body
-	r.Header.Set("X-Upload-Password", testPassword)
-	w := httptest.NewRecorder()
-	srv.handleUpload(w, r)
-	if w.Code != http.StatusUnauthorized || body.read {
-		t.Fatalf("legacy password header accepted: status %d, body read %t", w.Code, body.read)
-	}
-}
-
 func TestUploadsRejectHiddenFormatCharactersInNewNames(t *testing.T) {
 	t.Parallel()
 	srv := newTestServer(t, 1000)
 	rightToLeftOverride := string(rune(0x202E))
-	writeStoredFile(t, srv, "test-user", "old"+rightToLeftOverride+"txt.folder/kept.txt", "older upload")
+	writeStoredFile(t, srv, "test-user", "old"+rightToLeftOverride+"txt.folder/kept.txt", "existing upload")
 	upload := func(filename, directory string) *httptest.ResponseRecorder {
 		t.Helper()
 		r := uploadRequest(t, filename, "data")
@@ -205,7 +191,7 @@ func TestUploadsRejectHiddenFormatCharactersInNewNames(t *testing.T) {
 	}
 
 	// Scripts and emoji that need zero-width (non-)joiners still work, as do
-	// uploads into a folder created before the rule existed.
+	// uploads into an existing folder whose name the rule would reject.
 	persian := "نیم" + string(rune(0x200C)) + "فاصله.txt"
 	family := "👨" + string(rune(0x200D)) + "👩" + string(rune(0x200D)) + "👧.txt"
 	for _, tt := range []struct{ name, directory string }{

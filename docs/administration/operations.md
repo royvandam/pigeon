@@ -23,7 +23,7 @@ Keep a matching copy of both:
 | Data | Contents |
 | --- | --- |
 | SQLite database, at `database.path` | Accounts, password hashes, roles, quotas, sessions, share token hashes, and deleted account records |
-| Upload root, at `storage.local.directory` | Each account's files and folders, plus any legacy shared-password uploads |
+| Upload root, at `storage.local.directory` | Each account's files and folders |
 
 Also keep the configuration file, your executable or its source revision, and
 the reverse proxy configuration. Treat backups as private: they contain
@@ -76,27 +76,7 @@ holds; revoke or replace links where needed after a restore.
 4. Start with the same configuration file and verify the server and file
    operations.
 
-Database migrations run automatically at startup. Retain the pre-upgrade
-backup: an older binary may not understand a migrated database. A rollback
-should restore the matching database and upload snapshot as well as the old
-executable.
-
-## Older installations
-
-- Existing accounts received the default 1 GiB quota when per-user quotas
-  replaced the global upload limit. The `-max` flag was removed.
-- The shared `-password` flag and `X-Upload-Password` header were removed; use
-  an account and [HTTP Basic authentication](../reference/api.md#authentication)
-  for scripts.
-- Files from the shared-password implementation remain at the upload root and
-  are not assigned to an account automatically.
-- Existing timestamped filenames remain accessible; new uploads retain their
-  original names.
-- Saved listen addresses are preserved, including old externally reachable
-  defaults. Review the listener and [HTTPS configuration](deployment.md).
-- Earlier plaintext share tokens are converted to hashes on startup without
-  changing working links.
-- Server settings came from command-line flags and were saved in the database.
-  They now come from the configuration file. The first start with it checks
-  the saved settings against the file and removes them once they match; see
-  [upgrading from command-line flags](configuration.md#upgrading-from-command-line-flags).
+The database records the version of its schema. A release that changes the
+schema converts the database when it starts, and a release refuses a database
+from a later one. Retain the pre-upgrade backup: a rollback should restore the
+matching database and upload snapshot as well as the old executable.

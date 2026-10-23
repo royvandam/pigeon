@@ -156,7 +156,7 @@ func TestAdminGeneratesUserCredentials(t *testing.T) {
 			}
 			if tt.admin {
 				form.Set("admin", "on")
-				// Older clients cannot override the generated credential.
+				// Clients cannot choose the generated credential.
 				form.Set("password", "client-chosen-password")
 			}
 			w := httptest.NewRecorder()

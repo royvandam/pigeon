@@ -99,34 +99,3 @@ restoring.
 does not start a TLS listener. `http.trustedProxies` controls client address
 discovery for sign-in throttling. Configure both when using an
 [HTTPS reverse proxy](deployment.md).
-
-## Upgrading from command-line flags
-
-Earlier versions were configured with flags and saved all of them except `-db`
-in the database:
-
-| Flag | Setting |
-| --- | --- |
-| `-db` | `database.path` |
-| `-dir` | `storage.local.directory` |
-| `-listen` | `http.listenAddress` |
-| `-trusted-proxies` | `http.trustedProxies`, as a list |
-| `-public-url` | `http.publicURL` |
-
-Flags are no longer accepted. Write a configuration file with the values the
-installation used, and start Pigeon with it. On that first start, Pigeon
-compares the settings saved in the database with the configuration. If any
-differ, it refuses to start and lists each one with its saved and configured
-values, so an upgrade cannot quietly serve another upload root or drop its
-HTTPS and proxy settings:
-
-```text
-the database holds server settings saved by an earlier version of Pigeon, ...
-	storage.local.directory: "/srv/pigeon/uploads" (configured: "/srv/pigeon/files")
-	http.publicURL: "https://files.example.com" (configured: "")
-```
-
-Once they match, Pigeon removes them from the database and logs that it did.
-From then on the configuration file alone decides, and the settings can be
-changed. To see the saved values before upgrading, run
-`sqlite3 pigeon.db 'SELECT * FROM settings'`.

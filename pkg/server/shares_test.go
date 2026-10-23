@@ -253,18 +253,11 @@ func TestRejectedAndNoOpFileChangesKeepShareLinks(t *testing.T) {
 	}
 }
 
-func TestSharesSurviveRestartAndOlderDatabasesGainTheTable(t *testing.T) {
+func TestSharesSurviveRestart(t *testing.T) {
 	t.Parallel()
 	srv := newTestServer(t, 100)
 	cookie, csrf := sessionFor(t, srv, "Test User")
 	writeStoredFile(t, srv, "test-user", "readme.txt", "shared")
-	if _, err := srv.db.Exec(`DROP TABLE shares`); err != nil {
-		t.Fatal(err)
-	}
-	if err := srv.db.Close(); err != nil {
-		t.Fatal(err)
-	}
-	srv.open(t)
 	link := shareRequest(t, srv, cookie, csrf, "create", "readme.txt")
 	if err := srv.db.Close(); err != nil {
 		t.Fatal(err)
@@ -275,47 +268,6 @@ func TestSharesSurviveRestartAndOlderDatabasesGainTheTable(t *testing.T) {
 	}
 	if got, active := shareStatus(t, srv, cookie, "readme.txt"); got != "" || !active {
 		t.Fatalf("share status after restart = %q, %v", got, active)
-	}
-}
-
-func TestPlaintextShareTokensAreHashedOnUpgrade(t *testing.T) {
-	t.Parallel()
-	srv := newTestServer(t, 100)
-	cookie, _ := sessionFor(t, srv, "Test User")
-	writeStoredFile(t, srv, "test-user", "readme.txt", "shared")
-	// Recreate the table as older versions stored it, with a plaintext token.
-	plaintext := strings.Repeat("Q", 43)
-	for _, statement := range []string{
-		`DROP TABLE shares`,
-		`CREATE TABLE shares (token TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  path TEXT NOT NULL, is_directory INTEGER NOT NULL CHECK (is_directory IN (0, 1)), created_at INTEGER NOT NULL, UNIQUE (user_id, path))`,
-		`INSERT INTO shares (token, user_id, path, is_directory, created_at) SELECT '` + plaintext + `', id, 'readme.txt', 0, 0 FROM users`,
-	} {
-		if _, err := srv.db.Exec(statement); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := srv.db.Close(); err != nil {
-		t.Fatal(err)
-	}
-	srv.open(t)
-	var stored string
-	if err := srv.db.QueryRow(`SELECT token_hash FROM shares`).Scan(&stored); err != nil || stored != token.Hash(plaintext) {
-		t.Fatalf("upgraded share token = %q, %v; want its hash", stored, err)
-	}
-	if w := publicDownload(srv, http.MethodGet, "/s/"+plaintext); w.Code != http.StatusOK || w.Body.String() != "shared" {
-		t.Fatalf("upgrade broke an existing link: %d, %s", w.Code, w.Body)
-	}
-	if got, active := shareStatus(t, srv, cookie, "readme.txt"); got != "" || !active {
-		t.Fatalf("share status after upgrade = %q, %v", got, active)
-	}
-	// Opening the upgraded database again leaves the hashes alone.
-	if err := srv.db.Close(); err != nil {
-		t.Fatal(err)
-	}
-	srv.open(t)
-	if w := publicDownload(srv, http.MethodGet, "/s/"+plaintext); w.Code != http.StatusOK {
-		t.Fatalf("second start broke an upgraded link: %d", w.Code)
 	}
 }
 

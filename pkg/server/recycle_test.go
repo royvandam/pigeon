@@ -40,7 +40,7 @@ func TestRecycleUserPreservesAccountAndRevokesPreviousAccess(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			// Simulate credentials left behind by an earlier application version.
+			// Recycling also removes sessions and links that remain after deletion.
 			if _, err := srv.db.Exec(`INSERT INTO sessions (token_hash, user_id, user_version, csrf_token, expires_at) VALUES (?, ?, ?, ?, ?)`, token.Hash(cookie.Value), old.ID, old.Version, csrf, time.Now().Add(time.Hour).Unix()); err != nil {
 				t.Fatal(err)
 			}

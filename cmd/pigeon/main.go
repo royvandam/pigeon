@@ -87,9 +87,6 @@ func serve(ctx context.Context, cfg ApplicationConfiguration, stdin *os.File, st
 		return fmt.Errorf("database: %w", err)
 	}
 	defer db.Close()
-	if err := checkLegacySettings(ctx, db, cfg); err != nil {
-		return err
-	}
 	provider, err := storageconfiguration.NewProviderFromConfiguration(cfg.Storage)
 	if err != nil {
 		return fmt.Errorf("storage: %w", err)

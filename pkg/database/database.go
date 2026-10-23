@@ -1,5 +1,4 @@
-// Package database opens Pigeon's SQLite database and keeps its schema up to
-// date. The database holds accounts, sessions, and share links; the stores in
+// Package database opens Pigeon's SQLite database and creates its schema. The database holds accounts, sessions, and share links; the stores in
 // other packages read and change them through the returned *sql.DB.
 package database
 
@@ -13,9 +12,6 @@ import (
 	"path/filepath"
 
 	_ "modernc.org/sqlite"
-
-	"github.com/royvandam/pigeon/internal/token"
-	"github.com/royvandam/pigeon/pkg/quota"
 )
 
 // Configuration chooses the database.
@@ -26,7 +22,7 @@ type Configuration struct {
 }
 
 // Open opens the SQLite database at path, creating it and its parent folders
-// if needed, and migrates its schema. A relative path is resolved from the
+// if needed, and creates its schema in a new database. A relative path is resolved from the
 // current working directory.
 func Open(ctx context.Context, path string) (*sql.DB, error) {
 	if path == "" {
@@ -54,21 +50,20 @@ func Open(ctx context.Context, path string) (*sql.DB, error) {
 	}
 	// A single connection serializes account changes and their transactions.
 	db.SetMaxOpenConns(1)
-	if err := migrate(ctx, db); err != nil {
+	if err := initialize(ctx, db); err != nil {
 		db.Close()
 		return nil, err
 	}
 	return db, nil
 }
 
-func migrate(ctx context.Context, db *sql.DB) error {
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	_, err = tx.ExecContext(ctx, fmt.Sprintf(`
-CREATE TABLE IF NOT EXISTS users (
+// SchemaVersion is the version of the schema this release uses, kept in the
+// database as PRAGMA user_version. A release that changes the schema raises it
+// and converts databases from each earlier version in numbered steps.
+const SchemaVersion = 1
+
+const schema = `
+CREATE TABLE users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   username TEXT NOT NULL,
   username_key TEXT NOT NULL UNIQUE,
@@ -76,19 +71,19 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash BLOB NOT NULL,
   is_admin INTEGER NOT NULL CHECK (is_admin IN (0, 1)),
   auth_version INTEGER NOT NULL DEFAULT 0,
-  quota_bytes INTEGER NOT NULL DEFAULT %d CHECK (quota_bytes > 0),
+  quota_bytes INTEGER NOT NULL CHECK (quota_bytes > 0),
   deleted_at INTEGER
 );
-CREATE TABLE IF NOT EXISTS sessions (
+CREATE TABLE sessions (
   token_hash TEXT PRIMARY KEY,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   user_version INTEGER NOT NULL,
   csrf_token TEXT NOT NULL,
   expires_at INTEGER NOT NULL
 );
-CREATE INDEX IF NOT EXISTS sessions_user_id ON sessions(user_id);
-CREATE INDEX IF NOT EXISTS sessions_expires_at ON sessions(expires_at);
-CREATE TABLE IF NOT EXISTS shares (
+CREATE INDEX sessions_user_id ON sessions(user_id);
+CREATE INDEX sessions_expires_at ON sessions(expires_at);
+CREATE TABLE shares (
   token_hash TEXT PRIMARY KEY,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   path TEXT NOT NULL,
@@ -96,54 +91,40 @@ CREATE TABLE IF NOT EXISTS shares (
   created_at INTEGER NOT NULL,
   UNIQUE (user_id, path)
 );
-`, quota.DefaultQuota))
+`
+
+// initialize creates the schema in a new database, and checks that an existing
+// one has the schema of this release.
+func initialize(ctx context.Context, db *sql.DB) error {
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	var hasQuota bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pragma_table_info('users') WHERE name = 'quota_bytes')`).Scan(&hasQuota); err != nil {
+	defer tx.Rollback()
+	var version int
+	if err := tx.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil {
 		return err
 	}
-	if !hasQuota {
-		if _, err := tx.ExecContext(ctx, fmt.Sprintf(`ALTER TABLE users ADD COLUMN quota_bytes INTEGER NOT NULL DEFAULT %d CHECK (quota_bytes > 0)`, quota.DefaultQuota)); err != nil {
-			return err
-		}
+	switch {
+	case version == SchemaVersion:
+		return nil
+	case version > SchemaVersion:
+		return fmt.Errorf("the database has schema version %d, but this release supports version %d; use a later release, or restore a backup taken before the upgrade", version, SchemaVersion)
+	case version > 0:
+		return fmt.Errorf("the database has schema version %d, which this release cannot convert", version)
 	}
-	if err := hashShareTokens(ctx, tx); err != nil {
+	var tables int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'`).Scan(&tables); err != nil {
+		return err
+	}
+	if tables > 0 {
+		return errors.New("the database has no schema version: it was created by a development build or another program; start with a new database")
+	}
+	if _, err := tx.ExecContext(ctx, schema); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`PRAGMA user_version = %d`, SchemaVersion)); err != nil {
 		return err
 	}
 	return tx.Commit()
-}
-
-// hashShareTokens replaces plaintext share tokens from older databases with
-// their hashes, so existing links keep working but the database no longer
-// contains them.
-func hashShareTokens(ctx context.Context, tx *sql.Tx) error {
-	var plaintext bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pragma_table_info('shares') WHERE name = 'token')`).Scan(&plaintext); err != nil || !plaintext {
-		return err
-	}
-	rows, err := tx.QueryContext(ctx, `SELECT token FROM shares`)
-	if err != nil {
-		return err
-	}
-	var tokens []string
-	for rows.Next() {
-		var t string
-		if err := rows.Scan(&t); err != nil {
-			rows.Close()
-			return err
-		}
-		tokens = append(tokens, t)
-	}
-	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-		return err
-	}
-	for _, t := range tokens {
-		if _, err := tx.ExecContext(ctx, `UPDATE shares SET token = ? WHERE token = ?`, token.Hash(t), t); err != nil {
-			return err
-		}
-	}
-	_, err = tx.ExecContext(ctx, `ALTER TABLE shares RENAME COLUMN token TO token_hash`)
-	return err
 }
