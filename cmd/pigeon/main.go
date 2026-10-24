@@ -92,7 +92,10 @@ func serve(ctx context.Context, cfg ApplicationConfiguration, stdin *os.File, st
 	if err := cfg.Storage.Validate(); err != nil {
 		return fmt.Errorf("storage: %w", err)
 	}
-	db, err := database.Open(ctx, cfg.Database.Path)
+	if err := cfg.Database.Validate(); err != nil {
+		return fmt.Errorf("database: %w", err)
+	}
+	db, err := database.Open(ctx, cfg.Database)
 	if err != nil {
 		return fmt.Errorf("database: %w", err)
 	}

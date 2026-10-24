@@ -11,7 +11,7 @@ import (
 
 func open(t *testing.T, path string) *sql.DB {
 	t.Helper()
-	db, err := Open(context.Background(), path)
+	db, err := Open(context.Background(), Configuration{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestDatabasesCarryTheirSchemaVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 	db.Close()
-	if _, err := Open(ctx, path); err == nil || !strings.Contains(err.Error(), "schema version 99") {
+	if _, err := Open(ctx, Configuration{Path: path}); err == nil || !strings.Contains(err.Error(), "schema version 99") {
 		t.Fatalf("opened a database from a later release: %v", err)
 	}
 }
@@ -95,10 +95,10 @@ func TestDatabasesWithoutASchemaVersionAreRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	db.Close()
-	if _, err := Open(ctx, path); err == nil || !strings.Contains(err.Error(), "no schema version") {
+	if _, err := Open(ctx, Configuration{Path: path}); err == nil || !strings.Contains(err.Error(), "no schema version") {
 		t.Fatalf("opened a database without a schema version: %v", err)
 	}
-	if _, err := Open(ctx, ""); err == nil {
+	if _, err := Open(ctx, Configuration{}); err == nil {
 		t.Fatal("opened a database without a path")
 	}
 }

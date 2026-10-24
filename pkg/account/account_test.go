@@ -19,7 +19,7 @@ const testPassword = "test-password"
 
 func newTestStore(t *testing.T, cost int) *Store {
 	t.Helper()
-	db, err := database.Open(context.Background(), filepath.Join(t.TempDir(), "pigeon.db"))
+	db, err := database.Open(context.Background(), database.Configuration{Path: filepath.Join(t.TempDir(), "pigeon.db")})
 	if err != nil {
 		t.Fatal(err)
 	}

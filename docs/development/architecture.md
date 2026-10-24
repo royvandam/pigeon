@@ -220,8 +220,8 @@ provides value types such as `configuration.Duration`.
 ## Startup
 
 `cmd/pigeon/main.go` is the composition root. It reads the configuration file
-named on the command line and checks the HTTP and storage sections, then opens
-the database. First-run setup in `setup.go` creates the initial administrator.
+named on the command line and checks every section before it opens the
+database. First-run setup in `setup.go` creates the initial administrator.
 Startup then removes uploads left by a crash, builds the stores and services,
 connects them, and runs the server until SIGINT or SIGTERM; active requests
 then get up to 10 seconds to finish.
