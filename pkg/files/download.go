@@ -65,13 +65,16 @@ func openDownload(ctx context.Context, tree storage.Tree, name, topName string) 
 	return d, nil
 }
 
-// OpenShared opens the item that the share link with token secret points to.
-// Its error wraps share.ErrNotFound when the link or its item is gone, or the
-// item changed from a file to a folder or back.
+// OpenShared opens the item that the download link with token secret points
+// to. Its error wraps share.ErrNotFound when the link or its item is gone, the
+// link is an upload link, or the item changed from a file to a folder or back.
 func (s *Service) OpenShared(ctx context.Context, secret string) (*Download, error) {
 	link, err := s.shares.Find(ctx, secret)
 	if err != nil {
 		return nil, err
+	}
+	if link.Kind != share.Download {
+		return nil, share.ErrNotFound // An upload link never shows what its folder holds.
 	}
 	unlock, err := s.locks.Lock(ctx, link.User.ID)
 	if err != nil {
