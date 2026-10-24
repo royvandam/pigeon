@@ -77,8 +77,9 @@ func Open(ctx context.Context, cfg Configuration) (*sql.DB, error) {
 // SchemaVersion is the version of the schema this release uses, kept in the
 // database as PRAGMA user_version. A release that changes the schema raises it
 // and converts databases from each earlier version in numbered steps.
-const SchemaVersion = 1
+const SchemaVersion = 2
 
+// schema creates a new database with the current schema.
 const schema = `
 CREATE TABLE users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -104,14 +105,45 @@ CREATE TABLE shares (
   token_hash TEXT PRIMARY KEY,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   path TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('download', 'upload')),
   is_directory INTEGER NOT NULL CHECK (is_directory IN (0, 1)),
   created_at INTEGER NOT NULL,
-  UNIQUE (user_id, path)
+  expires_at INTEGER,
+  UNIQUE (user_id, path, kind),
+  CHECK (kind = 'download' OR is_directory = 1)
 );
+CREATE INDEX shares_expires_at ON shares(expires_at);
 `
 
-// initialize creates the schema in a new database, and checks that an existing
-// one has the schema of this release.
+// upgrades convert a database to each later schema version: upgrades[i]
+// converts version i+1 to version i+2. Each step is written for the schema of
+// its time, so later changes leave it as it is.
+var upgrades = []string{
+	// 2: a link is a download or an upload link, and may expire. A folder may
+	// have one of each. Existing links become download links that never expire.
+	`
+CREATE TABLE shares_v2 (
+  token_hash TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  path TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('download', 'upload')),
+  is_directory INTEGER NOT NULL CHECK (is_directory IN (0, 1)),
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER,
+  UNIQUE (user_id, path, kind),
+  CHECK (kind = 'download' OR is_directory = 1)
+);
+INSERT INTO shares_v2 (token_hash, user_id, path, kind, is_directory, created_at)
+  SELECT token_hash, user_id, path, 'download', is_directory, created_at FROM shares;
+DROP TABLE shares;
+ALTER TABLE shares_v2 RENAME TO shares;
+CREATE INDEX shares_expires_at ON shares(expires_at);
+`,
+}
+
+// initialize creates the schema in a new database, converts one from an
+// earlier release, and checks that an existing one has the schema of this
+// release.
 func initialize(ctx context.Context, db *sql.DB) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -128,7 +160,7 @@ func initialize(ctx context.Context, db *sql.DB) error {
 	case version > SchemaVersion:
 		return fmt.Errorf("the database has schema version %d, but this release supports version %d; use a later release, or restore a backup taken before the upgrade", version, SchemaVersion)
 	case version > 0:
-		return fmt.Errorf("the database has schema version %d, which this release cannot convert", version)
+		return upgrade(ctx, tx, version)
 	}
 	var tables int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'`).Scan(&tables); err != nil {
@@ -140,6 +172,24 @@ func initialize(ctx context.Context, db *sql.DB) error {
 	if _, err := tx.ExecContext(ctx, schema); err != nil {
 		return err
 	}
+	return commitVersion(ctx, tx)
+}
+
+// upgrade converts a database from version to SchemaVersion in tx, one step at
+// a time, so that a failed step leaves the database as it was.
+func upgrade(ctx context.Context, tx *sql.Tx, version int) error {
+	if version-1 >= len(upgrades) {
+		return fmt.Errorf("the database has schema version %d, which this release cannot convert", version)
+	}
+	for _, step := range upgrades[version-1:] {
+		if _, err := tx.ExecContext(ctx, step); err != nil {
+			return fmt.Errorf("convert the database from schema version %d: %w", version, err)
+		}
+	}
+	return commitVersion(ctx, tx)
+}
+
+func commitVersion(ctx context.Context, tx *sql.Tx) error {
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`PRAGMA user_version = %d`, SchemaVersion)); err != nil {
 		return err
 	}

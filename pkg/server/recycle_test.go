@@ -44,7 +44,7 @@ func TestRecycleUserPreservesAccountAndRevokesPreviousAccess(t *testing.T) {
 			if _, err := srv.db.Exec(`INSERT INTO sessions (token_hash, user_id, user_version, csrf_token, expires_at) VALUES (?, ?, ?, ?, ?)`, token.Hash(cookie.Value), old.ID, old.Version, csrf, time.Now().Add(time.Hour).Unix()); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := srv.db.Exec(`INSERT INTO shares (token_hash, user_id, path, is_directory, created_at) VALUES (?, ?, ?, 0, ?)`, token.Hash(strings.TrimPrefix(link, "/s/")), old.ID, "project/readme.txt", time.Now().Unix()); err != nil {
+			if _, err := srv.db.Exec(`INSERT INTO shares (token_hash, user_id, path, kind, is_directory, created_at) VALUES (?, ?, ?, 'download', 0, ?)`, token.Hash(strings.TrimPrefix(link, "/s/")), old.ID, "project/readme.txt", time.Now().Unix()); err != nil {
 				t.Fatal(err)
 			}
 			credentials, err := srv.manager.Recycle(ctx, actor, old.ID)

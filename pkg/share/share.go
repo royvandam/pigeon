@@ -58,9 +58,9 @@ func (s *Store) Create(ctx context.Context, u account.User, name string, directo
 		return "", err
 	}
 	result, err := s.db.ExecContext(ctx, `
-INSERT INTO shares (token_hash, user_id, path, is_directory, created_at)
-SELECT ?, id, ?, ?, ? FROM users WHERE id = ? AND auth_version = ? AND deleted_at IS NULL
-ON CONFLICT(user_id, path) DO UPDATE SET
+INSERT INTO shares (token_hash, user_id, path, kind, is_directory, created_at)
+SELECT ?, id, ?, 'download', ?, ? FROM users WHERE id = ? AND auth_version = ? AND deleted_at IS NULL
+ON CONFLICT(user_id, path, kind) DO UPDATE SET
   token_hash = excluded.token_hash, is_directory = excluded.is_directory, created_at = excluded.created_at`,
 		token.Hash(secret), name, directory, time.Now().Unix(), u.ID, u.Version)
 	if err != nil {

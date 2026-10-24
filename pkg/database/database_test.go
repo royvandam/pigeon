@@ -121,3 +121,73 @@ func TestIsUniqueViolation(t *testing.T) {
 		t.Fatalf("other constraint: %v", err)
 	}
 }
+
+// schemaVersion1 is the schema of the first release, before share links had
+// kinds or lifetimes.
+const schemaVersion1 = `
+CREATE TABLE users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  username TEXT NOT NULL,
+  username_key TEXT NOT NULL UNIQUE,
+  slug TEXT NOT NULL UNIQUE,
+  password_hash BLOB NOT NULL,
+  is_admin INTEGER NOT NULL CHECK (is_admin IN (0, 1)),
+  auth_version INTEGER NOT NULL DEFAULT 0,
+  quota_bytes INTEGER NOT NULL CHECK (quota_bytes > 0),
+  deleted_at INTEGER
+);
+CREATE TABLE sessions (
+  token_hash TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_version INTEGER NOT NULL,
+  csrf_token TEXT NOT NULL,
+  expires_at INTEGER NOT NULL
+);
+CREATE INDEX sessions_user_id ON sessions(user_id);
+CREATE INDEX sessions_expires_at ON sessions(expires_at);
+CREATE TABLE shares (
+  token_hash TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  path TEXT NOT NULL,
+  is_directory INTEGER NOT NULL CHECK (is_directory IN (0, 1)),
+  created_at INTEGER NOT NULL,
+  UNIQUE (user_id, path)
+);
+PRAGMA user_version = 1;
+`
+
+func TestVersion1DatabasesKeepTheirLinksAsDownloadLinks(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "pigeon.db")
+	old, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := old.Exec(schemaVersion1 + `
+INSERT INTO users (username, username_key, slug, password_hash, is_admin, quota_bytes) VALUES ('Jane', 'jane', 'jane', X'00', 0, 100);
+INSERT INTO shares (token_hash, user_id, path, is_directory, created_at) VALUES ('hash', 1, 'docs', 1, 1000);`); err != nil {
+		t.Fatal(err)
+	}
+	old.Close()
+
+	db := open(t, path)
+	if version := userVersion(t, db); version != SchemaVersion {
+		t.Fatalf("converted database has schema version %d, want %d", version, SchemaVersion)
+	}
+	var kind string
+	var expires sql.NullInt64
+	if err := db.QueryRow(`SELECT kind, expires_at FROM shares WHERE token_hash = 'hash' AND path = 'docs' AND is_directory = 1 AND created_at = 1000`).Scan(&kind, &expires); err != nil || kind != "download" || expires.Valid {
+		t.Fatalf("converted link: kind %q, expires %v, %v", kind, expires, err)
+	}
+	// The folder can now have an upload link beside its download link, but a
+	// file cannot have one.
+	if _, err := db.Exec(`INSERT INTO shares (token_hash, user_id, path, kind, is_directory, created_at) VALUES ('upload', 1, 'docs', 'upload', 1, 2000)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO shares (token_hash, user_id, path, kind, is_directory, created_at) VALUES ('file', 1, 'a.txt', 'upload', 0, 2000)`); err == nil {
+		t.Fatal("a file got an upload link")
+	}
+	if len(upgrades) != SchemaVersion-1 {
+		t.Fatalf("%d upgrades for schema version %d", len(upgrades), SchemaVersion)
+	}
+}

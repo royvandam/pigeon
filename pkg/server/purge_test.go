@@ -30,7 +30,7 @@ func TestPurgeRemovesUploadsAndCredentialsAndReleasesUsername(t *testing.T) {
 	if _, err := srv.db.Exec(`INSERT INTO sessions (token_hash, user_id, user_version, csrf_token, expires_at) VALUES (?, ?, 0, ?, ?)`, "remaining", u.ID, strings.Repeat("a", 43), time.Now().Add(time.Hour).Unix()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := srv.db.Exec(`INSERT INTO shares (token_hash, user_id, path, is_directory, created_at) VALUES (?, ?, 'nested/kept.txt', 0, ?)`, token.Hash(strings.Repeat("b", 43)), u.ID, time.Now().Unix()); err != nil {
+	if _, err := srv.db.Exec(`INSERT INTO shares (token_hash, user_id, path, kind, is_directory, created_at) VALUES (?, ?, 'nested/kept.txt', 'download', 0, ?)`, token.Hash(strings.Repeat("b", 43)), u.ID, time.Now().Unix()); err != nil {
 		t.Fatal(err)
 	}
 	if err := srv.manager.Purge(ctx, administrator, u.ID); err != nil {
