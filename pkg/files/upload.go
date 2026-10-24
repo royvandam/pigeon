@@ -7,9 +7,12 @@ import (
 	"io"
 	"io/fs"
 	"path"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/royvandam/pigeon/pkg/account"
 	"github.com/royvandam/pigeon/pkg/quota"
+	"github.com/royvandam/pigeon/pkg/share"
 	"github.com/royvandam/pigeon/pkg/storage"
 )
 
@@ -31,7 +34,8 @@ func (e *QuotaError) Unwrap() error {
 // Receipt describes a published upload.
 type Receipt struct {
 	// SavedAs is the path of a single file, or the destination folder of a
-	// group, "." for the top folder.
+	// group, "." for the top folder. For an upload through a link, it is
+	// relative to the link's folder.
 	SavedAs string
 	// Group reports several files, or files in folders.
 	Group bool
@@ -69,31 +73,82 @@ type Upload struct {
 	tree        storage.Tree
 	stage       storage.Upload
 	target      string
-	remaining   int64           // quota available before this batch
-	paths       map[string]bool // true for files, false for their parent folders
-	names       []string
-	firstPath   string
-	files       int
-	bytes       int64 // file contents received
-	charged     int64 // quota charge for those files and the folders they add
-	folders     int64 // folders included in charged
+	// secret and link are the token and link of an upload through an upload
+	// link, which renames items whose names are taken; see freeName.
+	secret    string
+	link      share.Link
+	renamed   map[string]string // first path element → its free name
+	taken     map[string]bool   // free names chosen so far
+	remaining int64             // quota available before this batch
+	paths     map[string]bool   // true for files, false for their parent folders
+	names     []string
+	firstPath string
+	files     int
+	bytes     int64 // file contents received
+	charged   int64 // quota charge for those files and the folders they add
+	folders   int64 // folders included in charged
 }
 
-// BeginUpload waits until no other upload to u's account is streaming.
-// progress, if not nil, follows the upload. Close the upload when done with it.
-func (s *Service) BeginUpload(ctx context.Context, u account.User, progress Progress) (*Upload, error) {
+// BeginUpload waits until no other upload to u's account is streaming, and
+// starts an upload into folder dir. progress, if not nil, follows the upload.
+// Close the upload when done with it.
+func (s *Service) BeginUpload(ctx context.Context, u account.User, dir string, progress Progress) (*Upload, error) {
 	release, err := s.locks.LockUploadSlot(ctx, u.ID)
 	if err != nil {
 		return nil, err
 	}
-	return &Upload{service: s, user: u, progress: progress, releaseSlot: release, paths: make(map[string]bool)}, nil
+	return &Upload{service: s, user: u, progress: progress, releaseSlot: release, target: dir, paths: make(map[string]bool)}, nil
 }
 
-// Prepare checks the account and that folder dir has room for at least one
-// more item, and starts staging files for it. It returns the account's usage
-// when known, also when the quota is exhausted, which a *QuotaError reports.
-func (up *Upload) Prepare(ctx context.Context, dir string) (Usage, error) {
+// BeginSharedUpload starts an upload through the upload link with token
+// secret, into the link's folder and charged to its owner, like BeginUpload.
+// Files and folders whose names are taken in the folder are renamed, so an
+// upload through a link never adds to or replaces what the folder holds. Its
+// error wraps share.ErrNotFound when the link is gone or is a download link;
+// Prepare and Publish check the link again.
+func (s *Service) BeginSharedUpload(ctx context.Context, secret string, progress Progress) (*Upload, error) {
+	link, err := s.UploadLink(ctx, secret)
+	if err != nil {
+		return nil, err
+	}
+	up, err := s.BeginUpload(ctx, link.User, link.Path, progress)
+	if err != nil {
+		return nil, err
+	}
+	up.secret, up.link, up.renamed, up.taken = secret, link, make(map[string]string), make(map[string]bool)
+	return up, nil
+}
+
+// open takes the account lock for a step of the upload. An upload through a
+// link checks that the link still points to its folder, before and again
+// after waiting for the lock, and acts for the account as it is now, so a
+// password change while files stream does not stop it.
+func (up *Upload) open(ctx context.Context) (*Access, error) {
+	if up.secret == "" {
+		return up.service.Open(ctx, up.user)
+	}
+	link, err := up.service.currentLink(ctx, up.secret, up.link)
+	if err != nil {
+		return nil, err
+	}
+	up.user = link.User
 	access, err := up.service.Open(ctx, up.user)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := up.service.currentLink(ctx, up.secret, up.link); err != nil {
+		access.Close()
+		return nil, err
+	}
+	return access, nil
+}
+
+// Prepare checks the account and that the destination folder has room for at
+// least one more item, and starts staging files for it. It returns the
+// account's usage when known, also when the quota is exhausted, which a
+// *QuotaError reports.
+func (up *Upload) Prepare(ctx context.Context) (Usage, error) {
+	access, err := up.open(ctx)
 	if err != nil {
 		return Usage{}, err
 	}
@@ -112,7 +167,7 @@ func (up *Upload) Prepare(ctx context.Context, dir string) (Usage, error) {
 		err = &QuotaError{Available: usage.Remaining()}
 	}
 	if err == nil {
-		err = storage.RequireDirectory(ctx, tree, dir)
+		err = storage.RequireDirectory(ctx, tree, up.target)
 	}
 	var stage storage.Upload
 	if err == nil {
@@ -122,7 +177,7 @@ func (up *Upload) Prepare(ctx context.Context, dir string) (Usage, error) {
 		tree.Close()
 		return usage, err
 	}
-	up.tree, up.stage, up.target, up.remaining = tree, stage, dir, usage.Remaining()
+	up.tree, up.stage, up.remaining = tree, stage, usage.Remaining()
 	return usage, nil
 }
 
@@ -178,8 +233,15 @@ func (up *Upload) newDirectories(ctx context.Context, name string) (int64, error
 // Add stages a file at name, relative to the destination folder, reading its
 // contents. It rejects invalid, duplicate, and taken paths before reading,
 // with errors that wrap storage.ErrInvalidPath or storage.ErrConflict, and
-// reports a *QuotaError as soon as the batch outgrows the quota.
+// reports a *QuotaError as soon as the batch outgrows the quota. An upload
+// through a link renames taken names instead.
 func (up *Upload) Add(ctx context.Context, name string, contents io.Reader) error {
+	if up.secret != "" {
+		var err error
+		if name, err = up.freeName(ctx, name); err != nil {
+			return err
+		}
+	}
 	if err := up.checkPath(ctx, name); err != nil {
 		return err
 	}
@@ -256,7 +318,7 @@ func (up *Upload) currentCharge(ctx context.Context) (int64, error) {
 // The account may have been deleted, its quota lowered, or its storage filled
 // by file actions while the files streamed.
 func (up *Upload) Publish(ctx context.Context) (Receipt, error) {
-	access, err := up.service.Open(ctx, up.user)
+	access, err := up.open(ctx)
 	if err != nil {
 		return Receipt{}, err
 	}
@@ -283,14 +345,87 @@ func (up *Upload) Publish(ctx context.Context) (Receipt, error) {
 	receipt.Usage.Used += charged
 	receipt.Files, receipt.Bytes = up.files, up.bytes
 	receipt.Group = up.files > 1 || path.Dir(up.firstPath) != "."
-	receipt.SavedAs = path.Join(up.target, up.firstPath)
+	folder := up.target
+	if up.secret != "" {
+		folder = "" // Someone uploading through a link sees only the names in its folder.
+	}
+	receipt.SavedAs = path.Join(folder, up.firstPath)
 	if receipt.Group {
-		receipt.SavedAs = up.target
+		receipt.SavedAs = folder
 		if receipt.SavedAs == "" {
 			receipt.SavedAs = "."
 		}
 	}
 	return receipt, nil
+}
+
+// maxRenames limits the numbered names an upload through a link tries for one
+// item.
+const maxRenames = 1000
+
+// freeName returns name with its first element replaced, if that is taken in
+// the destination folder, by the first free numbered name, such as
+// "report (2).pdf" or "Photos (2)". Every file under one first element gets the
+// same name, so an uploaded folder stays together, and an upload through a
+// link never adds files to a folder that was already there.
+func (up *Upload) freeName(ctx context.Context, name string) (string, error) {
+	if err := storage.ValidatePath(name); err != nil {
+		return "", err
+	}
+	first, rest, nested := strings.Cut(name, "/")
+	free, ok := up.renamed[first]
+	if !ok {
+		var err error
+		if free, err = up.freeFirstElement(ctx, first, nested); err != nil {
+			return "", err
+		}
+		up.renamed[first], up.taken[free] = free, true
+	}
+	if nested {
+		return free + "/" + rest, nil
+	}
+	return free, nil
+}
+
+func (up *Upload) freeFirstElement(ctx context.Context, first string, folder bool) (string, error) {
+	for n := 1; n <= maxRenames; n++ {
+		candidate := numberedName(first, n, folder)
+		if up.taken[candidate] {
+			continue
+		}
+		_, err := up.tree.Stat(ctx, path.Join(up.target, candidate))
+		if errors.Is(err, fs.ErrNotExist) {
+			return candidate, nil
+		}
+		if err != nil {
+			return "", err
+		}
+	}
+	return "", fmt.Errorf("%w: %q and its numbered names are taken", storage.ErrConflict, first)
+}
+
+// numberedName returns name for n = 1, and otherwise name with " (n)" before
+// a file's extension, shortening the name if needed to keep it a valid length.
+func numberedName(name string, n int, folder bool) string {
+	if n == 1 {
+		return name
+	}
+	base, ext := name, ""
+	if e := path.Ext(name); !folder && e != name {
+		base, ext = strings.TrimSuffix(name, e), e
+	}
+	suffix := fmt.Sprintf(" (%d)", n)
+	keep := storage.MaxNameBytes - len(suffix) - len(ext)
+	if keep < 1 {
+		base, ext, keep = name, "", storage.MaxNameBytes-len(suffix)
+	}
+	if len(base) > keep {
+		for keep > 0 && !utf8.RuneStart(base[keep]) {
+			keep--
+		}
+		base = base[:keep]
+	}
+	return base + suffix + ext
 }
 
 // Close discards every file that was not published and releases the upload
