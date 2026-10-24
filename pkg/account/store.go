@@ -107,7 +107,7 @@ func (s *Store) List(ctx context.Context) ([]User, error) {
 }
 
 // DeletedIDForUsername returns the ID of the deleted account that reserves
-// username's slug, or an error wrapping sql.ErrNoRows.
+// username's slug, or ErrDeletedUserNotFound if none does.
 func (s *Store) DeletedIDForUsername(ctx context.Context, username string) (int64, error) {
 	_, _, slug, err := NormalizeUsername(username)
 	if err != nil {
@@ -115,6 +115,9 @@ func (s *Store) DeletedIDForUsername(ctx context.Context, username string) (int6
 	}
 	var id int64
 	err = s.db.QueryRowContext(ctx, `SELECT id FROM users WHERE slug = ? AND deleted_at IS NOT NULL`, slug).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrDeletedUserNotFound
+	}
 	return id, err
 }
 
