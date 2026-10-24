@@ -87,7 +87,7 @@ func (srv *testServer) open(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv.db = db
-	srv.shares = share.NewStore(db)
+	srv.shares = share.NewStore(db, time.Now)
 	srv.Server, err = New(Configuration{}, Dependencies{
 		Accounts:      accounts,
 		Authenticator: auth.NewAuthenticator(accounts, time.Now),
@@ -369,6 +369,6 @@ func diskUsage(ctx context.Context, dir string, unit int64) (int64, error) {
 
 // createShare creates a link for u's item at name and returns its URL path.
 func createShare(ctx context.Context, srv *testServer, u account.User, name string, directory bool) (string, error) {
-	secret, err := srv.shares.Create(ctx, u, name, directory)
+	secret, _, err := srv.shares.Create(ctx, u, name, share.Download, directory, 0)
 	return "/s/" + secret, err
 }

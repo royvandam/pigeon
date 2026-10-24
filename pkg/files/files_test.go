@@ -53,7 +53,7 @@ func newFixture(t *testing.T, quotaBytes int64) fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	shares := share.NewStore(db)
+	shares := share.NewStore(db, time.Now)
 	s := NewService(provider, accounts, account.NewLocks(), quota.NewCache(time.Now), shares, 1)
 	return fixture{Service: s, dir: provider.Directory(), accounts: accounts, shares: shares, user: u}
 }
@@ -119,7 +119,7 @@ func TestFileActionsKeepUsageAndShareLinksUpToDate(t *testing.T) {
 		t.Fatalf("measured usage = %d", used)
 	}
 	a := f.open(t)
-	link, err := f.shares.Create(ctx, f.user, "folder/b.txt", false)
+	link, _, err := f.shares.Create(ctx, f.user, "folder/b.txt", share.Download, false, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +220,7 @@ func TestDownloadsStayBoundAndSharedLinksCheckTheirItem(t *testing.T) {
 		t.Fatalf("archive: %v", err)
 	}
 
-	secret, err := f.shares.Create(ctx, f.user, "project", true)
+	secret, _, err := f.shares.Create(ctx, f.user, "project", share.Download, true, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -354,37 +354,37 @@ func TestShareLinksNeedAnItemButRemovingThemDoesNot(t *testing.T) {
 	f.write(t, "folder/a.txt", "1")
 	a := f.open(t)
 	for _, name := range []string{"", "../other"} {
-		if _, err := a.Share(ctx, name); !errors.Is(err, storage.ErrInvalidPath) {
+		if _, _, err := a.Share(ctx, name, share.Download, 0); !errors.Is(err, storage.ErrInvalidPath) {
 			t.Errorf("Share(%q) = %v; want ErrInvalidPath", name, err)
 		}
-		if _, err := a.Shared(ctx, name); !errors.Is(err, storage.ErrInvalidPath) {
+		if _, err := a.Shared(ctx, name, share.Download); !errors.Is(err, storage.ErrInvalidPath) {
 			t.Errorf("Shared(%q) = %v; want ErrInvalidPath", name, err)
 		}
 	}
-	if _, err := a.Share(ctx, "missing.txt"); !errors.Is(err, fs.ErrNotExist) {
+	if _, _, err := a.Share(ctx, "missing.txt", share.Download, 0); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("sharing a missing item: %v", err)
 	}
-	secret, err := a.Share(ctx, "folder")
+	secret, _, err := a.Share(ctx, "folder", share.Download, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if link, err := f.shares.Find(ctx, secret); err != nil || link.Path != "folder" || !link.Directory {
 		t.Fatalf("link = %+v, %v", link, err)
 	}
-	if shared, err := a.Shared(ctx, "folder"); err != nil || !shared {
-		t.Fatalf("Shared = %t, %v", shared, err)
+	if status, err := a.Shared(ctx, "folder", share.Download); err != nil || !status.Active {
+		t.Fatalf("Shared = %+v, %v", status, err)
 	}
 	// An item removed by other means, such as on disk, can still be unshared.
 	if err := os.RemoveAll(filepath.Join(f.dir, f.user.Slug, "folder")); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.Unshare(ctx, "folder"); err != nil {
+	if err := a.Unshare(ctx, "folder", share.Download); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.shares.Find(ctx, secret); !errors.Is(err, share.ErrNotFound) {
 		t.Fatalf("unshared link: %v", err)
 	}
-	if err := a.Unshare(ctx, ""); !errors.Is(err, storage.ErrInvalidPath) {
+	if err := a.Unshare(ctx, "", share.Download); !errors.Is(err, storage.ErrInvalidPath) {
 		t.Fatalf("Unshare of the top folder: %v", err)
 	}
 }

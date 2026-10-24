@@ -18,11 +18,12 @@ import (
 
 	"github.com/royvandam/pigeon/internal/token"
 	"github.com/royvandam/pigeon/pkg/quota"
+	"github.com/royvandam/pigeon/pkg/share"
 	"github.com/royvandam/pigeon/pkg/storage"
 )
 
-// shareStatus returns what the Share dialog loads for name.
-func shareStatus(t *testing.T, srv *testServer, cookie *http.Cookie, name string) (string, bool) {
+// loadShareStatus returns what the Share dialog loads for name's download link.
+func loadShareStatus(t *testing.T, srv *testServer, cookie *http.Cookie, name string) (string, bool) {
 	t.Helper()
 	r := httptest.NewRequest(http.MethodGet, "/shares?"+url.Values{"path": {name}}.Encode(), nil)
 	r.AddCookie(cookie)
@@ -54,7 +55,7 @@ func TestShareFileLifecycleAndAnonymousDownload(t *testing.T) {
 	if err := srv.db.QueryRow(`SELECT token_hash FROM shares`).Scan(&stored); err != nil || stored != token.Hash(strings.TrimPrefix(link, "/s/")) {
 		t.Fatalf("stored share token = %q, %v; want its hash", stored, err)
 	}
-	if got, active := shareStatus(t, srv, cookie, filename); got != "" || !active {
+	if got, active := loadShareStatus(t, srv, cookie, filename); got != "" || !active {
 		t.Fatalf("share status after creation = %q, %v; want an active link without its URL", got, active)
 	}
 	replaced := shareRequest(t, srv, cookie, csrf, "create", filename)
@@ -89,7 +90,7 @@ func TestShareFileLifecycleAndAnonymousDownload(t *testing.T) {
 	if got := shareRequest(t, srv, cookie, csrf, "revoke", filename); got != "" {
 		t.Fatalf("revoke left an active link: %q", got)
 	}
-	if _, active := shareStatus(t, srv, cookie, filename); active {
+	if _, active := loadShareStatus(t, srv, cookie, filename); active {
 		t.Fatal("share status after revoking reports an active link")
 	}
 	if got := publicDownload(srv, http.MethodGet, link).Code; got != http.StatusNotFound {
@@ -266,7 +267,7 @@ func TestSharesSurviveRestart(t *testing.T) {
 	if w := publicDownload(srv, http.MethodGet, link); w.Code != http.StatusOK || w.Body.String() != "shared" {
 		t.Fatalf("restart invalidated a share: %d, %s", w.Code, w.Body)
 	}
-	if got, active := shareStatus(t, srv, cookie, "readme.txt"); got != "" || !active {
+	if got, active := loadShareStatus(t, srv, cookie, "readme.txt"); got != "" || !active {
 		t.Fatalf("share status after restart = %q, %v", got, active)
 	}
 }
@@ -363,7 +364,7 @@ func TestPublicDownloadsRecheckRevocationAfterWaitingForStorageLock(t *testing.T
 		t.Fatalf("public download did not wait for storage: %d", w.Code)
 	case <-time.After(30 * time.Millisecond):
 	}
-	if err := srv.shares.Revoke(ctx, u.ID, "readme.txt"); err != nil {
+	if err := srv.shares.Revoke(ctx, u.ID, "readme.txt", share.Download); err != nil {
 		unlock()
 		t.Fatal(err)
 	}
@@ -375,5 +376,50 @@ func TestPublicDownloadsRecheckRevocationAfterWaitingForStorageLock(t *testing.T
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("public download did not finish after unlock")
+	}
+}
+
+// manageLink sends a /shares request with form, which names the action, path,
+// kind, and lifetime, and returns the status code and answer.
+func manageLink(t *testing.T, srv *testServer, cookie *http.Cookie, csrf string, form url.Values) (int, shareStatus) {
+	t.Helper()
+	var r *http.Request
+	if form.Get("action") == "" {
+		r = httptest.NewRequest(http.MethodGet, "/shares?"+form.Encode(), nil)
+		r.AddCookie(cookie)
+	} else {
+		form.Set("csrf_token", csrf)
+		r = formRequest("/shares", form, cookie)
+	}
+	w := serve(srv.Handler(), r)
+	var answer shareStatus
+	if w.Code == http.StatusOK {
+		if err := json.Unmarshal(w.Body.Bytes(), &answer); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return w.Code, answer
+}
+
+func TestShareRequestsCheckKindsAndLifetimes(t *testing.T) {
+	t.Parallel()
+	srv := newTestServer(t, 100)
+	cookie, csrf := sessionFor(t, srv, "Test User")
+	writeStoredFile(t, srv, "test-user", "report.pdf", "r")
+	for _, form := range []url.Values{
+		{"action": {"create"}, "path": {"report.pdf"}, "kind": {"upload"}},
+		{"action": {"create"}, "path": {"report.pdf"}, "kind": {"edit"}},
+		{"action": {"create"}, "path": {"report.pdf"}, "lifetime": {"soon"}},
+		{"action": {"create"}, "path": {"report.pdf"}, "lifetime": {"-1h"}},
+		{"action": {"create"}, "path": {"report.pdf"}, "lifetime": {"9000h"}},
+		{"path": {"report.pdf"}, "kind": {"edit"}},
+	} {
+		if code, _ := manageLink(t, srv, cookie, csrf, form); code != http.StatusBadRequest {
+			t.Errorf("%v: %d; want 400", form, code)
+		}
+	}
+	code, created := manageLink(t, srv, cookie, csrf, url.Values{"action": {"create"}, "path": {"report.pdf"}, "lifetime": {"1h"}})
+	if code != http.StatusOK || !strings.HasPrefix(created.URL, "/s/") || created.ExpiresAt == nil {
+		t.Fatalf("download link with a lifetime: %d, %+v", code, created)
 	}
 }

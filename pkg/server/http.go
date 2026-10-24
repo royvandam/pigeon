@@ -10,6 +10,7 @@ import (
 
 	"github.com/royvandam/pigeon/pkg/account"
 	"github.com/royvandam/pigeon/pkg/quota"
+	"github.com/royvandam/pigeon/pkg/share"
 	"github.com/royvandam/pigeon/pkg/storage"
 )
 
@@ -45,7 +46,7 @@ func writeStorageError(w http.ResponseWriter, err error) {
 // failures it answers with a server error.
 func storageError(err error) (string, int) {
 	switch {
-	case errors.Is(err, storage.ErrInvalidPath):
+	case errors.Is(err, storage.ErrInvalidPath), errors.Is(err, share.ErrInvalidLink):
 		return err.Error(), http.StatusBadRequest
 	case errors.Is(err, storage.ErrConflict), errors.Is(err, os.ErrExist):
 		return err.Error(), http.StatusConflict

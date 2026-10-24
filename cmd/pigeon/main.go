@@ -128,7 +128,7 @@ func serve(ctx context.Context, cfg ApplicationConfiguration, stdin *os.File, st
 	}
 
 	locks, usage := account.NewLocks(), quota.NewCache(time.Now)
-	sessions, shares := auth.NewSessions(db), share.NewStore(db)
+	sessions, shares := auth.NewSessions(db), share.NewStore(db, time.Now)
 	srv, err := server.New(cfg.HTTP, server.Dependencies{
 		Accounts:      accounts,
 		Manager:       account.NewManager(accounts, locks, usage, provider),
