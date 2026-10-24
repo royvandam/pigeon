@@ -39,18 +39,18 @@ anything you decide to accept.
 
 | ID | Impact | Area | Finding | Status |
 | --- | --- | --- | --- | --- |
-| [S1](#s1-local-storage-settings-live-outside-package-local) | Low | Configuration | Local storage settings live outside package `local` | Fixed in #PR |
-| [S2](#s2-an-account-lookup-returns-sqlerrnorows-to-the-http-layer) | Low | Layering | An account lookup returns `sql.ErrNoRows` to the HTTP layer | Fixed in #PR |
-| [S3](#s3-the-account-store-imports-the-sqlite-driver) | Low | Layering | The account store imports the SQLite driver | Fixed in #PR |
-| [S4](#s4-the-database-does-not-follow-the-configuration-pattern) | Low | Configuration | The database does not follow the configuration pattern | Fixed in #PR |
-| [S5](#s5-the-shares-handler-does-the-work-of-a-file-operation) | Medium | Separation of concerns | The `/shares` handler does the work of a file operation | Fixed in #PR |
+| [S1](#s1-local-storage-settings-live-outside-package-local) | Low | Configuration | Local storage settings live outside package `local` | Fixed in #23 |
+| [S2](#s2-an-account-lookup-returns-sqlerrnorows-to-the-http-layer) | Low | Layering | An account lookup returns `sql.ErrNoRows` to the HTTP layer | Fixed in #23 |
+| [S3](#s3-the-account-store-imports-the-sqlite-driver) | Low | Layering | The account store imports the SQLite driver | Fixed in #23 |
+| [S4](#s4-the-database-does-not-follow-the-configuration-pattern) | Low | Configuration | The database does not follow the configuration pattern | Fixed in #23 |
+| [S5](#s5-the-shares-handler-does-the-work-of-a-file-operation) | Medium | Separation of concerns | The `/shares` handler does the work of a file operation | Fixed in #23 |
 | [S6](#s6-the-account-manager-depends-on-storage-and-the-usage-cache) | Low | Layering | The account manager depends on storage and the usage cache | Open |
 
 ---
 
 ## S1. Local storage settings live outside package `local`
 
-**Impact:** Low · **Area:** Configuration · **Status:** Fixed in #PR
+**Impact:** Low · **Area:** Configuration · **Status:** Fixed in #23
 
 **Location:** [pkg/storage/configuration/configuration.go:21](https://github.com/royvandam/pigeon/blob/8e8779d/pkg/storage/configuration/configuration.go#L21),
 [pkg/storage/configuration/configuration.go:30](https://github.com/royvandam/pigeon/blob/8e8779d/pkg/storage/configuration/configuration.go#L30)
@@ -81,7 +81,7 @@ own. A local test covers validation and construction.
 
 ## S2. An account lookup returns `sql.ErrNoRows` to the HTTP layer
 
-**Impact:** Low · **Area:** Layering · **Status:** Fixed in #PR
+**Impact:** Low · **Area:** Layering · **Status:** Fixed in #23
 
 **Location:** [pkg/account/store.go:111](https://github.com/royvandam/pigeon/blob/8e8779d/pkg/account/store.go#L111),
 [pkg/server/admin.go:115](https://github.com/royvandam/pigeon/blob/8e8779d/pkg/server/admin.go#L115)
@@ -104,7 +104,7 @@ test covers an unreserved username.
 
 ## S3. The account store imports the SQLite driver
 
-**Impact:** Low · **Area:** Layering · **Status:** Fixed in #PR
+**Impact:** Low · **Area:** Layering · **Status:** Fixed in #23
 
 **Location:** [pkg/account/store.go:9](https://github.com/royvandam/pigeon/blob/8e8779d/pkg/account/store.go#L9),
 [pkg/account/store.go:58](https://github.com/royvandam/pigeon/blob/8e8779d/pkg/account/store.go#L58)
@@ -127,7 +127,7 @@ not.
 
 ## S4. The database does not follow the configuration pattern
 
-**Impact:** Low · **Area:** Configuration · **Status:** Fixed in #PR
+**Impact:** Low · **Area:** Configuration · **Status:** Fixed in #23
 
 **Location:** [pkg/database/database.go:18](https://github.com/royvandam/pigeon/blob/8e8779d/pkg/database/database.go#L18),
 [pkg/database/database.go:27](https://github.com/royvandam/pigeon/blob/8e8779d/pkg/database/database.go#L27),
@@ -153,7 +153,7 @@ the other sections, and have `Open` take a `Configuration`.
 
 ## S5. The `/shares` handler does the work of a file operation
 
-**Impact:** Medium · **Area:** Separation of concerns · **Status:** Fixed in #PR
+**Impact:** Medium · **Area:** Separation of concerns · **Status:** Fixed in #23
 
 **Location:** [pkg/server/shares.go:15-77](https://github.com/royvandam/pigeon/blob/8e8779d/pkg/server/shares.go#L15-L77),
 [pkg/server/server.go:62](https://github.com/royvandam/pigeon/blob/8e8779d/pkg/server/server.go#L62)
