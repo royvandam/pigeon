@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"path"
 	"time"
 
+	"github.com/royvandam/pigeon/internal/token"
 	"github.com/royvandam/pigeon/pkg/share"
 )
 
@@ -106,9 +108,7 @@ func linkPath(kind share.Kind, secret string) string {
 }
 
 func (s *Server) handleSharedDownload(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Referrer-Policy", "no-referrer")
-	w.Header().Set("X-Robots-Tag", "noindex, nofollow, noarchive")
+	setPublicLinkHeaders(w)
 	if !allowMethods(w, r, http.MethodGet, http.MethodHead) {
 		return
 	}
@@ -130,4 +130,76 @@ func (s *Server) handleSharedDownload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer download.Close()
 	serveDownload(w, r, download)
+}
+
+// setPublicLinkHeaders keeps pages and files behind public links out of
+// caches, referrers, and search engines.
+func setPublicLinkHeaders(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set("X-Robots-Tag", "noindex, nofollow, noarchive")
+}
+
+// uploadLinkPage is the page behind an upload link.
+type uploadLinkPage struct {
+	// Folder is the name of the link's folder, or "" when the link no longer
+	// works.
+	Folder      string
+	Expires     string
+	UploadURL   string
+	ProgressURL string
+	// AllocationUnit lets the page round file sizes as the server charges
+	// them.
+	AllocationUnit int64
+}
+
+// handleUploadLink serves the page behind an upload link, and receives its
+// uploads. The page shows the folder's name only, never what it holds.
+func (s *Server) handleUploadLink(w http.ResponseWriter, r *http.Request) {
+	setPublicLinkHeaders(w)
+	if !allowMethods(w, r, http.MethodGet, http.MethodHead, http.MethodPost) {
+		return
+	}
+	if r.Method == http.MethodPost {
+		s.handleSharedUpload(w, r)
+		return
+	}
+	secret := r.PathValue("token")
+	link, err := s.files.UploadLink(r.Context(), secret)
+	if errors.Is(err, share.ErrNotFound) {
+		renderTemplate(w, uploadLinkTmpl, uploadLinkPage{}, http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		serverError(w, r, "upload link unavailable", err)
+		return
+	}
+	page := uploadLinkPage{
+		Folder:         path.Base(link.Path),
+		UploadURL:      "/u/" + secret,
+		ProgressURL:    "/u/" + secret + "/progress",
+		AllocationUnit: s.files.AllocationUnit(),
+	}
+	if !link.Expires.IsZero() {
+		page.Expires = link.Expires.UTC().Format("2 January 2006, 15:04 UTC")
+	}
+	renderTemplate(w, uploadLinkTmpl, page, http.StatusOK)
+}
+
+// handleUploadLinkProgress reports the progress of an upload through an
+// upload link, to the page that sent it.
+func (s *Server) handleUploadLinkProgress(w http.ResponseWriter, r *http.Request) {
+	setPublicLinkHeaders(w)
+	if !allowMethods(w, r, http.MethodGet) {
+		return
+	}
+	secret := r.PathValue("token")
+	if _, err := s.files.UploadLink(r.Context(), secret); errors.Is(err, share.ErrNotFound) {
+		http.Error(w, uploadLinkGone, http.StatusNotFound)
+		return
+	} else if err != nil {
+		serverError(w, r, "upload link unavailable", err)
+		return
+	}
+	s.writeUploadProgress(w, r, uploadOwner{link: token.Hash(secret)})
 }

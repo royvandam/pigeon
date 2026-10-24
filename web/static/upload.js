@@ -1,11 +1,16 @@
 (function () {
+  // The explorer uploads to its current folder with the session's CSRF token.
+  // The page behind an upload link names its own endpoints, and does not know
+  // the owner's storage, which the server checks instead.
   const settings = document.getElementById('uploadPanel').dataset;
-  let REMAINING_BYTES = Number(settings.remainingBytes);
+  let REMAINING_BYTES = settings.remainingBytes === undefined ? Infinity : Number(settings.remainingBytes);
   // The server charges each file its size in whole allocation units (at least one) plus
   // one unit per new folder. Folders are not known here, so this is a minimum.
   const ALLOCATION_UNIT = Number(settings.allocationUnit) || 4096;
   const CSRF_TOKEN = settings.csrfToken;
   const CURRENT_DIRECTORY = settings.directory;
+  const UPLOAD_URL = settings.uploadUrl || '/upload?dir=' + encodeURIComponent(CURRENT_DIRECTORY);
+  const PROGRESS_URL = settings.progressUrl || '/upload-progress';
 
   // Marks requests as coming from the browser, so an expired session gets a plain
   // 401 instead of a Basic challenge and the browser's own sign-in prompt.
@@ -15,6 +20,7 @@
   const fileList = document.getElementById('fileList');
   const explorerMessage = document.getElementById('explorerMessage');
   async function refreshFiles() {
+    if (!fileList) return;
     try {
       const response = await fetch('/files?dir=' + encodeURIComponent(CURRENT_DIRECTORY), {credentials: 'same-origin', cache: 'no-store', headers: BROWSER_HEADERS});
       if (response.status === 401) throw new Error(SESSION_EXPIRED);
@@ -156,9 +162,9 @@
     }
 
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", "/upload?dir=" + encodeURIComponent(CURRENT_DIRECTORY), true);
+    xhr.open("POST", UPLOAD_URL, true);
 
-    xhr.setRequestHeader("X-CSRF-Token", CSRF_TOKEN);
+    if (CSRF_TOKEN) xhr.setRequestHeader("X-CSRF-Token", CSRF_TOKEN);
     xhr.setRequestHeader("X-Requested-With", BROWSER_HEADERS['X-Requested-With']);
     // getRandomValues also works on local HTTP; randomUUID requires HTTPS.
     const uploadID = Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
@@ -228,7 +234,7 @@
       const timeout = setTimeout(() => controller.abort(), 5000);
       let terminal = false;
       try {
-        const response = await fetch('/upload-progress?id=' + encodeURIComponent(uploadID), {
+        const response = await fetch(PROGRESS_URL + '?id=' + encodeURIComponent(uploadID), {
           credentials: 'same-origin', cache: 'no-store', signal: controller.signal, headers: BROWSER_HEADERS
         });
         if (stopped) return;

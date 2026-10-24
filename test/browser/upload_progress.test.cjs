@@ -5,7 +5,7 @@ const vm = require('node:vm');
 const { webcrypto } = require('node:crypto');
 const { test } = require('node:test');
 
-const html = fs.readFileSync(path.join(__dirname, '../../web/templates/index.html'), 'utf8');
+const html = ['index.html', 'uploads.html'].map(name => fs.readFileSync(path.join(__dirname, '../../web/templates', name), 'utf8')).join('');
 const script = fs.readFileSync(path.join(__dirname, '../../web/static/upload.js'), 'utf8');
 
 function page(size = 10000, options = {}) {
@@ -31,6 +31,8 @@ function page(size = 10000, options = {}) {
   }
   elements.get('uploadPanel').dataset = {remainingBytes: '10000000', csrfToken: 'a'.repeat(43), directory: 'My folder/docs', ...options.settings};
   elements.get('directory').webkitdirectory = true;
+  // The page behind an upload link has no file list or storage display.
+  for (const id of options.missing || []) elements.delete(id);
   class XHR {
     constructor() { this.upload = {}; this.headers = {}; uploads.push(this); }
     open(method, url) { this.method = method; this.url = url; }
@@ -261,4 +263,17 @@ test('the storage check rounds files up to the server allocation unit', () => {
   assert.equal(tooBig.elements.get('btn').disabled, true);
   assert.equal(tooBig.text('phase'), 'Not enough storage: 12.00 KB needed, 8.00 KB available.');
   assert.equal(tooBig.text('fileSize'), '8.00 KB', 'the selection still shows its real size');
+});
+
+test('the upload link page posts to its link without a session or a storage check', async () => {
+  const p = page(10000, {settings: {remainingBytes: undefined, csrfToken: undefined, directory: undefined, uploadUrl: '/u/link-token', progressUrl: '/u/link-token/progress'}, missing: ['fileList', 'explorerMessage', 'storageUsed', 'storageQuota', 'storageRemaining']});
+  assert.equal(p.xhr.method, 'POST');
+  assert.equal(p.xhr.url, '/u/link-token');
+  assert.equal(p.xhr.headers['X-CSRF-Token'], undefined);
+  assert.ok(p.requests[0].url.startsWith('/u/link-token/progress?id='));
+  await p.reply('complete', 10000, 1000);
+  p.finish(200);
+  await p.settle();
+  assert.equal(p.text('phase'), 'Done');
+  assert.equal(p.refreshes.length, 0);
 });

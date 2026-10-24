@@ -172,6 +172,11 @@ func TestRequestLogEscapesPathsAndRedactsShareTokens(t *testing.T) {
 		{"/x/../s/" + token, `/x/../s/[redacted]`},
 		{"/s/" + token + "/../../x", `/s/[redacted]`},
 		{"/s/" + token + "\nGET /forged", `/s/[redacted]`},
+		{"/u/" + token, `/u/[redacted]`},
+		{"/u/" + token + "/progress", `/u/[redacted]`},
+		{"/x/../u/" + token, `/x/../u/[redacted]`},
+		{"/u/x/s/" + token, `/u/[redacted]`},
+		{"/upload", `/upload`},
 	} {
 		output.Reset()
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
