@@ -82,3 +82,4 @@ nav:
       - Review archive: audit/README.md
       - Security (2026-10-17): audit/2026-10-17-security.md
       - Code quality (2026-10-20): audit/2026-10-20-quality.md
+      - Package structure (2026-10-24): audit/2026-10-24-structure.md
