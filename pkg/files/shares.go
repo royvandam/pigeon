@@ -2,6 +2,7 @@ package files
 
 import (
 	"context"
+	"fmt"
 	"io/fs"
 	"time"
 
@@ -49,4 +50,30 @@ func (a *Access) statItem(ctx context.Context, name string) (fs.FileInfo, error)
 		return nil, err
 	}
 	return a.Stat(ctx, name)
+}
+
+// UploadLink returns the upload link with token secret. Its error wraps
+// share.ErrNotFound when the link is gone or has expired, or is a download
+// link.
+func (s *Service) UploadLink(ctx context.Context, secret string) (share.Link, error) {
+	link, err := s.shares.Find(ctx, secret)
+	if err == nil && link.Kind != share.Upload {
+		return share.Link{}, share.ErrNotFound
+	}
+	return link, err
+}
+
+// currentLink returns the link with token secret if it is still an upload
+// link to the folder an upload started with, or share.ErrNotFound. The link
+// may have been revoked, replaced, or expired, or its folder renamed, moved, or
+// deleted, while files streamed.
+func (s *Service) currentLink(ctx context.Context, secret string, started share.Link) (share.Link, error) {
+	link, err := s.UploadLink(ctx, secret)
+	if err != nil {
+		return share.Link{}, err
+	}
+	if link.User.ID != started.User.ID || link.Path != started.Path {
+		return share.Link{}, fmt.Errorf("%w: the link changed during the upload", share.ErrNotFound)
+	}
+	return link, nil
 }

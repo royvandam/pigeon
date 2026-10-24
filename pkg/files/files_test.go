@@ -254,12 +254,12 @@ func TestUploadsPublishTogetherWithinTheQuota(t *testing.T) {
 	f := newFixture(t, 20)
 	f.write(t, "existing.txt", "123")
 	var p progress
-	up, err := f.BeginUpload(ctx, f.user, &p)
+	up, err := f.BeginUpload(ctx, f.user, "", &p)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer up.Close()
-	usage, err := up.Prepare(ctx, "")
+	usage, err := up.Prepare(ctx)
 	if err != nil || usage != (Usage{Quota: 20, Used: 3}) || p.preparing != 1 {
 		t.Fatalf("Prepare = %#v, %v; reported preparing %d times", usage, err, p.preparing)
 	}
@@ -303,12 +303,12 @@ func TestUploadsRecheckTheQuotaBeforePublishing(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	f := newFixture(t, 20)
-	up, err := f.BeginUpload(ctx, f.user, nil)
+	up, err := f.BeginUpload(ctx, f.user, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer up.Close()
-	if _, err := up.Prepare(ctx, ""); err != nil {
+	if _, err := up.Prepare(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if err := up.Add(ctx, "a.txt", strings.NewReader("1234567890")); err != nil {
@@ -331,18 +331,18 @@ func TestUploadsRecheckTheQuotaBeforePublishing(t *testing.T) {
 	// before any file is read.
 	waiting, cancel := context.WithTimeout(ctx, 20*time.Millisecond)
 	defer cancel()
-	if _, err := f.BeginUpload(waiting, f.user, nil); !errors.Is(err, context.DeadlineExceeded) {
+	if _, err := f.BeginUpload(waiting, f.user, "", nil); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("a second upload did not wait for the slot: %v", err)
 	}
 	up.Close()
 	f.write(t, "full.txt", "12345")
 	f.usage.Forget(f.user.ID)
-	up, err = f.BeginUpload(ctx, f.user, nil)
+	up, err = f.BeginUpload(ctx, f.user, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer up.Close()
-	if usage, err := up.Prepare(ctx, ""); !errors.As(err, &quotaErr) || usage != (Usage{Quota: 5, Used: 5}) {
+	if usage, err := up.Prepare(ctx); !errors.As(err, &quotaErr) || usage != (Usage{Quota: 5, Used: 5}) {
 		t.Fatalf("Prepare with an exhausted quota = %#v, %v", usage, err)
 	}
 }
@@ -386,5 +386,178 @@ func TestShareLinksNeedAnItemButRemovingThemDoesNot(t *testing.T) {
 	}
 	if err := a.Unshare(ctx, "", share.Download); !errors.Is(err, storage.ErrInvalidPath) {
 		t.Fatalf("Unshare of the top folder: %v", err)
+	}
+}
+
+// shareUploads creates an upload link for folder dir and releases the account,
+// as the owner's request would.
+func (f fixture) shareUploads(t *testing.T, dir string) string {
+	t.Helper()
+	a := f.open(t)
+	defer a.Close()
+	secret, _, err := a.Share(context.Background(), dir, share.Upload, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return secret
+}
+
+func (f fixture) read(t *testing.T, name string) string {
+	t.Helper()
+	contents, err := os.ReadFile(filepath.Join(f.dir, f.user.Slug, filepath.FromSlash(name)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(contents)
+}
+
+func TestUploadLinksRenameTakenNamesAndChargeTheOwner(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	f := newFixture(t, 100)
+	f.write(t, "inbox/report.pdf", "old")
+	f.write(t, "inbox/Photos/old.jpg", "o")
+	secret := f.shareUploads(t, "inbox")
+	before := f.used(t)
+
+	up, err := f.BeginSharedUpload(ctx, secret, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := up.Prepare(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"report.pdf", "Photos/a.jpg", "Photos/b.jpg", "report (2).pdf", "new.txt"} {
+		if err := up.Add(ctx, name, strings.NewReader("n")); err != nil {
+			t.Fatalf("Add(%q): %v", name, err)
+		}
+	}
+	receipt, err := up.Publish(ctx)
+	if err != nil || receipt.Files != 5 || receipt.SavedAs != "." {
+		t.Fatalf("Publish = %+v, %v", receipt, err)
+	}
+	up.Close() // Releases the upload slot for the next upload.
+	// Existing items keep their contents, and an existing folder gets nothing.
+	if f.read(t, "inbox/report.pdf") != "old" || f.read(t, "inbox/Photos/old.jpg") != "o" {
+		t.Fatal("an upload through a link changed an existing file")
+	}
+	for _, name := range []string{"report (2).pdf", "Photos (2)/a.jpg", "Photos (2)/b.jpg", "report (2) (2).pdf", "new.txt"} {
+		if f.read(t, "inbox/"+name) != "n" {
+			t.Errorf("%s was not uploaded", name)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(f.dir, f.user.Slug, "inbox", "Photos", "a.jpg")); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("an upload added to an existing folder: %v", err)
+	}
+	// Five files and one new folder, charged to the owner.
+	if used := f.used(t); used != before+6 {
+		t.Fatalf("usage = %d, want %d", used, before+6)
+	}
+
+	// A single file's receipt names it inside the link's folder only.
+	up, err = f.BeginSharedUpload(ctx, secret, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer up.Close()
+	if _, err := up.Prepare(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := up.Add(ctx, "new.txt", strings.NewReader("x")); err != nil {
+		t.Fatal(err)
+	}
+	if receipt, err := up.Publish(ctx); err != nil || receipt.SavedAs != "new (2).txt" {
+		t.Fatalf("Publish = %+v, %v", receipt, err)
+	}
+}
+
+func TestUploadLinksStopWhenTheLinkChanges(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	f := newFixture(t, 100)
+	f.write(t, "inbox/a.txt", "a")
+	f.write(t, "report.pdf", "r")
+	a := f.open(t)
+	download, _, err := a.Share(ctx, "inbox", share.Download, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := a.Share(ctx, "report.pdf", share.Upload, 0); !errors.Is(err, share.ErrInvalidLink) {
+		t.Fatalf("a file got an upload link: %v", err)
+	}
+	a.Close()
+	upload := f.shareUploads(t, "inbox")
+
+	// Each kind of link does only what it is for.
+	if _, err := f.BeginSharedUpload(ctx, download, nil); !errors.Is(err, share.ErrNotFound) {
+		t.Fatalf("uploaded through a download link: %v", err)
+	}
+	if _, err := f.OpenShared(ctx, upload); !errors.Is(err, share.ErrNotFound) {
+		t.Fatalf("downloaded through an upload link: %v", err)
+	}
+
+	for name, change := range map[string]func(*Access) error{
+		"revoked": func(a *Access) error { return a.Unshare(ctx, "inbox", share.Upload) },
+		"renamed": func(a *Access) error { return a.Rename(ctx, "inbox", "archive") },
+		"replaced": func(a *Access) error {
+			_, _, err := a.Share(ctx, "inbox", share.Upload, 0)
+			return err
+		},
+	} {
+		f.write(t, "inbox/a.txt", "a") // The folder may have been renamed.
+		secret := f.shareUploads(t, "inbox")
+		up, err := f.BeginSharedUpload(ctx, secret, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := up.Prepare(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if err := up.Add(ctx, name+".txt", strings.NewReader("n")); err != nil {
+			t.Fatal(err)
+		}
+		a := f.open(t)
+		if err := change(a); err != nil {
+			t.Fatal(err)
+		}
+		a.Close()
+		if _, err := up.Publish(ctx); !errors.Is(err, share.ErrNotFound) {
+			t.Errorf("published after the link was %s: %v", name, err)
+		}
+		up.Close()
+		for _, dir := range []string{"inbox", "archive"} {
+			if _, err := os.Stat(filepath.Join(f.dir, f.user.Slug, dir, name+".txt")); !errors.Is(err, fs.ErrNotExist) {
+				t.Errorf("a file was published after the link was %s: %v", name, err)
+			}
+		}
+	}
+}
+
+func TestNumberedNames(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name   string
+		n      int
+		folder bool
+		want   string
+	}{
+		{"report.pdf", 1, false, "report.pdf"},
+		{"report.pdf", 2, false, "report (2).pdf"},
+		{"archive.tar.gz", 3, false, "archive.tar (3).gz"},
+		{".env", 2, false, ".env (2)"},
+		{"Photos.2024", 2, true, "Photos.2024 (2)"},
+	} {
+		if got := numberedName(test.name, test.n, test.folder); got != test.want {
+			t.Errorf("numberedName(%q, %d, %t) = %q, want %q", test.name, test.n, test.folder, got, test.want)
+		}
+	}
+	// Long names are shortened on a character boundary, keeping the extension.
+	long := strings.Repeat("é", 125) + ".pdf"
+	got := numberedName(long, 12, false)
+	if len(got) > storage.MaxNameBytes || !strings.HasSuffix(got, " (12).pdf") || storage.ValidatePath(got) != nil {
+		t.Fatalf("numberedName of a long name = %q (%d bytes)", got, len(got))
+	}
+	if got := numberedName(strings.Repeat("x", 250)+"."+strings.Repeat("y", 4), 2, false); len(got) > storage.MaxNameBytes {
+		t.Fatalf("numberedName = %d bytes", len(got))
 	}
 }

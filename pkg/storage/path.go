@@ -19,6 +19,10 @@ var (
 	ErrConflict = errors.New("a file or folder already exists at this path")
 )
 
+// MaxNameBytes is the longest name ValidatePath accepts for one element of a
+// path, in bytes.
+const MaxNameBytes = 255
+
 // ReservedPrefix starts the names that providers use for their own items, such
 // as uploads in progress. ValidatePath rejects paths with such a name in them.
 const ReservedPrefix = ".upload-"
@@ -50,7 +54,7 @@ func validateSyntax(name string) error {
 		return fmt.Errorf("invalid relative file path")
 	}
 	for _, component := range strings.Split(name, "/") {
-		if len(component) > 255 {
+		if len(component) > MaxNameBytes {
 			return fmt.Errorf("invalid relative file path")
 		}
 	}

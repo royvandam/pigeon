@@ -60,7 +60,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	// publish, so the account's pages, share links, and file actions do not
 	// wait for the body. Its slot keeps this account's uploads streaming one
 	// at a time.
-	upload, err := s.files.BeginUpload(r.Context(), a.User, progress)
+	upload, err := s.files.BeginUpload(r.Context(), a.User, r.URL.Query().Get("dir"), progress)
 	if err != nil {
 		http.Error(w, "upload canceled", http.StatusRequestTimeout)
 		return
@@ -70,7 +70,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("could not discard staged upload files", "err", err)
 		}
 	}()
-	usage, err := upload.Prepare(r.Context(), r.URL.Query().Get("dir"))
+	usage, err := upload.Prepare(r.Context())
 	if usage.Known() {
 		setQuotaHeaders(w, usage)
 	}
