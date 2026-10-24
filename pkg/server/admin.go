@@ -1,7 +1,6 @@
 package server
 
 import (
-	"database/sql"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -112,7 +111,7 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 				s.renderAdmin(w, r, a, adminPage{RecycleCandidateID: id}, http.StatusOK)
 				return
 			}
-			if !errors.Is(lookupErr, sql.ErrNoRows) {
+			if !errors.Is(lookupErr, account.ErrDeletedUserNotFound) {
 				serverError(w, r, "failed to check the reserved account", lookupErr)
 				return
 			}

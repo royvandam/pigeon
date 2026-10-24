@@ -94,6 +94,9 @@ func TestUsernameAndFolderCollisionsStayReserved(t *testing.T) {
 	if id, err := s.DeletedIDForUsername(ctx, "elise smith"); err != nil || id != u.ID {
 		t.Fatalf("reserving account = %d, %v; want %d", id, err, u.ID)
 	}
+	if _, err := s.DeletedIDForUsername(ctx, "Nobody Here"); !errors.Is(err, ErrDeletedUserNotFound) {
+		t.Fatalf("unreserved username: %v; want ErrDeletedUserNotFound", err)
+	}
 }
 
 func TestUnknownUsernamesCheckAHashOfTheConfiguredCost(t *testing.T) {
