@@ -13,9 +13,16 @@ const uploadProgressRetention = 5 * time.Minute
 
 var uploadIDPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]{16,64}$`)
 
-type uploadProgressKey struct {
+// uploadOwner is whose uploads a progress record belongs to: an account's, or
+// those through one upload link, identified by its token's hash.
+type uploadOwner struct {
 	userID int64
-	id     string
+	link   string
+}
+
+type uploadProgressKey struct {
+	owner uploadOwner
+	id    string
 }
 
 type uploadProgressSnapshot struct {
@@ -30,7 +37,8 @@ type uploadProgress struct {
 }
 
 // uploadTracker keeps the progress of uploads that asked for it. Progress
-// belongs to the authenticated user and lives only in this server. Terminal
+// belongs to the authenticated user, or to the upload link it came through,
+// and lives only in this server. Terminal
 // records expire so callers can fetch a final snapshot without keeping an
 // ever-growing upload history in memory.
 type uploadTracker struct {
@@ -41,9 +49,9 @@ func newUploadTracker() *uploadTracker {
 	return &uploadTracker{}
 }
 
-// begin starts tracking upload id of a user, or returns nil when the upload
+// begin starts tracking upload id of owner, or returns nil when the upload
 // has no ID.
-func (t *uploadTracker) begin(userID int64, id string) (*uploadProgress, error) {
+func (t *uploadTracker) begin(owner uploadOwner, id string) (*uploadProgress, error) {
 	if id == "" {
 		return nil, nil // Existing API clients need not request progress tracking.
 	}
@@ -62,7 +70,7 @@ func (t *uploadTracker) begin(userID int64, id string) (*uploadProgress, error) 
 		return true
 	})
 	p := &uploadProgress{snapshot: uploadProgressSnapshot{State: "queued"}}
-	if _, loaded := t.progress.LoadOrStore(uploadProgressKey{userID, id}, p); loaded {
+	if _, loaded := t.progress.LoadOrStore(uploadProgressKey{owner, id}, p); loaded {
 		return nil, fmt.Errorf("upload ID already in use")
 	}
 	return p, nil
@@ -108,9 +116,9 @@ func (p *uploadProgress) Written(n int64) {
 	p.mu.Unlock()
 }
 
-// snapshot returns the progress of a user's upload, if it is still tracked.
-func (t *uploadTracker) snapshot(userID int64, id string) (uploadProgressSnapshot, bool) {
-	key := uploadProgressKey{userID, id}
+// snapshot returns the progress of owner's upload, if it is still tracked.
+func (t *uploadTracker) snapshot(owner uploadOwner, id string) (uploadProgressSnapshot, bool) {
+	key := uploadProgressKey{owner, id}
 	value, ok := t.progress.Load(key)
 	if !ok {
 		return uploadProgressSnapshot{}, false
@@ -136,12 +144,16 @@ func (s *Server) handleUploadProgress(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	s.writeUploadProgress(w, r, uploadOwner{userID: a.User.ID})
+}
+
+func (s *Server) writeUploadProgress(w http.ResponseWriter, r *http.Request, owner uploadOwner) {
 	id := r.URL.Query().Get("id")
 	if !uploadIDPattern.MatchString(id) {
 		http.Error(w, "invalid upload ID", http.StatusBadRequest)
 		return
 	}
-	snapshot, ok := s.uploads.snapshot(a.User.ID, id)
+	snapshot, ok := s.uploads.snapshot(owner, id)
 	if !ok {
 		http.NotFound(w, r)
 		return

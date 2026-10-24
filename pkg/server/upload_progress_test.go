@@ -20,13 +20,13 @@ func waitForUploadProgress(t *testing.T, uploads *uploadTracker, state string, m
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		snapshot, ok := uploads.snapshot(1, testUploadID)
+		snapshot, ok := uploads.snapshot(uploadOwner{userID: 1}, testUploadID)
 		if ok && snapshot.State == state && snapshot.Bytes >= minimumBytes {
 			return snapshot
 		}
 		time.Sleep(time.Millisecond)
 	}
-	snapshot, ok := uploads.snapshot(1, testUploadID)
+	snapshot, ok := uploads.snapshot(uploadOwner{userID: 1}, testUploadID)
 	t.Fatalf("progress = %#v, found=%t; want %s with at least %d bytes", snapshot, ok, state, minimumBytes)
 	return uploadProgressSnapshot{}
 }
@@ -204,27 +204,27 @@ func TestUploadProgressQuotaFailureAndIDValidation(t *testing.T) {
 func TestUploadProgressExpiration(t *testing.T) {
 	t.Parallel()
 	uploads := newUploadTracker()
-	p, err := uploads.begin(1, testUploadID)
+	p, err := uploads.begin(uploadOwner{userID: 1}, testUploadID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	p.Written(42)
 	p.setState("complete")
 	p.fail() // A successful upload must keep its final state.
-	snapshot, ok := uploads.snapshot(1, testUploadID)
+	snapshot, ok := uploads.snapshot(uploadOwner{userID: 1}, testUploadID)
 	if !ok || snapshot.State != "complete" || snapshot.Bytes != 42 {
 		t.Fatalf("completed upload: %#v, %t", snapshot, ok)
 	}
 	p.mu.Lock()
 	p.finished = time.Now().Add(-uploadProgressRetention - time.Second)
 	p.mu.Unlock()
-	if _, ok := uploads.snapshot(1, testUploadID); ok {
+	if _, ok := uploads.snapshot(uploadOwner{userID: 1}, testUploadID); ok {
 		t.Fatal("expired progress is still accessible")
 	}
-	if _, ok := uploads.progress.Load(uploadProgressKey{1, testUploadID}); ok {
+	if _, ok := uploads.progress.Load(uploadProgressKey{uploadOwner{userID: 1}, testUploadID}); ok {
 		t.Fatal("expired progress was not removed")
 	}
-	if _, err := uploads.begin(1, testUploadID); err != nil {
+	if _, err := uploads.begin(uploadOwner{userID: 1}, testUploadID); err != nil {
 		t.Fatalf("expired ID is still reserved: %v", err)
 	}
 }

@@ -422,4 +422,8 @@ func TestShareRequestsCheckKindsAndLifetimes(t *testing.T) {
 	if code != http.StatusOK || !strings.HasPrefix(created.URL, "/s/") || created.ExpiresAt == nil {
 		t.Fatalf("download link with a lifetime: %d, %+v", code, created)
 	}
+	// A download link does not open the upload page.
+	if w := publicDownload(srv, http.MethodGet, "/u/"+strings.TrimPrefix(created.URL, "/s/")); w.Code != http.StatusNotFound {
+		t.Fatalf("upload page for a download link: %d", w.Code)
+	}
 }

@@ -155,6 +155,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/download", s.handleDownload)
 	mux.HandleFunc("/shares", s.handleShares)
 	mux.HandleFunc("/s/{token}", s.handleSharedDownload)
+	mux.HandleFunc("/u/{token}", s.handleUploadLink)
+	mux.HandleFunc("/u/{token}/progress", s.handleUploadLinkProgress)
 	mux.HandleFunc("/login", s.handleLogin)
 	mux.HandleFunc("/logout", s.handleLogout)
 	mux.HandleFunc("/admin", s.handleAdmin)
@@ -239,13 +241,20 @@ func logRequests(next http.Handler) http.Handler {
 	})
 }
 
-// redactShareToken hides everything after the first "s" path segment, because
-// share tokens grant access to private files. Looking for the segment anywhere
-// also covers paths such as //s/<token> and /x/../s/<token>, which the router
-// redirects to the share route only after this request is logged.
+// redactShareToken hides everything after the first "s" or "u" path segment,
+// because share tokens grant access to private files and folders. Looking for
+// the segment anywhere also covers paths such as //s/<token> and
+// /x/../u/<token>, which the router redirects to a share route only after this
+// request is logged.
 func redactShareToken(requestPath string) string {
-	if i := strings.Index(requestPath, "/s/"); i >= 0 {
-		return requestPath[:i] + "/s/[redacted]"
+	i, segment := -1, ""
+	for _, prefix := range []string{"/s/", "/u/"} {
+		if j := strings.Index(requestPath, prefix); j >= 0 && (i < 0 || j < i) {
+			i, segment = j, prefix
+		}
+	}
+	if i >= 0 {
+		return requestPath[:i] + segment + "[redacted]"
 	}
 	return requestPath
 }

@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>Upload files · Pigeon</title>
+
+  {{template "pageAssets" .}}
+</head>
+
+<body class="min-h-screen bg-zinc-950 text-zinc-100">
+  <main class="mx-auto max-w-3xl px-4 py-10">
+    <div class="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-6 shadow-sm">
+      {{if .Folder}}
+      <div id="uploadPanel" data-upload-url="{{.UploadURL}}" data-progress-url="{{.ProgressURL}}" data-allocation-unit="{{.AllocationUnit}}" class="space-y-4">
+        <div>
+          <h1 class="text-xl font-semibold"><i class="fa-solid fa-cloud-arrow-up mr-2 text-zinc-400" aria-hidden="true"></i>Upload to <span class="break-all">{{.Folder}}</span></h1>
+          <p class="mt-2 text-sm text-zinc-400">Files and folders you upload are added to this folder. You cannot see or change what it already holds. Anything whose name is taken is saved under a new name, such as “report (2).pdf”.</p>
+          {{if .Expires}}<p class="mt-1 text-sm text-zinc-400">This link works until {{.Expires}}.</p>{{end}}
+        </div>
+        {{template "uploadControls" .}}
+      </div>
+      {{else}}
+      <h1 class="text-xl font-semibold"><i class="fa-solid fa-link-slash mr-2 text-zinc-400" aria-hidden="true"></i>This upload link no longer works</h1>
+      <p class="mt-2 text-sm text-zinc-400">It was revoked or replaced, it expired, or its folder was moved. Ask the person who shared it for a new link.</p>
+      {{end}}
+    </div>
+  </main>
+
+{{if .Folder}}<script src="/assets/upload.js" defer></script>{{end}}
+</body>
+</html>

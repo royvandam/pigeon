@@ -12,9 +12,11 @@ import (
 	"os"
 
 	"github.com/royvandam/pigeon/internal/size"
+	"github.com/royvandam/pigeon/internal/token"
 	"github.com/royvandam/pigeon/pkg/account"
 	"github.com/royvandam/pigeon/pkg/files"
 	"github.com/royvandam/pigeon/pkg/quota"
+	"github.com/royvandam/pigeon/pkg/share"
 	"github.com/royvandam/pigeon/pkg/storage"
 )
 
@@ -31,27 +33,12 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-
-	// Parse multipart manually so we can stream.
-	ct := r.Header.Get("Content-Type")
-	mediaType, params, err := mime.ParseMediaType(ct)
-	if err != nil || mediaType != "multipart/form-data" {
-		http.Error(w, "expected multipart form", http.StatusBadRequest)
+	boundary, ok := multipartBoundary(w, r)
+	if !ok {
 		return
 	}
-
-	boundary := params["boundary"]
-	if boundary == "" {
-		http.Error(w, "missing multipart boundary", http.StatusBadRequest)
-		return
-	}
-	progress, err := s.uploads.begin(a.User.ID, r.Header.Get("X-Upload-ID"))
-	if err != nil {
-		status := http.StatusConflict
-		if !uploadIDPattern.MatchString(r.Header.Get("X-Upload-ID")) {
-			status = http.StatusBadRequest
-		}
-		http.Error(w, err.Error(), status)
+	progress, ok := s.beginProgress(w, r, uploadOwner{userID: a.User.ID})
+	if !ok {
 		return
 	}
 	defer progress.fail()
@@ -65,13 +52,85 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "upload canceled", http.StatusRequestTimeout)
 		return
 	}
+	s.receiveUpload(w, r, upload, boundary, progress, false)
+}
+
+// handleSharedUpload receives an upload through an upload link, after the
+// page in handleUploadPage. The link's token authorizes it; there is no
+// session, so there is no CSRF token to check.
+func (s *Server) handleSharedUpload(w http.ResponseWriter, r *http.Request) {
+	secret := r.PathValue("token")
+	if !s.sameOrigin(r) {
+		http.Error(w, "invalid request origin", http.StatusForbidden)
+		return
+	}
+	boundary, ok := multipartBoundary(w, r)
+	if !ok {
+		return
+	}
+	progress, ok := s.beginProgress(w, r, uploadOwner{link: token.Hash(secret)})
+	if !ok {
+		return
+	}
+	defer progress.fail()
+	upload, err := s.files.BeginSharedUpload(r.Context(), secret, progress)
+	if errors.Is(err, share.ErrNotFound) {
+		http.Error(w, uploadLinkGone, http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		writeUploadError(w, r, err, true)
+		return
+	}
+	s.receiveUpload(w, r, upload, boundary, progress, true)
+}
+
+// uploadLinkGone answers a request through an upload link that was revoked,
+// replaced, or expired, or whose folder changed.
+const uploadLinkGone = "this upload link no longer works; ask for a new one"
+
+// multipartBoundary returns the boundary of a multipart upload, or answers the
+// request and reports false.
+func multipartBoundary(w http.ResponseWriter, r *http.Request) (string, bool) {
+	// Parse multipart manually so we can stream.
+	mediaType, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || mediaType != "multipart/form-data" {
+		http.Error(w, "expected multipart form", http.StatusBadRequest)
+		return "", false
+	}
+	if params["boundary"] == "" {
+		http.Error(w, "missing multipart boundary", http.StatusBadRequest)
+		return "", false
+	}
+	return params["boundary"], true
+}
+
+// beginProgress starts tracking the upload that r asked to follow, or answers
+// the request and reports false.
+func (s *Server) beginProgress(w http.ResponseWriter, r *http.Request, owner uploadOwner) (*uploadProgress, bool) {
+	progress, err := s.uploads.begin(owner, r.Header.Get("X-Upload-ID"))
+	if err != nil {
+		status := http.StatusConflict
+		if !uploadIDPattern.MatchString(r.Header.Get("X-Upload-ID")) {
+			status = http.StatusBadRequest
+		}
+		http.Error(w, err.Error(), status)
+		return nil, false
+	}
+	return progress, true
+}
+
+// receiveUpload streams the files of r into upload and publishes them. An
+// upload through a link reveals nothing about its owner's storage: it sends
+// no quota headers, and errors do not say how much space is left.
+func (s *Server) receiveUpload(w http.ResponseWriter, r *http.Request, upload *files.Upload, boundary string, progress *uploadProgress, shared bool) {
 	defer func() {
 		if err := upload.Close(); err != nil {
 			slog.Warn("could not discard staged upload files", "err", err)
 		}
 	}()
 	usage, err := upload.Prepare(r.Context())
-	if usage.Known() {
+	if usage.Known() && !shared {
 		setQuotaHeaders(w, usage)
 	}
 	var quotaErr *files.QuotaError
@@ -80,7 +139,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeUploadError(w, r, err)
+		writeUploadError(w, r, err, shared)
 		return
 	}
 
@@ -122,7 +181,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 			var fileErr *os.PathError
 			switch {
 			case errors.As(err, &quotaErr):
-				http.Error(w, fmt.Sprintf("disk quota exceeded (%s available)", size.Format(quotaErr.Available)), http.StatusRequestEntityTooLarge)
+				writeQuotaError(w, quotaErr, shared)
 			case errors.Is(err, storage.ErrInvalidPath), errors.Is(err, storage.ErrConflict):
 				writeStorageError(w, err)
 			case errors.As(err, &fileErr):
@@ -146,11 +205,11 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	progress.setState("finalizing")
 	receipt, err := upload.Publish(r.Context())
-	if receipt.Usage.Known() {
+	if receipt.Usage.Known() && !shared {
 		setQuotaHeaders(w, receipt.Usage)
 	}
 	if err != nil {
-		writeUploadError(w, r, err)
+		writeUploadError(w, r, err, shared)
 		return
 	}
 	progress.setState("complete")
@@ -164,9 +223,14 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 
 // writeUploadError answers an upload that could not check the account or
 // publish its files.
-func writeUploadError(w http.ResponseWriter, r *http.Request, err error) {
+func writeUploadError(w http.ResponseWriter, r *http.Request, err error, shared bool) {
 	var quotaErr *files.QuotaError
 	switch {
+	case errors.Is(err, share.ErrNotFound):
+		http.Error(w, uploadLinkGone, http.StatusNotFound)
+	case errors.Is(err, account.ErrInvalidCredentials) && shared:
+		// The owner's password changed while the files streamed.
+		http.Error(w, "the upload could not be saved; try again", http.StatusConflict)
 	case errors.Is(err, account.ErrInvalidCredentials):
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 	case errors.Is(err, files.ErrUsageUnavailable):
@@ -176,10 +240,20 @@ func writeUploadError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, files.ErrQuotaUnavailable):
 		serverError(w, r, "failed to load disk quota", err)
 	case errors.As(err, &quotaErr):
-		http.Error(w, fmt.Sprintf("disk quota exceeded (%s available)", size.Format(quotaErr.Available)), http.StatusRequestEntityTooLarge)
+		writeQuotaError(w, quotaErr, shared)
 	default:
 		writeStorageError(w, err)
 	}
+}
+
+// writeQuotaError answers an upload that does not fit the quota. Only the
+// account's owner learns how much space is left.
+func writeQuotaError(w http.ResponseWriter, err *files.QuotaError, shared bool) {
+	message := fmt.Sprintf("disk quota exceeded (%s available)", size.Format(err.Available))
+	if shared {
+		message = "there is not enough storage space for these files"
+	}
+	http.Error(w, message, http.StatusRequestEntityTooLarge)
 }
 
 func uploadReadErrorStatus(err error) int {
