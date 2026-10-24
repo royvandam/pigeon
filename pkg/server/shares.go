@@ -7,9 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/royvandam/pigeon/pkg/account"
 	"github.com/royvandam/pigeon/pkg/share"
-	"github.com/royvandam/pigeon/pkg/storage"
 )
 
 func (s *Server) handleShares(w http.ResponseWriter, r *http.Request) {
@@ -22,13 +20,13 @@ func (s *Server) handleShares(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	name := r.URL.Query().Get("path")
+	name, action := r.URL.Query().Get("path"), ""
 	if r.Method == http.MethodPost {
-		name = r.PostForm.Get("path")
-	}
-	if err := storage.ValidatePath(name); err != nil {
-		writeStorageError(w, err)
-		return
+		name, action = r.PostForm.Get("path"), r.PostForm.Get("action")
+		if action != "create" && action != "revoke" {
+			http.Error(w, "unknown share action", http.StatusBadRequest)
+			return
+		}
 	}
 	access, err := s.files.Open(r.Context(), a.User)
 	if err != nil {
@@ -37,33 +35,18 @@ func (s *Server) handleShares(w http.ResponseWriter, r *http.Request) {
 	}
 	defer access.Close()
 	link, active := "", false
-	if r.Method == http.MethodPost && r.PostForm.Get("action") == "revoke" {
-		// Revoking does not require the item to still exist on disk.
-		err = s.shares.Revoke(r.Context(), a.User.ID, name)
-	} else {
-		info, statErr := access.Stat(r.Context(), name)
-		if statErr != nil {
-			writeStorageError(w, statErr)
-			return
-		}
-		if r.Method == http.MethodGet {
-			active, err = s.shares.Active(r.Context(), a.User, name)
-		} else if r.PostForm.Get("action") == "create" {
-			var secret string
-			secret, err = s.shares.Create(r.Context(), a.User, name, info.IsDir())
-			link = "/s/" + secret
-			active = err == nil
-		} else {
-			http.Error(w, "unknown share action", http.StatusBadRequest)
-			return
-		}
+	switch action {
+	case "":
+		active, err = access.Shared(r.Context(), name)
+	case "create":
+		var secret string
+		secret, err = access.Share(r.Context(), name)
+		link, active = "/s/"+secret, err == nil
+	case "revoke":
+		err = access.Unshare(r.Context(), name)
 	}
 	if err != nil {
-		if errors.Is(err, account.ErrInvalidCredentials) {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-		} else {
-			serverError(w, r, "failed to update share link", err)
-		}
+		writeStorageError(w, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

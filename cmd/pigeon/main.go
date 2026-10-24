@@ -134,7 +134,6 @@ func serve(ctx context.Context, cfg ApplicationConfiguration, stdin *os.File, st
 		Manager:       account.NewManager(accounts, locks, usage, provider),
 		Authenticator: auth.NewAuthenticator(accounts, time.Now),
 		Sessions:      sessions,
-		Shares:        shares,
 		Files:         files.NewService(provider, accounts, locks, usage, shares, quota.DefaultAllocationUnit),
 	})
 	if err != nil {

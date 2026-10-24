@@ -346,3 +346,45 @@ func TestUploadsRecheckTheQuotaBeforePublishing(t *testing.T) {
 		t.Fatalf("Prepare with an exhausted quota = %#v, %v", usage, err)
 	}
 }
+
+func TestShareLinksNeedAnItemButRemovingThemDoesNot(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	f := newFixture(t, 100)
+	f.write(t, "folder/a.txt", "1")
+	a := f.open(t)
+	for _, name := range []string{"", "../other"} {
+		if _, err := a.Share(ctx, name); !errors.Is(err, storage.ErrInvalidPath) {
+			t.Errorf("Share(%q) = %v; want ErrInvalidPath", name, err)
+		}
+		if _, err := a.Shared(ctx, name); !errors.Is(err, storage.ErrInvalidPath) {
+			t.Errorf("Shared(%q) = %v; want ErrInvalidPath", name, err)
+		}
+	}
+	if _, err := a.Share(ctx, "missing.txt"); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("sharing a missing item: %v", err)
+	}
+	secret, err := a.Share(ctx, "folder")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if link, err := f.shares.Find(ctx, secret); err != nil || link.Path != "folder" || !link.Directory {
+		t.Fatalf("link = %+v, %v", link, err)
+	}
+	if shared, err := a.Shared(ctx, "folder"); err != nil || !shared {
+		t.Fatalf("Shared = %t, %v", shared, err)
+	}
+	// An item removed by other means, such as on disk, can still be unshared.
+	if err := os.RemoveAll(filepath.Join(f.dir, f.user.Slug, "folder")); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Unshare(ctx, "folder"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.shares.Find(ctx, secret); !errors.Is(err, share.ErrNotFound) {
+		t.Fatalf("unshared link: %v", err)
+	}
+	if err := a.Unshare(ctx, ""); !errors.Is(err, storage.ErrInvalidPath) {
+		t.Fatalf("Unshare of the top folder: %v", err)
+	}
+}
