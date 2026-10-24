@@ -4,7 +4,7 @@
 
 Pigeon moves files between devices through a browser or an HTTP client. It is a
 self-hosted Go server with individual accounts, per-user storage and disk
-quotas, an administrator interface, and shareable download links.
+quotas, an administrator interface, and shareable download and upload links.
 
 The server streams uploads to disk and embeds its web interface in the
 executable. It reads its settings from a JSON configuration file and keeps
@@ -17,7 +17,7 @@ database, and an upload directory.
 | --- | --- |
 | Run Pigeon for the first time | [Installation and first run](getting-started.md) |
 | Upload, organize, or download files | [Files and uploads](guide/files.md) |
-| Send someone a download link | [Shareable downloads](guide/sharing.md) |
+| Send someone a download link, or collect files from them | [Share links](guide/sharing.md) |
 | Manage users and storage | [Accounts](administration/accounts.md) and [disk quotas](administration/quotas.md) |
 | Make Pigeon available over HTTPS | [HTTPS and reverse proxies](administration/deployment.md) |
 | Back up, restore, or upgrade a server | [Operations](administration/operations.md) |
@@ -33,9 +33,10 @@ administrator recycles or purges it.
 
 Uploads preserve filenames and directory structure. A batch is published only
 after the entire request succeeds; existing files are never overwritten.
-Folder downloads are ZIP archives. Anyone holding a share link can download
-its file or folder without signing in, until the owner replaces or revokes the
-link.
+Folder downloads are ZIP archives. Anyone holding a download link can download
+its file or folder without signing in, and anyone holding a folder's upload
+link can add files to it without seeing what it holds, until the owner replaces
+or revokes the link or it expires.
 
 ## Documentation and review history
 

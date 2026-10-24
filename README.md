@@ -1,9 +1,9 @@
 # <img src="web/static/logo.webp" width="48" height="48" alt="" /> Pigeon
 
 Pigeon is a self-hosted file sharing server written in Go. Upload and organize
-files from your browser, download folders as ZIPs, and share downloads with a
-link. Each account has its own storage and disk quota; administrators manage
-accounts through a web interface.
+files from your browser, download folders as ZIPs, share downloads with a link,
+and collect files from others through upload links. Each account has its own
+storage and disk quota; administrators manage accounts through a web interface.
 
 ## Quick start
 

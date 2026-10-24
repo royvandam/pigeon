@@ -78,8 +78,11 @@ the returned `*sql.DB`.
 The schema has a version, `database.SchemaVersion`, kept in the database as
 `PRAGMA user_version`. Opening a database from a later release, or one without
 a version that already has tables, fails rather than guessing at its contents.
-A release that changes the schema raises the version and adds a numbered step
-that converts databases from the previous one.
+A release that changes the schema raises the version and adds a step to
+`upgrades` that converts databases from the previous one. Opening an older
+database runs the steps it needs in one transaction, so a failed conversion
+leaves it as it was. Each step is written against the schema of its time and
+never changes afterwards.
 
 ## Accounts
 
@@ -122,11 +125,15 @@ its password changes.
 
 ## Share links
 
-`pkg/share` stores public download links. Only a hash of each token is kept,
-so a leaked database or backup yields no working links. Creating a link for an
-item replaces its previous one, and renaming, moving, or deleting an item
-revokes the links for it and everything below it before the path changes, so a
-reused path never revives an old link. Links of deleted accounts stop working.
+`pkg/share` stores public links. A link has a `share.Kind`: a download link
+for a file or folder, or an upload link for a folder, and an item has at most
+one of each kind. A link may expire; `share.Store` reads the time from the
+clock it is given, ignores expired links, and removes them when another link
+is created. Only a hash of each token is kept, so a leaked database or backup
+yields no working links. Creating a link for an item replaces its previous one
+of that kind, and renaming, moving, or deleting an item revokes every link for
+it and everything below it before the path changes, so a reused path never
+revives an old link. Links of deleted accounts stop working.
 
 ## Account files
 
@@ -148,8 +155,9 @@ moves, deletes, opens downloads, and creates and removes share links:
 
 A `files.Download` holds its own handle to the file or folder, so it streams
 after the account lock is released; folders are sent as ZIP archives.
-`files.Service.OpenShared` opens a share link's item under the account lock
-and rechecks the link after waiting for it.
+`files.Service.OpenShared` opens a download link's item under the account lock
+and rechecks the link after waiting for it; upload links never open a
+download.
 
 An upload is a `files.Upload`. `BeginUpload` takes the account's upload slot,
 which keeps uploads to one account one at a time. `Prepare` takes the account
@@ -158,6 +166,14 @@ each file while the lock is released, and `Publish` takes the lock again to
 recheck the account and quota before publishing the batch. The account's
 pages, share links, and file actions therefore never wait for an upload's
 body. A `files.Progress` follows the upload's phases and written bytes.
+
+`BeginSharedUpload` starts an upload through an upload link into the link's
+folder, for the link's owner. `Prepare` and `Publish` check that the link
+still points to that folder, before and after taking the lock, so revoking,
+replacing, or expiring the link, or moving its folder, discards an upload in
+progress. `Add` gives each first path element whose name is taken the next
+free numbered name, the same for every file below it, so an upload through a
+link never adds to or replaces an existing item.
 
 ## HTTP server
 
@@ -174,10 +190,11 @@ authentication, and error helpers:
   `client.go` identifies clients behind trusted proxies;
 - `index.go` and `explorer.go` render the explorer, and `files.go` handles
   file actions;
-- `download.go` serves files and ZIP archives, and `shares.go` manages and
-  serves share links;
-- `upload.go` streams uploads, and `upload_progress.go` tracks their progress
-  for the browser and serves authenticated snapshots;
+- `download.go` serves files and ZIP archives, and `shares.go` manages share
+  links and serves download links and the upload link page;
+- `upload.go` streams uploads, signed in or through an upload link, and
+  `upload_progress.go` tracks their progress for the browser, separately for
+  each account and each link, and serves snapshots to each;
 - `admin.go` serves user management, and `accounts.go` turns its actions into
   account changes;
 - `server.go` handles routing and shutdown, `deadline.go` limits slow request

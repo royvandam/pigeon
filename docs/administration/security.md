@@ -15,12 +15,26 @@ recycling does not restore them. See [accounts](accounts.md).
 
 ## Public links
 
-Anyone with a share URL can download the item without an account. Links have
-no automatic expiry; revoke or replace them when access should end. Folder
+Anyone with a download link can download its item without an account; folder
 links expose the folder's current contents, including files added later.
-Only token hashes are stored in SQLite, and application request logs redact
-public share tokens. A reverse proxy has its own logs; configure it to protect
-share URLs as well. See [sharing](../guide/sharing.md).
+Anyone with an upload link can add files to its folder without an account.
+
+- **Upload links write to the owner's storage.** Uploads through a link are
+  charged to the owner's quota and wait in the owner's upload queue, so anyone
+  with the link can fill the quota or keep the owner's uploads waiting. Give
+  upload links a lifetime and revoke them when they are no longer needed.
+- **Upload links reveal little.** The upload page shows the folder's name
+  only. It never lists, downloads, or replaces existing items: a taken name is
+  saved under a new one, and responses do not report the owner's quota or
+  usage. An upload link's token does not work as a download link.
+- **Links can expire.** The owner picks a lifetime when creating a link, from
+  1 hour to 30 days, or none. Download links default to none, so revoke or
+  replace them when access should end.
+- **Tokens are protected.** Only token hashes are stored in SQLite, and
+  application request logs redact the tokens of `/s/` and `/u/` URLs. A
+  reverse proxy has its own logs; configure it to protect share URLs as well.
+
+See [share links](../guide/sharing.md).
 
 ## Filesystem and browser boundaries
 

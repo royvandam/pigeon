@@ -14,6 +14,8 @@ are relative to the authenticated user's storage root.
 | `GET`, `HEAD` | `/download` | Private file or ZIP download; optional `path`. |
 | `GET`, `POST` | `/shares` | Inspect, create, replace, or revoke a share link. |
 | `GET`, `HEAD` | `/s/<token>` | Public file or ZIP download; no account required. |
+| `GET`, `POST` | `/u/<token>` | Public upload page and multipart upload into a folder; no account required. |
+| `GET` | `/u/<token>/progress` | JSON progress for an upload `id` through that link. |
 
 ## Authentication
 
@@ -119,15 +121,25 @@ curl --fail-with-body --user 'Jane Doe' --get \
 
 ## Manage share links
 
-`GET /shares?path=Archive/docs/report.pdf` returns `{"url":"","active":true}`
-when the item has a link, or `"active":false` when it does not; the URL of an
-existing link is not stored and cannot be returned. `POST /shares` accepts
-URL-encoded `action=create` or `action=revoke`, plus `path`. `create` returns
-`{"url":"/s/<token>","active":true}` with a new link, replacing any existing
-link for that item. Both endpoints require authentication and manage only the
-signed-in user's links. Session-authenticated POSTs also require `csrf_token`, like other
-file operations. The path must name a file or folder; sharing the account root
-is not supported.
+An item can have one link of each kind: `kind=download`, the default, for a
+file or folder, and `kind=upload` for a folder.
+
+`GET /shares?path=Archive/docs/report.pdf&kind=download` returns
+`{"url":"","active":true,"kind":"download","expires_at":null}` when the item
+has a link of that kind, or `"active":false` when it does not; the URL of an
+existing link is not stored and cannot be returned. `expires_at` is when an
+active link stops working, in RFC 3339 UTC, or `null` if it does not expire.
+
+`POST /shares` accepts URL-encoded `action=create` or `action=revoke`, plus
+`path` and `kind`. `create` also accepts `lifetime`, a duration such as `1h`,
+`24h`, or `720h`, up to a year; without it, the link does not expire. It
+returns the new link, such as `{"url":"/s/<token>","active":true,...}`,
+replacing any existing link of that kind for that item. Both endpoints require
+authentication and manage only the signed-in user's links.
+Session-authenticated POSTs also require `csrf_token`, like other file
+operations. The path must name a file or folder; sharing the account root is
+not supported. An unknown kind, an invalid lifetime, or an upload link for a
+file returns HTTP 400.
 
 For example, create a link to an existing file:
 
@@ -141,13 +153,39 @@ curl --fail-with-body --user 'Jane Doe' \
 The JSON response's `url` is a path such as `/s/<token>`; prepend the server's
 public origin to share it. Save that URL immediately. Repeating `create`
 replaces the link and invalidates the old token. Send `action=revoke` with
-the same `path` to disable sharing; the response has an empty `url` and
-`active: false`.
+the same `path` and `kind` to disable sharing; the response has an empty `url`
+and `active: false`.
+
+## Use share links
 
 `GET /s/<token>` and `HEAD /s/<token>` provide the shared download without
 authentication. File downloads support byte ranges. Query parameters cannot
-change the shared item. Invalid or revoked links return HTTP 404, and these
-URLs allow downloads only.
+change the shared item. Invalid, revoked, or expired links, and upload links,
+return HTTP 404; these URLs allow downloads only.
+
+`GET /u/<token>` serves the upload page of an upload link. `POST /u/<token>`
+takes the same multipart form as `/upload`, without authentication, and saves
+the files in the link's folder. Names are relative to that folder; a taken
+first path element is replaced by the next free name, such as
+`report (2).pdf` or `Photos (2)`. The response is the same as for `/upload`,
+with `saved_as` relative to the link's folder, but it sends no `X-Quota-*`
+headers, and a quota error does not say how much space is left. An optional
+`X-Upload-ID` header enables `GET /u/<token>/progress?id=<id>`. For example,
+create a link that works for a week and upload through it:
+
+```sh
+curl --fail-with-body --user 'Jane Doe' \
+  --data-urlencode 'action=create' --data-urlencode 'path=Inbox' \
+  --data-urlencode 'kind=upload' --data-urlencode 'lifetime=168h' \
+  http://127.0.0.1:8080/shares
+curl --fail-with-body --form 'file=@scan.pdf' \
+  http://127.0.0.1:8080/u/<token>
+```
+
+Invalid, revoked, or expired links, and download links, return HTTP 404. An
+upload also fails with 404 when its link is revoked, replaced, or expires, or
+its folder is renamed, moved, or deleted, before the files are saved.
+Cross-site browser posts return HTTP 403.
 
 ## Change files and folders
 
