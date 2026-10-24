@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"html/template"
+	"log/slog"
 	"net/http"
 
 	"github.com/royvandam/pigeon/web"
@@ -31,6 +32,7 @@ type loginPage struct {
 func renderTemplate(w http.ResponseWriter, tmpl *template.Template, data any, status int) {
 	var body bytes.Buffer
 	if err := tmpl.Execute(&body, data); err != nil {
+		slog.Error("template error", "err", err)
 		http.Error(w, "template error", http.StatusInternalServerError)
 		return
 	}

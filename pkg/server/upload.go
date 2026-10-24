@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime"
 	"mime/multipart"
 	"net/http"
@@ -64,7 +65,11 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "upload canceled", http.StatusRequestTimeout)
 		return
 	}
-	defer upload.Close()
+	defer func() {
+		if err := upload.Close(); err != nil {
+			slog.Warn("could not discard staged upload files", "err", err)
+		}
+	}()
 	usage, err := upload.Prepare(r.Context(), r.URL.Query().Get("dir"))
 	if usage.Known() {
 		setQuotaHeaders(w, usage)
@@ -75,7 +80,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeUploadError(w, err)
+		writeUploadError(w, r, err)
 		return
 	}
 
@@ -121,7 +126,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 			case errors.Is(err, storage.ErrInvalidPath), errors.Is(err, storage.ErrConflict):
 				writeStorageError(w, err)
 			case errors.As(err, &fileErr):
-				http.Error(w, "upload failed", http.StatusInternalServerError)
+				serverError(w, r, "upload failed", err)
 			default:
 				http.Error(w, "upload failed", uploadReadErrorStatus(err))
 			}
@@ -145,7 +150,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		setQuotaHeaders(w, receipt.Usage)
 	}
 	if err != nil {
-		writeUploadError(w, err)
+		writeUploadError(w, r, err)
 		return
 	}
 	progress.setState("complete")
@@ -159,17 +164,17 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 
 // writeUploadError answers an upload that could not check the account or
 // publish its files.
-func writeUploadError(w http.ResponseWriter, err error) {
+func writeUploadError(w http.ResponseWriter, r *http.Request, err error) {
 	var quotaErr *files.QuotaError
 	switch {
 	case errors.Is(err, account.ErrInvalidCredentials):
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 	case errors.Is(err, files.ErrUsageUnavailable):
-		http.Error(w, "failed to check storage usage", http.StatusInternalServerError)
+		serverError(w, r, "failed to check storage usage", err)
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		http.Error(w, "upload canceled", http.StatusRequestTimeout)
 	case errors.Is(err, files.ErrQuotaUnavailable):
-		http.Error(w, "failed to load disk quota", http.StatusInternalServerError)
+		serverError(w, r, "failed to load disk quota", err)
 	case errors.As(err, &quotaErr):
 		http.Error(w, fmt.Sprintf("disk quota exceeded (%s available)", size.Format(quotaErr.Available)), http.StatusRequestEntityTooLarge)
 	default:

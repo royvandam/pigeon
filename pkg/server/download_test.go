@@ -4,7 +4,9 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"errors"
 	"io"
+	"log"
 	"mime"
 	"net/http"
 	"net/http/httptest"
@@ -196,5 +198,44 @@ func TestFolderDownloadsIncludeEveryUploadedName(t *testing.T) {
 				t.Errorf("%s: ZIP entry %s = %q, exists=%t; want %q", name, entry, got, exists, want)
 			}
 		}
+	}
+}
+
+// failingWriter is a response whose connection broke.
+type failingWriter struct{ *httptest.ResponseRecorder }
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("broken pipe") }
+
+// This test replaces the global log output, so it must not call t.Parallel.
+func TestFolderDownloadLogsAnErrorOnlyWhenTheClientRemains(t *testing.T) {
+	var output bytes.Buffer
+	old := log.Writer()
+	log.SetOutput(&output)
+	defer log.SetOutput(old)
+	srv := newTestServer(t, 100)
+	ctx := context.Background()
+	u, err := srv.accounts.Authenticate(ctx, "Test User", testPassword)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeStoredFile(t, srv, u.Slug, "project/readme.txt", "root")
+	download := func(ctx context.Context) string {
+		d, err := srv.openPrivateDownload(context.Background(), u, "project")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer d.Close()
+		output.Reset()
+		r := httptest.NewRequestWithContext(ctx, http.MethodGet, "/download?path=project", nil)
+		serveDownload(failingWriter{httptest.NewRecorder()}, r, d)
+		return output.String()
+	}
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	if line := download(canceled); line != "" {
+		t.Errorf("a download the client abandoned logged %q", line)
+	}
+	if line := download(ctx); !strings.Contains(line, "ERROR folder download failed") {
+		t.Errorf("a failed download logged %q; want an error", line)
 	}
 }

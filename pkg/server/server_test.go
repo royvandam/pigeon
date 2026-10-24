@@ -3,12 +3,15 @@ package server
 import (
 	"bytes"
 	"context"
+	"errors"
 	"html"
 	"io/fs"
 	"log"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"reflect"
 	"regexp"
 	"strings"
@@ -145,35 +148,37 @@ func TestTemplatesContainNoInlineScriptsOrStyles(t *testing.T) {
 	}
 }
 
-// This test replaces the global log output, so it must not call t.Parallel:
-// Go runs it before the parallel tests start, so their requests are not
-// logged into its buffer.
+// This test replaces the global log output and level, so it must not call
+// t.Parallel: Go runs it before the parallel tests start, so their requests
+// are not logged into its buffer.
 func TestRequestLogEscapesPathsAndRedactsShareTokens(t *testing.T) {
 	var output bytes.Buffer
 	old := log.Writer()
 	log.SetOutput(&output)
 	defer log.SetOutput(old)
+	defer slog.SetLogLoggerLevel(slog.SetLogLoggerLevel(slog.LevelDebug))
 	handler := newTestServer(t, 100).Handler()
 	token := strings.Repeat("A", 43)
 	for _, test := range []struct{ path, logged string }{
-		{"/files", `"/files"`},
-		{"/x\n2026/10/17 12:00:00 POST /admin 1ms", `"/x\n2026/10/17 12:00:00 POST /admin 1ms"`},
+		{"/files", `/files`},
+		{"/x path=/admin", `"/x path=/admin"`},
+		{"/x\n2026/10/17 12:00:00 DEBUG request method=POST path=/admin", `"/x\n2026/10/17 12:00:00 DEBUG request method=POST path=/admin"`},
 		{"/x\r\x1b[2K", `"/x\r\x1b[2K"`},
 		{"/invoice\u202efdp.exe", `"/invoice\u202efdp.exe"`},
-		{"/s/" + token, `"/s/[redacted]"`},
-		{"/s/" + token + "/", `"/s/[redacted]"`},
-		{"//s/" + token, `"//s/[redacted]"`},
-		{"/s//" + token, `"/s/[redacted]"`},
-		{"/x/../s/" + token, `"/x/../s/[redacted]"`},
-		{"/s/" + token + "/../../x", `"/s/[redacted]"`},
-		{"/s/" + token + "\nGET /forged", `"/s/[redacted]"`},
+		{"/s/" + token, `/s/[redacted]`},
+		{"/s/" + token + "/", `/s/[redacted]`},
+		{"//s/" + token, `//s/[redacted]`},
+		{"/s//" + token, `/s/[redacted]`},
+		{"/x/../s/" + token, `/x/../s/[redacted]`},
+		{"/s/" + token + "/../../x", `/s/[redacted]`},
+		{"/s/" + token + "\nGET /forged", `/s/[redacted]`},
 	} {
 		output.Reset()
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
 		r.URL.Path = test.path // As decoded from the request line, such as %0a or //.
 		handler.ServeHTTP(httptest.NewRecorder(), r)
 		line := output.String()
-		if strings.Count(line, "\n") != 1 || !strings.Contains(line, " GET "+test.logged+" ") || strings.Contains(line, token) {
+		if strings.Count(line, "\n") != 1 || !strings.Contains(line, " method=GET path="+test.logged+" ") || strings.Contains(line, token) {
 			t.Errorf("request for %q logged %q; want one line with %s", test.path, line, test.logged)
 		}
 	}
@@ -218,5 +223,38 @@ func TestNormalizeShowsTheSettingsAsApplied(t *testing.T) {
 	}
 	if _, err := (Configuration{ListenAddress: "nowhere"}).Normalize(); err == nil {
 		t.Fatal("normalized an invalid configuration")
+	}
+}
+
+// This test replaces the global log output, so it must not call t.Parallel.
+func TestServerErrorsAreLoggedUnlessTheClientLeft(t *testing.T) {
+	var output bytes.Buffer
+	old := log.Writer()
+	log.SetOutput(&output)
+	defer log.SetOutput(old)
+	failure := errors.New("disk on fire")
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	for _, test := range []struct {
+		name   string
+		answer func(http.ResponseWriter, *http.Request)
+		ctx    context.Context
+		logged string
+	}{
+		{"server error", func(w http.ResponseWriter, r *http.Request) { serverError(w, r, "logout failed", failure) },
+			context.Background(), `ERROR logout failed err="disk on fire"`},
+		{"abandoned server error", func(w http.ResponseWriter, r *http.Request) { serverError(w, r, "logout failed", failure) },
+			canceled, ""},
+		{"storage failure", func(w http.ResponseWriter, r *http.Request) { writeStorageError(w, failure) },
+			context.Background(), `ERROR unable to access files err="disk on fire"`},
+		{"missing file", func(w http.ResponseWriter, r *http.Request) { writeStorageError(w, os.ErrNotExist) },
+			context.Background(), ""},
+	} {
+		output.Reset()
+		w := httptest.NewRecorder()
+		test.answer(w, httptest.NewRequestWithContext(test.ctx, http.MethodPost, "/", nil))
+		if line := output.String(); test.logged == "" && line != "" || !strings.Contains(line, test.logged) {
+			t.Errorf("%s logged %q; want %q", test.name, line, test.logged)
+		}
 	}
 }

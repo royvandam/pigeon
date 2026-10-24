@@ -1,4 +1,7 @@
 {
+  "logging": {
+    "level": "info"
+  },
   "database": {
     "path": "pigeon.db"
   },

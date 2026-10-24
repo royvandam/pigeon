@@ -3,7 +3,7 @@ package server
 import (
 	"database/sql"
 	"errors"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -45,14 +45,14 @@ type adminUser struct {
 func (s *Server) renderAdmin(w http.ResponseWriter, r *http.Request, a auth.Authentication, data adminPage, status int) {
 	users, err := s.accounts.List(r.Context())
 	if err != nil {
-		http.Error(w, "failed to load users", http.StatusInternalServerError)
+		serverError(w, r, "failed to load users", err)
 		return
 	}
 	var rows, deletedRows []adminUser
 	for _, u := range users {
 		used, err := s.files.Usage(r.Context(), u)
 		if err != nil {
-			http.Error(w, "failed to check storage usage", http.StatusInternalServerError)
+			serverError(w, r, "failed to check storage usage", err)
 			return
 		}
 		row := adminUser{User: u, UsedHuman: size.Format(used), QuotaHuman: size.Format(u.QuotaBytes), QuotaInput: quotaInput(u.QuotaBytes)}
@@ -97,11 +97,11 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 	}
 	change, err := s.applyAccountCommand(r.Context(), a.User, command)
 	if errors.Is(err, account.ErrPassphraseGeneration) {
-		http.Error(w, account.ErrPassphraseGeneration.Error(), http.StatusInternalServerError)
+		serverError(w, r, account.ErrPassphraseGeneration.Error(), err)
 		return
 	}
 	if command.action == "purge" && err != nil && !errors.Is(err, account.ErrDeletedUserNotFound) {
-		log.Printf("purge account %d: %v", command.id, err)
+		slog.Error("purge account", "id", command.id, "err", err)
 		s.renderAdmin(w, r, a, adminPage{Error: "Unable to finish purging this account. Its username remains reserved. Some uploads may have been removed; resolve the storage problem and try again."}, http.StatusInternalServerError)
 		return
 	}
@@ -113,7 +113,7 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if !errors.Is(lookupErr, sql.ErrNoRows) {
-				http.Error(w, "failed to check the reserved account", http.StatusInternalServerError)
+				serverError(w, r, "failed to check the reserved account", lookupErr)
 				return
 			}
 		}

@@ -3,7 +3,6 @@ package server
 import (
 	"crypto/subtle"
 	"errors"
-	"log"
 	"net/http"
 	"time"
 
@@ -72,8 +71,7 @@ func (s *Server) requireAuth(w http.ResponseWriter, r *http.Request, options aut
 			setRetryAfter(w, limited)
 			http.Error(w, limited.Error(), http.StatusTooManyRequests)
 		} else if !errors.Is(err, account.ErrInvalidCredentials) {
-			log.Printf("authenticate: %v", err)
-			http.Error(w, "authentication unavailable", http.StatusInternalServerError)
+			serverError(w, r, "authentication unavailable", err)
 		} else if options.Browser || (r.Method == http.MethodGet && navigation(r)) {
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
 		} else {
@@ -139,7 +137,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		}
 		csrf, err := token.New()
 		if err != nil {
-			http.Error(w, "login unavailable", http.StatusInternalServerError)
+			serverError(w, r, "login unavailable", err)
 			return
 		}
 		http.SetCookie(w, &http.Cookie{Name: loginCookieName, Value: csrf, Path: "/login", HttpOnly: true,
@@ -169,13 +167,12 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err != nil {
-			log.Printf("login: %v", err)
-			http.Error(w, "login unavailable", http.StatusInternalServerError)
+			serverError(w, r, "login unavailable", err)
 			return
 		}
 		token, err := s.sessions.Create(r.Context(), u)
 		if err != nil {
-			http.Error(w, "login unavailable; try again", http.StatusInternalServerError)
+			serverError(w, r, "login unavailable; try again", err)
 			return
 		}
 		s.setSessionCookie(w, r, token)
@@ -194,7 +191,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.sessions.Delete(r.Context(), a.TokenHash); err != nil {
-		http.Error(w, "logout failed", http.StatusInternalServerError)
+		serverError(w, r, "logout failed", err)
 		return
 	}
 	s.clearSessionCookie(w, r)
