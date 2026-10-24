@@ -197,6 +197,7 @@ composes them into one type that mirrors the configuration file:
 
 ```go
 type ApplicationConfiguration struct {
+	Logging  LoggingConfiguration               `json:"logging"`
 	Database database.Configuration             `json:"database"`
 	Storage  storageconfiguration.Configuration `json:"storage"`
 	HTTP     server.Configuration               `json:"http"`
@@ -208,11 +209,13 @@ defaults, which the package resolves once when it builds from them, as
 `server.New` does. A choice between implementations is a struct with one
 pointer field per implementation, of which exactly one is set; its factory,
 such as `storageconfiguration.NewProviderFromConfiguration`, builds the chosen
-one. The factory lives in its own package, `pkg/storage/configuration`, so
-that implementations of the storage interfaces can be chosen without import
-cycles; a new provider adds a field there. `pkg/configuration` reads the file
-strictly, rejecting unknown fields, and provides value types such as
-`configuration.Duration`.
+one. Each implementation defines its own configuration type and factory, such
+as `local.Configuration` and `local.NewProviderFromConfiguration`, and the
+choice delegates to them. The choice lives in its own package,
+`pkg/storage/configuration`, so that implementations of the storage interfaces
+can be chosen without import cycles; a new provider adds a field there.
+`pkg/configuration` reads the file strictly, rejecting unknown fields, and
+provides value types such as `configuration.Duration`.
 
 ## Startup
 

@@ -12,7 +12,7 @@ import (
 func TestNewProviderFromConfiguration(t *testing.T) {
 	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "uploads")
-	provider, err := NewProviderFromConfiguration(Configuration{Local: &LocalConfiguration{Directory: dir}})
+	provider, err := NewProviderFromConfiguration(Configuration{Local: &local.Configuration{Directory: dir}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -22,7 +22,7 @@ func TestNewProviderFromConfiguration(t *testing.T) {
 	if _, err := NewProviderFromConfiguration(Configuration{}); err == nil || !strings.Contains(err.Error(), "choose a storage provider") {
 		t.Fatalf("no provider: %v", err)
 	}
-	if _, err := NewProviderFromConfiguration(Configuration{Local: &LocalConfiguration{}}); err == nil || !strings.HasPrefix(err.Error(), "local: ") {
+	if _, err := NewProviderFromConfiguration(Configuration{Local: &local.Configuration{}}); err == nil || !strings.HasPrefix(err.Error(), "local: ") {
 		t.Fatalf("local provider without a directory: %v", err)
 	}
 }
@@ -30,13 +30,13 @@ func TestNewProviderFromConfiguration(t *testing.T) {
 func TestValidateCreatesNothing(t *testing.T) {
 	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "uploads")
-	if err := (Configuration{Local: &LocalConfiguration{Directory: dir}}).Validate(); err != nil {
+	if err := (Configuration{Local: &local.Configuration{Directory: dir}}).Validate(); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
 		t.Fatalf("validation created the directory: %v", err)
 	}
-	for _, cfg := range []Configuration{{}, {Local: &LocalConfiguration{}}} {
+	for _, cfg := range []Configuration{{}, {Local: &local.Configuration{}}} {
 		if err := cfg.Validate(); err == nil {
 			t.Errorf("%+v passed validation", cfg)
 		}
