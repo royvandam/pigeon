@@ -135,9 +135,11 @@ takes the account lock and checks that the identity it acts for is still
 current, so a request authenticated before a deletion, password change, or
 purge cannot reach the account's files, or those of a new account that reuses
 the username. The returned `files.Access` lists, creates folders, renames,
-moves, deletes, and opens downloads:
+moves, deletes, opens downloads, and creates and removes share links:
 
 - new names are checked for invisible formatting characters;
+- a share link needs an existing item other than the top folder, but can be
+  removed after its item is gone;
 - a new folder is charged one allocation unit;
 - renames, moves, and deletions revoke the share links of the item and
   everything below it, after validation and before the change;

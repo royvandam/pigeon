@@ -21,7 +21,6 @@ import (
 	"github.com/royvandam/pigeon/pkg/auth"
 	"github.com/royvandam/pigeon/pkg/configuration"
 	"github.com/royvandam/pigeon/pkg/files"
-	"github.com/royvandam/pigeon/pkg/share"
 )
 
 const (
@@ -59,7 +58,6 @@ type Dependencies struct {
 	Manager       *account.Manager
 	Authenticator *auth.Authenticator
 	Sessions      *auth.Sessions
-	Shares        *share.Store
 	Files         *files.Service
 }
 
@@ -77,7 +75,6 @@ type Server struct {
 	manager       *account.Manager
 	authenticator *auth.Authenticator
 	sessions      *auth.Sessions
-	shares        *share.Store
 	files         *files.Service
 	uploads       *uploadTracker
 }
@@ -89,7 +86,6 @@ func New(cfg Configuration, deps Dependencies) (*Server, error) {
 		manager:       deps.Manager,
 		authenticator: deps.Authenticator,
 		sessions:      deps.Sessions,
-		shares:        deps.Shares,
 		files:         deps.Files,
 		uploads:       newUploadTracker(),
 	}

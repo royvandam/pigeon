@@ -54,6 +54,7 @@ type testServer struct {
 	storage storage.Provider
 	locks   *account.Locks
 	usage   *quota.Cache
+	shares  *share.Store
 }
 
 // newTestServer serves one account, Test User, with quotaBytes of quota.
@@ -86,11 +87,11 @@ func (srv *testServer) open(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv.db = db
+	srv.shares = share.NewStore(db)
 	srv.Server, err = New(Configuration{}, Dependencies{
 		Accounts:      accounts,
 		Authenticator: auth.NewAuthenticator(accounts, time.Now),
 		Sessions:      auth.NewSessions(db),
-		Shares:        share.NewStore(db),
 	})
 	if err != nil {
 		t.Fatal(err)
