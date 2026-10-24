@@ -2,7 +2,7 @@ package server
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"mime"
 	"net/http"
 
@@ -44,8 +44,12 @@ func serveDownload(w http.ResponseWriter, r *http.Request, d *files.Download) {
 		w.Header().Set("Content-Type", "application/zip")
 		w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": d.Name() + ".zip"}))
 		if r.Method != http.MethodHead {
-			if err := d.WriteZip(r.Context(), w); err != nil {
-				log.Printf("folder download failed: %v", err)
+			// A client that disconnects cancels the request context, also when
+			// the failed write notices it first; that is not a server fault.
+			if err := d.WriteZip(r.Context(), w); err != nil && r.Context().Err() != nil {
+				slog.Debug("folder download canceled", "err", err)
+			} else if err != nil {
+				slog.Error("folder download failed", "err", err)
 			}
 		}
 		return

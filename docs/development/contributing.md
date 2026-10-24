@@ -11,7 +11,7 @@ For remote editor setup, see [VS Code over SSH](editor.md).
 ## Checks and builds
 
 Go tests run in parallel and hash passwords at bcrypt's minimum cost, so the
-suite takes seconds; only a test that replaces the global log output stays
+suite takes seconds; only tests that replace the global log output stay
 serial. Each package tests its own behavior; the HTTP tests in `pkg/server`
 exercise them together through a test server whose fixture and shared helpers
 live in `pkg/server/helpers_test.go`.

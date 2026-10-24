@@ -67,6 +67,7 @@ func TestRunRejectsInvalidConfigurationsBeforeCreatingTheDatabase(t *testing.T) 
 		"storage: choose a storage":     `{"database": {"path": "` + db + `"}}`,
 		"database: database path":       `{"storage": {"local": {"directory": "` + uploads + `"}}}`,
 		`invalid duration "soon"`:       `{"http": {"uploadIdleTimeout": "soon"}}`,
+		`level string "verbose"`:        `{"logging": {"level": "verbose"}}`,
 		"http: public URL must be":      `{"storage": {"local": {"directory": "` + uploads + `"}}, "http": {"publicURL": "files.example.com"}}`,
 		"http: trusted proxies must be": `{"storage": {"local": {"directory": "` + uploads + `"}}, "http": {"trustedProxies": ["proxy.example"]}}`,
 	} {

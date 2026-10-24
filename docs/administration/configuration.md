@@ -40,6 +40,25 @@ A service behind an HTTPS reverse proxy on the same host:
 The file has one section for each part of Pigeon. Omitted settings take their
 defaults; the database path and a storage provider are required.
 
+### Logging
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `logging.level` | `info` | Least severe messages logged: `debug`, `info`, `warn`, or `error`. |
+
+Each level includes the ones after it:
+
+- `debug` adds a line for every request, with its method, path, and duration,
+  and failures caused by a client that disconnected.
+- `info` logs the listen address, storage, and other settings at startup.
+- `warn` logs problems Pigeon works around, such as serving plain HTTP to the
+  network or failing to remove the staged files of an unfinished upload.
+- `error` logs failures that stopped a request, such as a database or storage
+  error behind an HTTP `500` response.
+
+Use `warn` in production to log only what needs attention, and `debug` while
+developing or investigating a problem.
+
 ### Database
 
 | Setting | Default | Purpose |

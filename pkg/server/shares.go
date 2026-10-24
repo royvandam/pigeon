@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log"
+	"log/slog"
 	"net/http"
 
 	"github.com/royvandam/pigeon/pkg/account"
@@ -62,7 +62,7 @@ func (s *Server) handleShares(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, account.ErrInvalidCredentials) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 		} else {
-			http.Error(w, "failed to update share link", http.StatusInternalServerError)
+			serverError(w, r, "failed to update share link", err)
 		}
 		return
 	}
@@ -87,10 +87,12 @@ func (s *Server) handleSharedDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		log.Printf("shared download unavailable: %v", err)
 		status := http.StatusInternalServerError
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			status = http.StatusRequestTimeout
+			slog.Debug("shared download canceled", "err", err)
+		} else {
+			slog.Error("shared download unavailable", "err", err)
 		}
 		http.Error(w, "download unavailable", status)
 		return

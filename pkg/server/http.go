@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -23,11 +24,25 @@ func allowMethods(w http.ResponseWriter, r *http.Request, methods ...string) boo
 	return false
 }
 
+// serverError answers a request that failed on the server and logs err. A
+// client that disconnects also makes server work fail; that is logged only for
+// debugging.
+func serverError(w http.ResponseWriter, r *http.Request, message string, err error) {
+	if r.Context().Err() != nil {
+		slog.Debug(message, "err", err)
+	} else {
+		slog.Error(message, "err", err)
+	}
+	http.Error(w, message, http.StatusInternalServerError)
+}
+
 func writeStorageError(w http.ResponseWriter, err error) {
 	message, status := storageError(err)
 	http.Error(w, message, status)
 }
 
+// storageError returns the message and status that answer err, and logs the
+// failures it answers with a server error.
 func storageError(err error) (string, int) {
 	switch {
 	case errors.Is(err, storage.ErrInvalidPath):
@@ -43,6 +58,7 @@ func storageError(err error) (string, int) {
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		return "operation canceled", http.StatusRequestTimeout
 	default:
+		slog.Error("unable to access files", "err", err)
 		return "unable to access files", http.StatusInternalServerError
 	}
 }

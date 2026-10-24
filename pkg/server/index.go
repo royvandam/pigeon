@@ -38,7 +38,7 @@ func (s *Server) renderIndex(w http.ResponseWriter, r *http.Request, a auth.Auth
 	}
 	usage, err := access.Usage(r.Context())
 	if err != nil {
-		http.Error(w, "failed to check storage usage", http.StatusInternalServerError)
+		serverError(w, r, "failed to check storage usage", err)
 		return
 	}
 	data := struct {

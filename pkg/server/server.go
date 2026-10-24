@@ -8,7 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/netip"
@@ -168,19 +168,19 @@ func (s *Server) Handler() http.Handler {
 // Run serves HTTP until ctx is canceled, then gives active requests up to 10
 // seconds to finish.
 func (s *Server) Run(ctx context.Context) error {
-	log.Printf("listening on http://%s", s.listen)
+	slog.Info("listening", "url", "http://"+s.listen)
 	if s.publicURL != nil {
-		log.Printf("public URL: %s", s.publicURL)
+		slog.Info("public URL", "url", s.publicURL)
 	}
 	if warning := plainHTTPWarning(s.listen, s.publicURL); warning != "" {
-		log.Print(warning)
+		slog.Warn(warning)
 	}
 	if len(s.trustedProxies) > 0 {
 		proxies := make([]string, len(s.trustedProxies))
 		for i, prefix := range s.trustedProxies {
 			proxies[i] = prefix.String()
 		}
-		log.Printf("trusted proxies: %s", strings.Join(proxies, ", "))
+		slog.Info("trusted proxies", "proxies", strings.Join(proxies, ", "))
 	}
 	return runServer(ctx, &http.Server{
 		Addr:              s.listen,
@@ -236,9 +236,10 @@ func logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		next.ServeHTTP(w, r)
-		// %q keeps a decoded newline or other control character from starting a
-		// forged log line.
-		log.Printf("%s %q %s", r.Method, redactShareToken(r.URL.Path), time.Since(start).Truncate(time.Millisecond))
+		// Attribute values are quoted when they hold a decoded newline or other
+		// control character, which therefore cannot start a forged log line.
+		slog.Debug("request", "method", r.Method, "path", redactShareToken(r.URL.Path),
+			"duration", time.Since(start).Truncate(time.Millisecond))
 	})
 }
 

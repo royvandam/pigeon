@@ -79,6 +79,6 @@ func plainHTTPWarning(listen string, publicURL *url.URL) string {
 	if addr, err := netip.ParseAddr(host); err == nil && addr.IsLoopback() {
 		return ""
 	}
-	return fmt.Sprintf("warning: serving plain HTTP on %s; passwords and sessions cross the network unencrypted. "+
+	return fmt.Sprintf("serving plain HTTP on %s; passwords and sessions cross the network unencrypted. "+
 		"Put Pigeon behind an HTTPS reverse proxy and set http.publicURL to https://… in the configuration file, or listen on %s", listen, DefaultListenAddress)
 }

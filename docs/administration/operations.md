@@ -13,8 +13,10 @@ path resolved from another working directory can create an empty database and
 trigger first-run setup again. See [configuration](configuration.md) before
 relocating data.
 
-Pigeon logs its listen address, storage, and requests to standard error. `SIGINT` and `SIGTERM` allow active requests up to 10 seconds to finish
-before shutdown. Give a service manager more than 10 seconds to stop it.
+Pigeon logs to standard error; [`logging.level`](configuration.md#logging)
+selects how much. `SIGINT` and `SIGTERM` allow active requests up to 10
+seconds to finish before shutdown. Give a service manager more than 10 seconds
+to stop it.
 
 ## What to back up
 

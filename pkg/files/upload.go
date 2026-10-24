@@ -294,10 +294,12 @@ func (up *Upload) Publish(ctx context.Context) (Receipt, error) {
 }
 
 // Close discards every file that was not published and releases the upload
-// slot.
-func (up *Upload) Close() {
+// slot. An error means some staged files remain until the next start removes
+// them.
+func (up *Upload) Close() error {
+	var err error
 	if up.stage != nil {
-		up.stage.Close()
+		err = up.stage.Close()
 		up.stage = nil
 	}
 	if up.tree != nil {
@@ -308,6 +310,7 @@ func (up *Upload) Close() {
 		up.releaseSlot()
 		up.releaseSlot = nil
 	}
+	return err
 }
 
 // progressWriter reports file bytes only after the output accepts them.

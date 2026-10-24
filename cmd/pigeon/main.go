@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -37,9 +38,17 @@ import (
 // section is the configuration type of the package that builds that part of
 // Pigeon.
 type ApplicationConfiguration struct {
+	Logging  LoggingConfiguration               `json:"logging"`
 	Database database.Configuration             `json:"database"`
 	Storage  storageconfiguration.Configuration `json:"storage"`
 	HTTP     server.Configuration               `json:"http"`
+}
+
+// LoggingConfiguration holds the logging settings.
+type LoggingConfiguration struct {
+	// Level is the least severe level logged: "debug", "info", "warn", or
+	// "error". The zero value is info.
+	Level slog.Level `json:"level"`
 }
 
 func main() {
@@ -76,6 +85,7 @@ func run(ctx context.Context, args []string, stdin *os.File, stdout io.Writer) e
 
 // serve builds Pigeon from cfg and serves until ctx is canceled.
 func serve(ctx context.Context, cfg ApplicationConfiguration, stdin *os.File, stdout io.Writer) error {
+	slog.SetLogLoggerLevel(cfg.Logging.Level)
 	if err := cfg.HTTP.Validate(); err != nil {
 		return fmt.Errorf("http: %w", err)
 	}
@@ -108,10 +118,10 @@ func serve(ctx context.Context, cfg ApplicationConfiguration, stdin *os.File, st
 	// No upload can be running yet, so every staged upload is stale.
 	removed, err := provider.RemoveStaleUploads(ctx)
 	if removed > 0 {
-		log.Printf("removed %d unfinished uploads left from the previous run", removed)
+		slog.Info("removed unfinished uploads left from the previous run", "count", removed)
 	}
 	if err != nil {
-		log.Printf("warning: could not remove every unfinished upload: %v", err)
+		slog.Warn("could not remove every unfinished upload", "err", err)
 	}
 
 	locks, usage := account.NewLocks(), quota.NewCache(time.Now)
@@ -127,8 +137,8 @@ func serve(ctx context.Context, cfg ApplicationConfiguration, stdin *os.File, st
 	if err != nil {
 		return fmt.Errorf("http: %w", err)
 	}
-	log.Printf("storage: %v", provider)
-	log.Printf("default user quota: %s", size.Format(quota.DefaultQuota))
+	slog.Info("storage", "provider", provider)
+	slog.Info("default user quota", "quota", size.Format(quota.DefaultQuota))
 	if err := srv.Run(ctx); err != nil {
 		return fmt.Errorf("server error: %w", err)
 	}
