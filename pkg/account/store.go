@@ -6,9 +6,7 @@ import (
 	"errors"
 	"time"
 
-	"modernc.org/sqlite"
-	"modernc.org/sqlite/lib"
-
+	"github.com/royvandam/pigeon/pkg/database"
 	"github.com/royvandam/pigeon/pkg/quota"
 )
 
@@ -54,8 +52,7 @@ func (s *Store) Create(ctx context.Context, username, password string, admin boo
 		`INSERT INTO users (username, username_key, slug, password_hash, is_admin, quota_bytes) VALUES (?, ?, ?, ?, ?, ?)`,
 		display, key, slug, hash, admin, quotaBytes)
 	if err != nil {
-		var sqliteErr *sqlite.Error
-		if errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE {
+		if database.IsUniqueViolation(err) {
 			return User{}, ErrUserConflict
 		}
 		return User{}, err

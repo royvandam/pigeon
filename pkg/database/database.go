@@ -11,7 +11,8 @@ import (
 	"os"
 	"path/filepath"
 
-	_ "modernc.org/sqlite"
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
 // Configuration chooses the database.
@@ -19,6 +20,13 @@ type Configuration struct {
 	// Path is the SQLite database file. A relative path is resolved from the
 	// working directory at startup.
 	Path string `json:"path"`
+}
+
+// IsUniqueViolation reports whether err is a statement that failed because a
+// row would duplicate a UNIQUE column, so that stores need not know the driver.
+func IsUniqueViolation(err error) bool {
+	var sqliteErr *sqlite.Error
+	return errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE
 }
 
 // Open opens the SQLite database at path, creating it and its parent folders
