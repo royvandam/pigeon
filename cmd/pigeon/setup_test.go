@@ -17,7 +17,7 @@ const testPassword = "test-password"
 
 func newTestAccounts(t *testing.T) *account.Store {
 	t.Helper()
-	db, err := database.Open(context.Background(), filepath.Join(t.TempDir(), "setup.db"))
+	db, err := database.Open(context.Background(), database.Configuration{Path: filepath.Join(t.TempDir(), "setup.db")})
 	if err != nil {
 		t.Fatal(err)
 	}

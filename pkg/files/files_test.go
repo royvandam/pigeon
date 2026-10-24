@@ -36,7 +36,7 @@ func newFixture(t *testing.T, quotaBytes int64) fixture {
 	t.Helper()
 	ctx := context.Background()
 	root := t.TempDir()
-	db, err := database.Open(ctx, filepath.Join(root, "pigeon.db"))
+	db, err := database.Open(ctx, database.Configuration{Path: filepath.Join(root, "pigeon.db")})
 	if err != nil {
 		t.Fatal(err)
 	}

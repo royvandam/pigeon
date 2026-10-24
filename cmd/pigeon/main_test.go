@@ -138,7 +138,7 @@ func TestRunSetsUpAndServesUntilCanceled(t *testing.T) {
 	}
 
 	// First-run setup created the administrator in the configured database.
-	opened, err := database.Open(context.Background(), db)
+	opened, err := database.Open(context.Background(), database.Configuration{Path: db})
 	if err != nil {
 		t.Fatal(err)
 	}

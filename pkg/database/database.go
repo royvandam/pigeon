@@ -1,5 +1,6 @@
-// Package database opens Pigeon's SQLite database and creates its schema. The database holds accounts, sessions, and share links; the stores in
-// other packages read and change them through the returned *sql.DB.
+// Package database opens Pigeon's SQLite database and creates its schema. The
+// database holds accounts, sessions, and share links; the stores in other
+// packages read and change them through the returned *sql.DB.
 package database
 
 import (
@@ -22,6 +23,14 @@ type Configuration struct {
 	Path string `json:"path"`
 }
 
+// Validate checks cfg without creating anything.
+func (cfg Configuration) Validate() error {
+	if cfg.Path == "" {
+		return errors.New("database path cannot be empty")
+	}
+	return nil
+}
+
 // IsUniqueViolation reports whether err is a statement that failed because a
 // row would duplicate a UNIQUE column, so that stores need not know the driver.
 func IsUniqueViolation(err error) bool {
@@ -29,14 +38,14 @@ func IsUniqueViolation(err error) bool {
 	return errors.As(err, &sqliteErr) && sqliteErr.Code() == sqlite3.SQLITE_CONSTRAINT_UNIQUE
 }
 
-// Open opens the SQLite database at path, creating it and its parent folders
-// if needed, and creates its schema in a new database. A relative path is resolved from the
-// current working directory.
-func Open(ctx context.Context, path string) (*sql.DB, error) {
-	if path == "" {
-		return nil, errors.New("database path cannot be empty")
+// Open opens the SQLite database that cfg names, creating it and its parent
+// folders if needed, and creates its schema in a new database. A relative path
+// is resolved from the current working directory.
+func Open(ctx context.Context, cfg Configuration) (*sql.DB, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, err
 	}
-	path, err := filepath.Abs(path)
+	path, err := filepath.Abs(cfg.Path)
 	if err != nil {
 		return nil, err
 	}

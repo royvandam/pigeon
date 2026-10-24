@@ -76,7 +76,7 @@ func newTestServer(t *testing.T, quotaBytes int64) *testServer {
 // open opens the database and builds the server on it, as a restart would.
 func (srv *testServer) open(t *testing.T) {
 	t.Helper()
-	db, err := database.Open(context.Background(), srv.dbPath)
+	db, err := database.Open(context.Background(), database.Configuration{Path: srv.dbPath})
 	if err != nil {
 		t.Fatal(err)
 	}
