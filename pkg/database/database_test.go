@@ -102,3 +102,22 @@ func TestDatabasesWithoutASchemaVersionAreRefused(t *testing.T) {
 		t.Fatal("opened a database without a path")
 	}
 }
+
+func TestIsUniqueViolation(t *testing.T) {
+	t.Parallel()
+	db := open(t, filepath.Join(t.TempDir(), "pigeon.db"))
+	insert := func(username string, quota int64) error {
+		_, err := db.Exec(`INSERT INTO users (username, username_key, slug, password_hash, is_admin, quota_bytes) VALUES (?, ?, ?, '', 0, ?)`,
+			username, username, username, quota)
+		return err
+	}
+	if err := insert("jane", 1); err != nil {
+		t.Fatalf("first insert: %v", err)
+	}
+	if err := insert("jane", 1); !IsUniqueViolation(err) {
+		t.Fatalf("duplicate insert: %v; want a unique violation", err)
+	}
+	if err := insert("john", 0); err == nil || IsUniqueViolation(err) {
+		t.Fatalf("other constraint: %v", err)
+	}
+}
