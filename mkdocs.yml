@@ -63,7 +63,7 @@ nav:
   - Installation: getting-started.md
   - User guide:
       - Files and uploads: guide/files.md
-      - Sharing downloads: guide/sharing.md
+      - Share links: guide/sharing.md
   - Administration:
       - Configuration: administration/configuration.md
       - HTTPS and reverse proxies: administration/deployment.md
