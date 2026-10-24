@@ -40,8 +40,9 @@
     }],
     ['share', {
       title: 'Share', endpoint: '/shares', fields: () => ({}), share: true,
-      description: data => 'Anyone with the link can download ' + (data.directory === 'true'
-        ? 'this folder as a ZIP, including files added later.' : 'this file.') + ' Links stay active until revoked or the item is renamed, moved, or deleted.'
+      description: data => (data.directory === 'true'
+        ? 'Anyone with the download link can download this folder as a ZIP, including files added later. Anyone with the upload link can add files to it, without seeing what it holds.'
+        : 'Anyone with the download link can download this file.') + ' Links work until they expire or are revoked, or the item is renamed, moved, or deleted.'
     }]
   ]);
 
@@ -105,7 +106,7 @@
       this.sharePanel.hidden = !action.share;
       document.getElementById('actionDialogCancelLabel').textContent = action.share ? 'Close' : 'Cancel';
       this.dialog.showModal();
-      if (action.share) this.dialog.dispatchEvent(new CustomEvent('share', {detail: {path: data.path}}));
+      if (action.share) this.dialog.dispatchEvent(new CustomEvent('share', {detail: {path: data.path, directory: data.directory === 'true'}}));
       if (edit) {
         this.input.focus();
         this.input.select();

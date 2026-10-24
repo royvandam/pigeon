@@ -262,7 +262,7 @@ test('sharing explicitly creates, copies and revokes a link in the existing dial
   assert.equal(p.submit().prevented, true);
   assert.equal(p.requests.length, 1);
   assert.equal(p.requests[0].options.method, 'GET');
-  assert.equal(p.requests[0].url, '/shares?path=docs%2Freport.txt');
+  assert.equal(p.requests[0].url, '/shares?path=docs%2Freport.txt&kind=download');
   await p.reply(0);
   assert.equal(p.elements.get('shareCreate').hidden, false);
   p.elements.get('shareCreate').dispatch('click');
@@ -306,15 +306,16 @@ test('existing links stay hidden, can be replaced, and clipboard failures select
   assert.equal(p.elements.get('shareRevoke').hidden, false);
   p.elements.get('shareReplace').dispatch('click');
   assert.equal(p.elements.get('shareStatus').textContent, 'Replacing link…');
-  assert.equal(p.requests[1].options.body.get('action'), 'create');
-  await p.reply(1, '/s/replacement-token');
+  // requests[1] loaded the folder's upload link.
+  assert.equal(p.requests[2].options.body.get('action'), 'create');
+  await p.reply(2, '/s/replacement-token');
   assert.equal(p.elements.get('shareURL').value, 'https://uploads.example/s/replacement-token');
   assert.equal(p.elements.get('shareURL').placeholder, '');
   assert.equal(p.elements.get('shareReplace').hidden, true);
   await p.elements.get('shareCopy').dispatch('click');
   assert.equal(p.elements.get('shareURL').selected, true);
   assert.match(p.elements.get('shareStatus').textContent, /Copy it from the field/);
-  assert.equal(p.requests.length, 2);
+  assert.equal(p.requests.length, 3);
 });
 
 test('late sharing responses cannot overwrite a newly opened item or edit dialog', async () => {
@@ -343,4 +344,44 @@ test('share request failures keep the dialog usable and explain expired sessions
   assert.equal(p.elements.get('shareStatus').textContent, 'Your session has expired. Reload the page to sign in again.');
   assert.equal(p.elements.get('shareCreate').disabled, false);
   assert.equal(p.elements.get('shareCopy').disabled, true);
+});
+
+test('folders also get an upload link, with its own lifetime and status', async () => {
+  const p = page();
+  p.open('share', {name: 'inbox', path: 'inbox', directory: 'true'});
+  assert.match(p.elements.get('actionDialogDescription').textContent, /upload link can add files/);
+  assert.equal(p.elements.get('uploadLinkControls').hidden, false);
+  assert.equal(p.requests[1].url, '/shares?path=inbox&kind=upload');
+  await p.reply(0);
+  await p.reply(1);
+  assert.match(p.elements.get('uploadLinkStatus').textContent, /let others upload into this folder/);
+  p.elements.get('uploadLinkLifetime').value = '168h';
+  p.elements.get('uploadLinkCreate').dispatch('click');
+  const body = p.requests[2].options.body;
+  assert.deepEqual([body.get('action'), body.get('path'), body.get('kind'), body.get('lifetime')], ['create', 'inbox', 'upload', '168h']);
+  p.requests[2].resolve({ok: true, status: 200, async json() { return {url: '/u/upload-token', active: true, kind: 'upload', expires_at: '2026-10-31T12:00:00Z'}; }});
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+  assert.equal(p.elements.get('uploadLinkURL').value, 'https://uploads.example/u/upload-token');
+  assert.match(p.elements.get('uploadLinkStatus').textContent, /cannot see what it holds/);
+  assert.match(p.elements.get('uploadLinkStatus').textContent, /works until/);
+  // The download link's controls are separate.
+  assert.equal(p.elements.get('shareURL').value, '');
+  assert.equal(p.elements.get('shareCreate').hidden, false);
+  // A file has no upload link, and its late answers are ignored.
+  p.cancel();
+  p.open('share');
+  assert.equal(p.elements.get('uploadLinkControls').hidden, true);
+  assert.equal(p.requests.length, 4);
+});
+
+test('an active link shows when it expires', async () => {
+  const p = page();
+  p.open('share');
+  p.requests[0].resolve({ok: true, status: 200, async json() { return {url: '', active: true, kind: 'download', expires_at: '2026-10-31T12:00:00Z'}; }});
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+  assert.match(p.elements.get('shareStatus').textContent, /A link is active\. It works until .+\. Its URL was shown only/);
+  p.elements.get('shareLifetime').value = '24h';
+  p.elements.get('shareReplace').dispatch('click');
+  assert.equal(p.requests[1].options.body.get('lifetime'), '24h');
+  assert.equal(p.requests[1].options.body.get('kind'), 'download');
 });
