@@ -187,11 +187,21 @@ func (s *Server) handleUploadLink(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleUploadLinkProgress reports the progress of an upload through an
-// upload link, to the page that sent it.
+// upload link to the page that sent it, or stops it when posted
+// action=cancel.
 func (s *Server) handleUploadLinkProgress(w http.ResponseWriter, r *http.Request) {
 	setPublicLinkHeaders(w)
-	if !allowMethods(w, r, http.MethodGet) {
+	if !allowMethods(w, r, http.MethodGet, http.MethodPost) {
 		return
+	}
+	if r.Method == http.MethodPost {
+		if !s.sameOrigin(r) {
+			http.Error(w, "invalid request origin", http.StatusForbidden)
+			return
+		}
+		if !s.parseForm(w, r) {
+			return
+		}
 	}
 	secret := r.PathValue("token")
 	if _, err := s.files.UploadLink(r.Context(), secret); errors.Is(err, share.ErrNotFound) {
@@ -199,6 +209,10 @@ func (s *Server) handleUploadLinkProgress(w http.ResponseWriter, r *http.Request
 		return
 	} else if err != nil {
 		serverError(w, r, "upload link unavailable", err)
+		return
+	}
+	if r.Method == http.MethodPost {
+		s.stopUpload(w, r, uploadOwner{link: token.Hash(secret)})
 		return
 	}
 	s.writeUploadProgress(w, r, uploadOwner{link: token.Hash(secret)})

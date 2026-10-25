@@ -170,7 +170,9 @@ first path element is replaced by the next free name, such as
 `report (2).pdf` or `Photos (2)`. The response is the same as for `/upload`,
 with `saved_as` relative to the link's folder, but it sends no `X-Quota-*`
 headers, and a quota error does not say how much space is left. An optional
-`X-Upload-ID` header enables `GET /u/<token>/progress?id=<id>`. For example,
+`X-Upload-ID` header enables `GET /u/<token>/progress?id=<id>`, and
+`POST /u/<token>/progress?id=<id>` with `action=cancel` cancels the upload, as
+for `/upload-progress`. For example,
 create a link that works for a week and upload through it:
 
 ```sh
@@ -225,6 +227,14 @@ failure; other users cannot read them. Reusing an existing ID returns HTTP 409.
 An account, or an upload link, can have 16 tracked uploads in progress at a
 time; another tracked upload returns HTTP 429 until one finishes. The header is
 optional for clients that do not need progress.
+
+To cancel a tracked upload, `POST /upload-progress?id=<upload-id>` with the
+URL-encoded form `action=cancel`, plus `csrf_token` for session-authenticated
+requests. It returns HTTP 204 and the upload fails without saving anything,
+unless it was already being saved, or HTTP 404 when no upload with that ID is
+in progress. Closing the upload's connection also cancels it, but a proxy may
+keep the server's side open, and the upload then holds the account's next
+uploads until it times out.
 
 For example, start an upload with a fresh ID:
 

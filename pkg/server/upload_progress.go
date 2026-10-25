@@ -41,6 +41,9 @@ type uploadProgress struct {
 	mu       sync.Mutex
 	snapshot uploadProgressSnapshot
 	finished time.Time
+	// stop ends the upload at its uploader's request, until the upload's
+	// handler returns; see stoppable.
+	stop func()
 }
 
 // uploadTracker keeps the progress of uploads that asked for it. Progress
@@ -149,12 +152,16 @@ func (p *uploadProgress) setState(state string) {
 	}
 }
 
+// fail records that the upload ended without completing, unless it
+// completed. Its handler calls it on returning, so it also ends the stop
+// function's use of the handler's request.
 func (p *uploadProgress) fail() {
 	if p == nil {
 		return
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.stop = nil
 	if p.snapshot.State != "complete" {
 		p.snapshot.State = "failed"
 		p.finished = time.Now()
@@ -177,6 +184,34 @@ func (p *uploadProgress) Written(n int64) {
 	p.mu.Unlock()
 }
 
+// onStop sets the function that stops the upload when its uploader asks.
+func (p *uploadProgress) onStop(stop func()) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.stop = stop
+}
+
+// stop stops owner's upload id, and reports whether it was in progress.
+func (t *uploadTracker) stop(owner uploadOwner, id string) bool {
+	t.mu.Lock()
+	p := t.uploads[owner][id]
+	t.mu.Unlock()
+	if p == nil {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.stop == nil {
+		return false
+	}
+	p.stop()
+	p.stop = nil
+	return true
+}
+
 // snapshot returns the progress of owner's upload, if it is still tracked.
 func (t *uploadTracker) snapshot(owner uploadOwner, id string) (uploadProgressSnapshot, bool) {
 	t.mu.Lock()
@@ -195,16 +230,44 @@ func (t *uploadTracker) snapshot(owner uploadOwner, id string) (uploadProgressSn
 	return snapshot, true
 }
 
+// handleUploadProgress reports the progress of one of the user's uploads, or
+// stops it when posted action=cancel.
 func (s *Server) handleUploadProgress(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	if !allowMethods(w, r, http.MethodGet) {
+	if !allowMethods(w, r, http.MethodGet, http.MethodPost) {
 		return
 	}
 	a, ok := s.requireAuth(w, r, authOptions{})
 	if !ok {
 		return
 	}
+	if r.Method == http.MethodPost {
+		s.stopUpload(w, r, uploadOwner{userID: a.User.ID})
+		return
+	}
 	s.writeUploadProgress(w, r, uploadOwner{userID: a.User.ID})
+}
+
+// stopUpload stops owner's upload named by the request's id, for a posted
+// action=cancel whose form has been parsed. Browsers abort a canceled upload's
+// request too, but something between them, such as a proxy, may keep the
+// server's connection open, and the upload would hold the account's upload
+// slot until it timed out.
+func (s *Server) stopUpload(w http.ResponseWriter, r *http.Request, owner uploadOwner) {
+	id := r.URL.Query().Get("id")
+	if !uploadIDPattern.MatchString(id) {
+		http.Error(w, "invalid upload ID", http.StatusBadRequest)
+		return
+	}
+	if r.PostForm.Get("action") != "cancel" {
+		http.Error(w, "unknown upload action", http.StatusBadRequest)
+		return
+	}
+	if !s.uploads.stop(owner, id) {
+		http.Error(w, "no upload in progress with this ID", http.StatusNotFound)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) writeUploadProgress(w http.ResponseWriter, r *http.Request, owner uploadOwner) {
