@@ -221,7 +221,8 @@ To track progress, send a unique `X-Upload-ID` header (16–64 ASCII letters, di
 underscores, or hyphens) with the upload, then poll
 `GET /upload-progress?id=<upload-id>` with the same account's authentication.
 The JSON response has `bytes_received` (file bytes written so far) and `state`
-(`queued`, `preparing`, `uploading`, `finalizing`, `complete`, or `failed`).
+(`queued`, `preparing`, `uploading`, `finalizing`, `complete`, `failed`, or
+`canceled`).
 Progress records are held in memory and expire five minutes after completion or
 failure; other users cannot read them. Reusing an existing ID returns HTTP 409.
 An account, or an upload link, can have 16 tracked uploads in progress at a
@@ -230,11 +231,15 @@ optional for clients that do not need progress.
 
 To cancel a tracked upload, `POST /upload-progress?id=<upload-id>` with the
 URL-encoded form `action=cancel`, plus `csrf_token` for session-authenticated
-requests. It returns HTTP 204 and the upload fails without saving anything,
-unless it was already being saved, or HTTP 404 when no upload with that ID is
-in progress. Closing the upload's connection also cancels it, but a proxy may
-keep the server's side open, and the upload then holds the account's next
-uploads until it times out.
+requests. It returns HTTP 204, and the upload stops without saving anything; its
+state becomes `canceled`, or `complete` if it was already being saved, so poll
+it to learn which. It returns HTTP 409 when the upload already completed, with
+its files saved. A cancel for an upload that has not arrived yet, as when a
+buffering proxy holds it back, is kept for five minutes like a finished
+record, and the upload is refused with HTTP 409 when it comes. Closing the
+upload's connection also cancels it, but a proxy may keep the server's side
+open, so the upload holds the account's next uploads until it times out, or may
+deliver the upload later.
 
 For example, start an upload with a fresh ID:
 

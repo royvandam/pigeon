@@ -53,10 +53,12 @@ The progress closes a few seconds after an upload succeeds; after a failure it
 stays, next to the error, until you choose or drop other files.
 
 Choose **Cancel** to stop an upload while it runs; its progress closes at once,
-and the next upload can start right away, also behind a proxy. The server
-discards the files it received, so nothing from the upload is saved,
-unless the cancel arrives while the server is already saving the batch; the file
-list then shows the whole batch. Uploads are never saved in part.
+and the next upload can start right away, also behind a proxy. The page then
+asks the server what became of the upload and says so: usually nothing was
+saved, because the server discards the files it received, and refuses an upload
+that a proxy delivers after the cancel. A cancel that arrives while the server
+is already saving the batch is too late, and the page says that its files were
+saved. Uploads are never saved in part.
 
 For request errors and stalled transfers, see [troubleshooting](../troubleshooting.md).
 For scripts and command-line uploads, see the [HTTP API](../reference/api.md).

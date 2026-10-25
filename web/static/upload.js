@@ -51,24 +51,57 @@
     hideProgressTimer = null;
     progressPanel.hidden = !shown;
   }
-  // Canceling asks the server to stop the upload and closes its connection,
-  // and the server discards the files it received. Asking matters when
-  // something between them, such as a proxy, keeps the server's connection
-  // open: the upload would otherwise keep the next one waiting until it timed
-  // out. A cancel that arrives while the server saves the batch may be too
-  // late; batches are saved whole or not at all.
+  // Canceling closes the upload's connection, then asks the server to cancel
+  // it and reports what became of it; see cancelOnServer.
   const cancelButton = document.getElementById('cancelUpload');
   let currentUpload = null;
-  cancelButton.addEventListener('click', () => {
-    if (!currentUpload) return;
-    const {xhr, id} = currentUpload;
+  // uploadCount numbers the uploads, so a late answer about a canceled one
+  // does not overwrite the status of a newer one.
+  let uploadCount = 0;
+  cancelButton.addEventListener('click', () => currentUpload?.xhr.abort());
+
+  const CANCEL_OUTCOMES = {
+    canceled: 'Canceled. Nothing from this upload was saved.',
+    saved: 'The upload finished before it could be canceled, so its files were saved.',
+    unknown: 'Canceled, but the server did not confirm it. Check the file list.'
+  };
+
+  // cancelOnServer asks the server to cancel upload id, and returns what
+  // became of it: 'canceled', 'saved' if it had already finished, or 'unknown'.
+  // Closing the connection is not enough: a proxy may keep the server's side
+  // open, so the upload holds the account's next ones, or may hold the upload
+  // back and deliver it later. The server stops an upload in progress, and
+  // keeps a cancel that arrives first, refusing the upload when it comes. A
+  // stopping upload's final state says whether it was saved after all.
+  async function cancelOnServer(id) {
+    const url = PROGRESS_URL + '?id=' + encodeURIComponent(id);
     const body = new URLSearchParams({action: 'cancel'});
     if (CSRF_TOKEN) body.set('csrf_token', CSRF_TOKEN);
-    fetch(PROGRESS_URL + '?id=' + encodeURIComponent(id), {
-      method: 'POST', credentials: 'same-origin', headers: BROWSER_HEADERS, body, keepalive: true
-    }).catch(() => {}); // The aborted connection still ends the upload in most setups.
-    xhr.abort();
-  });
+    try {
+      const response = await fetch(url, {method: 'POST', credentials: 'same-origin', headers: BROWSER_HEADERS, body, keepalive: true});
+      if (response.status === 409) return 'saved';
+      if (response.status !== 204) return 'unknown';
+      for (let attempt = 0; attempt < 20; attempt++) {
+        const progress = await fetch(url, {credentials: 'same-origin', cache: 'no-store', headers: BROWSER_HEADERS});
+        if (progress.ok) {
+          const {state} = await progress.json();
+          if (state === 'complete') return 'saved';
+          if (state === 'canceled' || state === 'failed') return 'canceled';
+        }
+        await new Promise(resolve => setTimeout(resolve, 250));
+      }
+    } catch {
+      // Unconfirmed: the file list shows what happened.
+    }
+    return 'unknown';
+  }
+
+  async function reportCancel(id, upload) {
+    const outcome = await cancelOnServer(id);
+    if (upload !== uploadCount) return;
+    phase.textContent = CANCEL_OUTCOMES[outcome];
+    refreshFiles();
+  }
   // Each selected file with its path relative to the destination folder, which
   // keeps the structure of a chosen or dropped folder.
   let selectedFiles = [];
@@ -268,6 +301,7 @@
   btn.addEventListener('click', startUpload);
 
   function startUpload() {
+    const upload = ++uploadCount;
     const files = selectedFiles.slice();
     const totalSize = selectedSize();
 
@@ -349,8 +383,8 @@
       } else if (snapshot.state === 'preparing') {
         phase.textContent = "Checking storage";
         eta.textContent = "Calculating…";
-      } else if (snapshot.state === 'failed') {
-        phase.textContent = "Upload failed";
+      } else if (snapshot.state === 'failed' || snapshot.state === 'canceled') {
+        phase.textContent = snapshot.state === 'canceled' ? "Canceled" : "Upload failed";
         eta.textContent = "—";
         spd.textContent = "—";
       } else if (snapshot.state === 'finalizing' || snapshot.state === 'complete' || (totalSize > 0 && received === totalSize)) {
@@ -383,7 +417,7 @@
           if (stopped) return;
           progressSeen = true;
           showProgress(snapshot);
-          terminal = snapshot.state === 'complete' || snapshot.state === 'failed';
+          terminal = snapshot.state === 'complete' || snapshot.state === 'failed' || snapshot.state === 'canceled';
         } else if (response.status === 404 && !progressSeen) {
           // A buffering proxy may not have forwarded the upload request yet.
           phase.textContent = "Connecting to server";
@@ -445,11 +479,10 @@
       stopProgress();
       eta.textContent = "—";
       spd.textContent = "—";
-      phase.textContent = "Canceled";
+      phase.textContent = "Canceling…";
       setProgressShown(false);
       setDisabled(false);
-      // The server may have finished saving the batch before the cancel.
-      refreshFiles();
+      reportCancel(uploadID, upload);
     };
 
     xhr.send(form);

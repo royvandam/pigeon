@@ -246,7 +246,7 @@ test('a rejected upload never shows 100% even after the server receives all byte
   assert.equal(p.timers.size, 0);
 });
 
-for (const [event, phase] of [['onabort', 'Canceled'], ['onerror', 'Network error. Please try again.']]) {
+for (const [event, phase] of [['onabort', 'Canceling…'], ['onerror', 'Network error. Please try again.']]) {
   test(`${event} stops polling and clears the estimate`, async () => {
     const p = page();
     const pending = p.requests[0];
@@ -426,31 +426,80 @@ test('a new selection or upload is not hidden by an earlier upload\'s timer', ()
   assert.equal(p.elements.get('progressPanel').hidden, false);
 });
 
-test('Cancel shows only while an upload runs and aborts it', async () => {
+// answer resolves a pending request with status and a JSON body.
+async function answer(request, status, body = {}) {
+  request.settled = true;
+  request.resolve({ok: status >= 200 && status < 300, status, async json() { return body; }, async text() { return ''; }});
+  for (let i = 0; i < 20; i++) await Promise.resolve();
+}
+
+function cancelRequest(p) {
+  return p.requests.find(request => request.options?.method === 'POST' && !request.settled);
+}
+
+test('Cancel shows only while an upload runs, and reports what the server did', async () => {
   const p = page();
   const cancel = p.elements.get('cancelUpload');
   assert.equal(cancel.hidden, false);
   cancel.dispatch('click');
   assert.equal(p.xhr.aborted, true);
-  // The server is asked to stop the upload, too.
-  const stop = p.requests.find(request => request.options?.method === 'POST');
-  assert.equal(stop.url, '/upload-progress?id=' + p.xhr.headers['X-Upload-ID']);
-  assert.equal(stop.options.body.get('action'), 'cancel');
-  assert.equal(stop.options.body.get('csrf_token'), 'a'.repeat(43));
-  assert.equal(stop.options.keepalive, true);
-  stop.settled = true;
   assert.equal(cancel.hidden, true);
-  assert.equal(p.text('phase'), 'Canceled');
+  assert.equal(p.text('phase'), 'Canceling…', 'aborting is not yet confirmation');
   assert.equal(p.elements.get('progressPanel').hidden, true, 'a canceled upload closes its progress at once');
   assert.equal(p.elements.get('btn').disabled, false);
   await p.reply('uploading', 5000, 4000); // A late answer to the aborted poll.
-  assert.equal(p.text('phase'), 'Canceled');
+  assert.equal(p.text('phase'), 'Canceling…');
   assert.equal(p.timers.size, 0, 'progress polling stopped');
-  assert.equal(p.refreshes.length, 1, 'the file list shows whether the batch was saved');
-  // A finished upload hides it too.
+
+  // The server is asked to cancel the upload, and then for its final state.
+  const id = p.xhr.headers['X-Upload-ID'];
+  const request = cancelRequest(p);
+  assert.equal(request.url, '/upload-progress?id=' + id);
+  assert.equal(request.options.body.get('action'), 'cancel');
+  assert.equal(request.options.body.get('csrf_token'), 'a'.repeat(43));
+  assert.equal(request.options.keepalive, true);
+  await answer(request, 204);
+  assert.equal(p.refreshes.length, 0, 'the file list waits for the outcome');
+  const final = p.requests.find(request => !request.settled && request.url === '/upload-progress?id=' + id);
+  await answer(final, 200, {state: 'canceled', bytes_received: 0});
+  assert.equal(p.text('phase'), 'Canceled. Nothing from this upload was saved.');
+  await p.settle();
+  assert.equal(p.refreshes.length, 1);
+
+  // A finished upload hides the button too.
   const done = page();
   done.finish(200);
   assert.equal(done.elements.get('cancelUpload').hidden, true);
+});
+
+test('a cancel that came too late, or was not confirmed, says so', async () => {
+  const saved = page();
+  saved.elements.get('cancelUpload').dispatch('click');
+  await answer(cancelRequest(saved), 409);
+  assert.equal(saved.text('phase'), 'The upload finished before it could be canceled, so its files were saved.');
+
+  const stopping = page();
+  stopping.elements.get('cancelUpload').dispatch('click');
+  await answer(cancelRequest(stopping), 204);
+  const final = stopping.requests.filter(request => !request.settled && request.options?.method !== 'POST' && request.url.includes('id=')).at(-1);
+  await answer(final, 200, {state: 'complete', bytes_received: 10000});
+  assert.match(stopping.text('phase'), /finished before it could be canceled/);
+
+  const unknown = page();
+  unknown.elements.get('cancelUpload').dispatch('click');
+  await answer(cancelRequest(unknown), 500);
+  assert.equal(unknown.text('phase'), 'Canceled, but the server did not confirm it. Check the file list.');
+});
+
+test('a late answer about a canceled upload does not overwrite a newer one', async () => {
+  const p = page();
+  p.elements.get('cancelUpload').dispatch('click');
+  const request = cancelRequest(p);
+  p.select(10);
+  p.elements.get('btn').dispatch('click');
+  assert.equal(p.text('phase'), 'Connecting to server');
+  await answer(request, 409);
+  assert.equal(p.text('phase'), 'Connecting to server');
 });
 
 test('Cancel on the upload link page asks its link to stop the upload', () => {

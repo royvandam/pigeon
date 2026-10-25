@@ -1,6 +1,8 @@
 package server
 
 import (
+	"errors"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -135,5 +137,49 @@ func TestInvalidUploadLinksKeepNoState(t *testing.T) {
 	defer srv.uploads.mu.Unlock()
 	if len(srv.uploads.uploads) != 0 {
 		t.Fatalf("invalid links left progress records: %v", srv.uploads.uploads)
+	}
+}
+
+func TestACancelBeforeTheUploadArrivesRefusesIt(t *testing.T) {
+	t.Parallel()
+	srv := newTestServer(t, 1000)
+	cookie, csrf := sessionFor(t, srv, "Test User")
+	if err := os.MkdirAll(filepath.Join(srv.dir, "test-user", "inbox"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	_, created := manageLink(t, srv, cookie, csrf, url.Values{"action": {"create"}, "path": {"inbox"}, "kind": {"upload"}})
+	cancel := func(id string) int {
+		r := httptest.NewRequest(http.MethodPost, created.URL+"/progress?id="+id, strings.NewReader("action=cancel"))
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		return serve(srv.Handler(), r).Code
+	}
+	upload := func(id, name string) *httptest.ResponseRecorder {
+		r := linkUploadRequest(t, created.URL, uploadFile{name, "x"})
+		r.Header.Set("X-Upload-ID", id)
+		return serve(srv.Handler(), r)
+	}
+
+	// A buffering proxy holds the upload back; the cancel arrives first.
+	if code := cancel(testUploadID); code != http.StatusNoContent {
+		t.Fatalf("cancel before the upload arrived: %d", code)
+	}
+	if w := upload(testUploadID, "held-back.txt"); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "canceled") {
+		t.Fatalf("an upload canceled before it arrived: %d, %s", w.Code, w.Body)
+	}
+	if _, err := os.Stat(filepath.Join(srv.dir, "test-user", "inbox", "held-back.txt")); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("the canceled upload was saved: %v", err)
+	}
+	r := httptest.NewRequest(http.MethodGet, created.URL+"/progress?id="+testUploadID, nil)
+	if w := serve(srv.Handler(), r); !strings.Contains(w.Body.String(), `"canceled"`) {
+		t.Fatalf("progress of the canceled upload: %s", w.Body)
+	}
+
+	// An upload that completed cannot be canceled: its files are saved.
+	done := testUploadID[:30] + "dd"
+	if w := upload(done, "done.txt"); w.Code != http.StatusOK {
+		t.Fatalf("upload: %d, %s", w.Code, w.Body)
+	}
+	if code := cancel(done); code != http.StatusConflict {
+		t.Fatalf("cancel after completion: %d", code)
 	}
 }

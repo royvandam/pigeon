@@ -212,7 +212,7 @@ func (s *Server) handleUploadLinkProgress(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if r.Method == http.MethodPost {
-		s.stopUpload(w, r, uploadOwner{link: token.Hash(secret)})
+		s.cancelUpload(w, r, uploadOwner{link: token.Hash(secret)})
 		return
 	}
 	s.writeUploadProgress(w, r, uploadOwner{link: token.Hash(secret)})
