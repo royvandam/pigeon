@@ -78,6 +78,9 @@ nav:
       - Architecture: development/architecture.md
       - VS Code over SSH: development/editor.md
       - Documentation: development/documentation.md
+  - Decisions:
+      - Decision records: decisions/README.md
+      - "0001: Browser interface": decisions/0001-frontend-framework.md
   - Audits:
       - Review archive: audit/README.md
       - Security (2026-10-17): audit/2026-10-17-security.md

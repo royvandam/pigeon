@@ -42,7 +42,8 @@ or revokes the link or it expires.
 
 These guides describe the current implementation. The [audit archive](audit/README.md)
 records historical reviews, findings, and their resolution; its findings are
-not a current feature reference.
+not a current feature reference. [Decision records](decisions/README.md) explain
+significant choices about how Pigeon is built, including open questions.
 
 The [source repository](https://github.com/royvandam/pigeon) contains the Go
 application, embedded assets, tests, and this documentation. The MkDocs site
