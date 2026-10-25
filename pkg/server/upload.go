@@ -10,6 +10,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/royvandam/pigeon/internal/size"
 	"github.com/royvandam/pigeon/internal/token"
@@ -42,6 +43,8 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer progress.fail()
+	r, stop := stoppable(w, r, progress)
+	defer stop()
 
 	// The upload holds the account lock only to check the quota and to
 	// publish, so the account's pages, share links, and file actions do not
@@ -83,6 +86,8 @@ func (s *Server) handleSharedUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer progress.fail()
+	r, stop := stoppable(w, r, progress)
+	defer stop()
 	upload, err := s.files.BeginSharedUpload(r.Context(), secret, progress)
 	if errors.Is(err, share.ErrNotFound) {
 		http.Error(w, uploadLinkGone, http.StatusNotFound)
@@ -130,6 +135,21 @@ func (s *Server) beginProgress(w http.ResponseWriter, r *http.Request, owner upl
 		return progress, true
 	}
 	return nil, false
+}
+
+// stoppable lets the uploader stop the upload that progress follows; see
+// stopUpload. Stopping cancels the returned request's context, which ends a
+// wait for the upload slot or the account lock, and ends a read of the body
+// that waits for data. The caller cancels the context when done.
+func stoppable(w http.ResponseWriter, r *http.Request, progress *uploadProgress) (*http.Request, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(r.Context())
+	controller := http.NewResponseController(w)
+	progress.onStop(func() {
+		cancel()
+		// Recorders in tests do not support deadlines; real connections do.
+		_ = controller.SetReadDeadline(time.Now())
+	})
+	return r.WithContext(ctx), cancel
 }
 
 // receiveUpload streams the files of r into upload and publishes them. An

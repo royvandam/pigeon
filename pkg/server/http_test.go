@@ -43,7 +43,8 @@ func TestRoutesRejectUnsupportedMethodsConsistently(t *testing.T) {
 	for route, allow := range map[string]string{
 		"/": "GET", "/files": "GET, POST", "/admin": "GET, POST",
 		"/login": "GET, POST", "/logout": "POST", "/upload": "POST",
-		"/upload-progress": "GET", "/shares": "GET, POST",
+		"/upload-progress": "GET, POST", "/shares": "GET, POST",
+		"/u/token": "GET, HEAD, POST", "/u/token/progress": "GET, POST",
 		"/download": "GET, HEAD", "/s/token": "GET, HEAD", "/assets/dialog.js": "GET, HEAD",
 	} {
 		w := httptest.NewRecorder()

@@ -6,9 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -278,5 +282,118 @@ func TestUploadProgressIsBoundedPerOwner(t *testing.T) {
 	}
 	if _, ok := uploads.uploads[owner]; ok || len(uploads.uploads) != 1 {
 		t.Fatalf("expired records were not swept: %v", uploads.uploads)
+	}
+}
+
+func TestCancelStopsAnUploadWhoseConnectionStaysOpen(t *testing.T) {
+	t.Parallel()
+	srv := newTestServer(t, 1<<20)
+	cookie, csrf := sessionFor(t, srv, "Test User")
+	server := httptest.NewServer(srv.Handler())
+	defer server.Close()
+	post := func(target, contentType string, body io.Reader, header http.Header) (*http.Response, error) {
+		r, err := http.NewRequest(http.MethodPost, server.URL+target, body)
+		if err != nil {
+			return nil, err
+		}
+		r.Header = header.Clone()
+		r.Header.Set("Content-Type", contentType)
+		r.Header.Set("X-CSRF-Token", csrf)
+		r.AddCookie(cookie)
+		return server.Client().Do(r)
+	}
+
+	// The first upload sends part of a file and then nothing, with its
+	// connection open, as through a proxy that does not pass on a canceled
+	// request.
+	reader, writer := io.Pipe()
+	defer writer.Close()
+	mw := multipart.NewWriter(writer)
+	go func() {
+		part, err := mw.CreateFormFile("file", "stalled.bin")
+		if err == nil {
+			part.Write(make([]byte, 1000))
+		}
+	}()
+	go post("/upload", mw.FormDataContentType(), reader, http.Header{"X-Upload-Id": {testUploadID}})
+	waitForUploadProgress(t, srv.uploads, "uploading", 1000)
+
+	// A second upload waits for the first to give up the upload slot.
+	second := make(chan int, 1)
+	go func() {
+		var body strings.Builder
+		smw := multipart.NewWriter(&body)
+		part, _ := smw.CreateFormFile("file", "second.txt")
+		io.WriteString(part, "second")
+		smw.Close()
+		response, err := post("/upload", smw.FormDataContentType(), strings.NewReader(body.String()), http.Header{})
+		if err != nil {
+			second <- 0
+			return
+		}
+		response.Body.Close()
+		second <- response.StatusCode
+	}()
+	select {
+	case code := <-second:
+		t.Fatalf("the second upload did not wait for the first: %d", code)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	cancel := func() int {
+		form := url.Values{"action": {"cancel"}, "csrf_token": {csrf}}
+		response, err := post("/upload-progress?id="+testUploadID, "application/x-www-form-urlencoded", strings.NewReader(form.Encode()), http.Header{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		return response.StatusCode
+	}
+	if code := cancel(); code != http.StatusNoContent {
+		t.Fatalf("cancel: %d", code)
+	}
+	select {
+	case code := <-second:
+		if code != http.StatusOK {
+			t.Fatalf("second upload after the cancel: %d", code)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the second upload still waits after the cancel")
+	}
+	if _, err := os.Stat(filepath.Join(srv.dir, "test-user", "stalled.bin")); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("the canceled upload was saved: %v", err)
+	}
+	if snapshot, _ := srv.uploads.snapshot(uploadOwner{userID: 1}, testUploadID); snapshot.State != "failed" {
+		t.Fatalf("canceled upload state = %q", snapshot.State)
+	}
+	if code := cancel(); code != http.StatusNotFound {
+		t.Fatalf("canceling a finished upload: %d", code)
+	}
+}
+
+func TestOnlyTheOwnerCanStopAnUpload(t *testing.T) {
+	t.Parallel()
+	uploads := newUploadTracker()
+	owner := uploadOwner{link: "link-hash"}
+	p, err := uploads.begin(owner, testUploadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stops := 0
+	p.onStop(func() { stops++ })
+	if uploads.stop(uploadOwner{userID: 1}, testUploadID) || uploads.stop(owner, testUploadID[:20]) {
+		t.Fatal("stopped another owner's or another upload")
+	}
+	if !uploads.stop(owner, testUploadID) || stops != 1 {
+		t.Fatalf("stop: %d calls", stops)
+	}
+	if uploads.stop(owner, testUploadID) || stops != 1 {
+		t.Fatal("stopped twice")
+	}
+	// Once its handler returns, an upload can no longer be stopped.
+	p.onStop(func() { stops++ })
+	p.fail()
+	if uploads.stop(owner, testUploadID) || stops != 1 {
+		t.Fatal("stopped an upload whose handler returned")
 	}
 }
