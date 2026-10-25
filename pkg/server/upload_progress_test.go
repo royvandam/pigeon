@@ -363,37 +363,89 @@ func TestCancelStopsAnUploadWhoseConnectionStaysOpen(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(srv.dir, "test-user", "stalled.bin")); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("the canceled upload was saved: %v", err)
 	}
-	if snapshot, _ := srv.uploads.snapshot(uploadOwner{userID: 1}, testUploadID); snapshot.State != "failed" {
+	if snapshot, _ := srv.uploads.snapshot(uploadOwner{userID: 1}, testUploadID); snapshot.State != "canceled" {
 		t.Fatalf("canceled upload state = %q", snapshot.State)
 	}
-	if code := cancel(); code != http.StatusNotFound {
-		t.Fatalf("canceling a finished upload: %d", code)
+	if code := cancel(); code != http.StatusNoContent {
+		t.Fatalf("canceling a canceled upload again: %d", code)
 	}
 }
 
-func TestOnlyTheOwnerCanStopAnUpload(t *testing.T) {
+func TestCancelingAnUpload(t *testing.T) {
 	t.Parallel()
 	uploads := newUploadTracker()
-	owner := uploadOwner{link: "link-hash"}
+	owner, other := uploadOwner{link: "link-hash"}, uploadOwner{userID: 1}
+
+	// An upload in progress stops, once, and only for its own owner.
 	p, err := uploads.begin(owner, testUploadID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	stops := 0
 	p.onStop(func() { stops++ })
-	if uploads.stop(uploadOwner{userID: 1}, testUploadID) || uploads.stop(owner, testUploadID[:20]) {
-		t.Fatal("stopped another owner's or another upload")
+	if canceled, err := uploads.cancel(owner, testUploadID); !canceled || err != nil || stops != 1 {
+		t.Fatalf("cancel = %t, %v with %d stops", canceled, err, stops)
 	}
-	if !uploads.stop(owner, testUploadID) || stops != 1 {
-		t.Fatalf("stop: %d calls", stops)
+	if canceled, err := uploads.cancel(owner, testUploadID); !canceled || err != nil || stops != 1 {
+		t.Fatalf("second cancel = %t, %v with %d stops", canceled, err, stops)
 	}
-	if uploads.stop(owner, testUploadID) || stops != 1 {
-		t.Fatal("stopped twice")
-	}
-	// Once its handler returns, an upload can no longer be stopped.
-	p.onStop(func() { stops++ })
 	p.fail()
-	if uploads.stop(owner, testUploadID) || stops != 1 {
-		t.Fatal("stopped an upload whose handler returned")
+	if snapshot, _ := uploads.snapshot(owner, testUploadID); snapshot.State != "canceled" {
+		t.Fatalf("a stopped upload ended %q", snapshot.State)
+	}
+	if snapshot, ok := uploads.snapshot(other, testUploadID); ok {
+		t.Fatalf("another owner sees the upload: %+v", snapshot)
+	}
+
+	// A cancel before the upload arrives, as through a buffering proxy, is kept,
+	// and the upload is refused when it comes.
+	early := testUploadID[:30] + "ee"
+	if canceled, err := uploads.cancel(other, early); !canceled || err != nil {
+		t.Fatalf("early cancel = %t, %v", canceled, err)
+	}
+	if snapshot, _ := uploads.snapshot(other, early); snapshot.State != "canceled" {
+		t.Fatalf("early cancel state %q", snapshot.State)
+	}
+	if _, err := uploads.begin(other, early); !errors.Is(err, errUploadCanceled) {
+		t.Fatalf("an upload canceled before it arrived began: %v", err)
+	}
+
+	// A cancel during the moment before the handler can stop the upload takes
+	// effect as soon as it can.
+	pending := testUploadID[:30] + "pp"
+	p, err = uploads.begin(owner, pending)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if canceled, err := uploads.cancel(owner, pending); !canceled || err != nil {
+		t.Fatalf("cancel before onStop = %t, %v", canceled, err)
+	}
+	stops = 0
+	p.onStop(func() { stops++ })
+	if stops != 1 {
+		t.Fatal("onStop did not stop an upload canceled before it")
+	}
+
+	// A completed upload cannot be canceled: its files are saved.
+	done := testUploadID[:30] + "dd"
+	p, err = uploads.begin(owner, done)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.onStop(func() { t.Fatal("stopped a completed upload") })
+	p.setState("complete")
+	if canceled, err := uploads.cancel(owner, done); canceled || err != nil {
+		t.Fatalf("cancel after completion = %t, %v", canceled, err)
+	}
+
+	// Kept cancels count toward the limit, and give way to uploads in progress.
+	full := uploadOwner{link: "full"}
+	for i := range maxTrackedUploads {
+		if _, err := uploads.begin(full, fmt.Sprintf("%s%04d", testUploadID[:16], i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := uploads.cancel(full, early); !errors.Is(err, errTooManyUploads) {
+		t.Fatalf("cancel with no room: %v", err)
 	}
 }

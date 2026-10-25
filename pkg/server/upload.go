@@ -137,7 +137,7 @@ func (s *Server) beginProgress(w http.ResponseWriter, r *http.Request, owner upl
 }
 
 // stoppable lets the uploader stop the upload that progress follows; see
-// stopUpload. Stopping cancels the returned request's context, which ends a
+// cancelUpload. Stopping cancels the returned request's context, which ends a
 // wait for the upload slot or the account lock, and ends a read of the body
 // that waits for data. The caller cancels the context when done.
 func stoppable(w http.ResponseWriter, r *http.Request, progress *uploadProgress) (*http.Request, *bodyDeadline, context.CancelFunc) {

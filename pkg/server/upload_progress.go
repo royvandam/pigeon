@@ -23,6 +23,7 @@ var (
 	errInvalidUploadID = errors.New("invalid upload ID")
 	errUploadIDInUse   = errors.New("upload ID already in use")
 	errTooManyUploads  = errors.New("too many uploads in progress; wait for one to finish")
+	errUploadCanceled  = errors.New("this upload was canceled")
 )
 
 // uploadOwner is whose uploads a progress record belongs to: an account's, or
@@ -44,6 +45,9 @@ type uploadProgress struct {
 	// stop ends the upload at its uploader's request, until the upload's
 	// handler returns; see stoppable.
 	stop func()
+	// canceled records that the uploader canceled the upload, perhaps before
+	// it arrived; see uploadTracker.cancel.
+	canceled bool
 }
 
 // uploadTracker keeps the progress of uploads that asked for it. Progress
@@ -70,12 +74,26 @@ func (t *uploadTracker) begin(owner uploadOwner, id string) (*uploadProgress, er
 	if !uploadIDPattern.MatchString(id) {
 		return nil, errInvalidUploadID
 	}
-	now := time.Now()
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	// Owners who stopped uploading leave expired records behind. Sweeping them
-	// once per retention period keeps each upload's work proportional to its
-	// own owner's records.
+	if p, ok := t.records(owner, time.Now())[id]; ok {
+		if p.wasCanceled() {
+			return nil, errUploadCanceled
+		}
+		return nil, errUploadIDInUse
+	}
+	p := &uploadProgress{snapshot: uploadProgressSnapshot{State: "queued"}}
+	if err := t.add(owner, id, p); err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
+// records returns owner's records after removing expired ones. Owners who
+// stopped uploading leave expired records behind; sweeping them all once per
+// retention period keeps each call's work proportional to owner's records.
+// The tracker's lock must be held.
+func (t *uploadTracker) records(owner uploadOwner, now time.Time) map[string]*uploadProgress {
 	if now.Sub(t.lastSweep) >= uploadProgressRetention {
 		for other := range t.uploads {
 			t.prune(other, now)
@@ -84,20 +102,23 @@ func (t *uploadTracker) begin(owner uploadOwner, id string) (*uploadProgress, er
 	} else {
 		t.prune(owner, now)
 	}
+	return t.uploads[owner]
+}
+
+// add keeps p as owner's record for id, making room by dropping the oldest
+// finished record. It fails when every record is in progress. The tracker's
+// lock must be held.
+func (t *uploadTracker) add(owner uploadOwner, id string, p *uploadProgress) error {
 	records := t.uploads[owner]
-	if _, ok := records[id]; ok {
-		return nil, errUploadIDInUse
-	}
 	if len(records) >= maxTrackedUploads && !evictOldestFinished(records) {
-		return nil, errTooManyUploads
+		return errTooManyUploads
 	}
 	if records == nil {
 		records = make(map[string]*uploadProgress)
 		t.uploads[owner] = records
 	}
-	p := &uploadProgress{snapshot: uploadProgressSnapshot{State: "queued"}}
 	records[id] = p
-	return p, nil
+	return nil
 }
 
 // prune removes owner's expired records, and owner once it has none left.
@@ -164,8 +185,17 @@ func (p *uploadProgress) fail() {
 	p.stop = nil
 	if p.snapshot.State != "complete" {
 		p.snapshot.State = "failed"
+		if p.canceled {
+			p.snapshot.State = "canceled"
+		}
 		p.finished = time.Now()
 	}
+}
+
+func (p *uploadProgress) wasCanceled() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.canceled
 }
 
 // Preparing records that the upload has started checking the account's storage.
@@ -184,32 +214,47 @@ func (p *uploadProgress) Written(n int64) {
 	p.mu.Unlock()
 }
 
-// onStop sets the function that stops the upload when its uploader asks.
+// onStop sets the function that stops the upload when its uploader asks, and
+// calls it at once if the uploader already canceled.
 func (p *uploadProgress) onStop(stop func()) {
 	if p == nil {
 		return
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.canceled {
+		stop()
+		return
+	}
 	p.stop = stop
 }
 
-// stop stops owner's upload id, and reports whether it was in progress.
-func (t *uploadTracker) stop(owner uploadOwner, id string) bool {
+// cancel cancels owner's upload id, and reports false if it already
+// completed, with its files saved. An upload in progress stops. One that has
+// not arrived, as when a buffering proxy holds it back, is refused when it
+// does: the cancel is kept, like a finished upload's record, for the
+// retention period. It fails with errTooManyUploads when owner has no room to
+// keep it.
+func (t *uploadTracker) cancel(owner uploadOwner, id string) (bool, error) {
+	now := time.Now()
 	t.mu.Lock()
-	p := t.uploads[owner][id]
-	t.mu.Unlock()
-	if p == nil {
-		return false
+	defer t.mu.Unlock()
+	p, ok := t.records(owner, now)[id]
+	if !ok {
+		canceled := &uploadProgress{snapshot: uploadProgressSnapshot{State: "canceled"}, finished: now, canceled: true}
+		return true, t.add(owner, id, canceled)
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.stop == nil {
-		return false
+	if p.snapshot.State == "complete" {
+		return false, nil
 	}
-	p.stop()
-	p.stop = nil
-	return true
+	p.canceled = true
+	if p.stop != nil {
+		p.stop()
+		p.stop = nil
+	}
+	return true, nil
 }
 
 // snapshot returns the progress of owner's upload, if it is still tracked.
@@ -242,18 +287,19 @@ func (s *Server) handleUploadProgress(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodPost {
-		s.stopUpload(w, r, uploadOwner{userID: a.User.ID})
+		s.cancelUpload(w, r, uploadOwner{userID: a.User.ID})
 		return
 	}
 	s.writeUploadProgress(w, r, uploadOwner{userID: a.User.ID})
 }
 
-// stopUpload stops owner's upload named by the request's id, for a posted
-// action=cancel whose form has been parsed. Browsers abort a canceled upload's
-// request too, but something between them, such as a proxy, may keep the
-// server's connection open, and the upload would hold the account's upload
-// slot until it timed out.
-func (s *Server) stopUpload(w http.ResponseWriter, r *http.Request, owner uploadOwner) {
+// cancelUpload cancels owner's upload named by the request's id, for a posted
+// action=cancel whose form has been parsed; see uploadTracker.cancel. Browsers
+// abort a canceled upload's request too, but something between them, such as
+// a proxy, may keep the server's connection open, and the upload would hold
+// the account's upload slot until it timed out, or may hold the upload back
+// and deliver it later.
+func (s *Server) cancelUpload(w http.ResponseWriter, r *http.Request, owner uploadOwner) {
 	id := r.URL.Query().Get("id")
 	if !uploadIDPattern.MatchString(id) {
 		http.Error(w, "invalid upload ID", http.StatusBadRequest)
@@ -263,11 +309,15 @@ func (s *Server) stopUpload(w http.ResponseWriter, r *http.Request, owner upload
 		http.Error(w, "unknown upload action", http.StatusBadRequest)
 		return
 	}
-	if !s.uploads.stop(owner, id) {
-		http.Error(w, "no upload in progress with this ID", http.StatusNotFound)
-		return
+	canceled, err := s.uploads.cancel(owner, id)
+	switch {
+	case err != nil:
+		http.Error(w, err.Error(), http.StatusTooManyRequests)
+	case !canceled:
+		http.Error(w, "the upload already finished, and its files were saved", http.StatusConflict)
+	default:
+		w.WriteHeader(http.StatusNoContent)
 	}
-	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) writeUploadProgress(w http.ResponseWriter, r *http.Request, owner uploadOwner) {
