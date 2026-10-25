@@ -1,6 +1,6 @@
 # 0001. How to structure the browser interface as it grows
 
-**Status:** Proposed · **Date:** 2026-10-25 · **Deciders:** maintainers
+**Status:** Accepted · **Date:** 2026-10-25 · **Deciders:** maintainers
 
 ## Context
 
@@ -146,18 +146,58 @@ needs.
 
 ## Decision
 
-Open. Revisit when one of these comes first:
+**Option B: Preact with htm, without a build step, as islands in
+server-rendered pages.** The maintainers chose it directly as the best
+trade-off between server rendering and a richer interface, without the
+prototype the recommendation suggested; the first island of the migration
+serves as that trial.
 
-- work starts on F3, F4, F12, or F13, which each add state in the browser;
-- `upload.js` or the scripts as a whole grow well beyond their current size, or
-  a change to one widget repeatedly breaks another;
-- someone joins who mainly works on the interface.
+- **Islands, not a single-page application.** Go keeps routing, sign-in,
+  sessions, security headers, and the page shells. Each interactive area of a
+  page is a Preact component tree mounted into an element of its shell. Pages
+  that need no interaction, such as sign-in, stay plain server-rendered forms.
+- **No runtime build step.** The browser loads Pigeon's modules and the
+  vendored libraries as ES modules from the embedded assets. npm is used only
+  as the pinned source of the vendored libraries and for development tooling:
+  tests and type checking.
+- **One JSON API.** The islands use a JSON API under `/api`, which replaces the
+  forms, redirects, and HTML fragments the scripts use today; see
+  [0002](0002-json-api.md).
 
-When decided, record the choice and the prototype's results here, set the
-status to Accepted, and note the follow-up work under Consequences.
+How the move is carried out is in the
+[migration plan](../plans/preact-migration.md).
+
+### Findings that shape the decision
+
+Checked on 2026-10-25 against Preact 11.0.2 and htm 3.1.1:
+
+- Neither uses `eval` or `Function`, so the Content Security Policy stays as it
+  is. Preact is 12 KB, its hooks 3.7 KB, and htm 1.2 KB, as published.
+- Preact's hooks module imports `"preact"` by its bare name. Browsers resolve
+  bare names only through an import map, which is an inline script and would
+  break the policy. Vendoring therefore rewrites that one import to a relative
+  path, and checks that it did.
+- htm's bundled `htm/preact/standalone` contains Preact 10, so Pigeon binds
+  htm to Preact 11 itself.
 
 ## Consequences
 
-To be written when the decision is made. For any option, expect to update the
-architecture and contributing guides, the CI workflow, and, for A and B, the
-API reference.
+- **Supply chain:** `package.json` and its lockfile pin Preact, htm, and the
+  development tools. Installs run with `--ignore-scripts`, Dependabot watches
+  npm with the same cooldown as the other ecosystems, and CI fails when the
+  vendored files differ from what the pinned versions produce.
+- **API:** the HTTP API becomes JSON throughout, and its reference is rewritten.
+  Scripts using the forms and redirects documented today must change; Pigeon
+  is not yet in production, so no compatibility layer is kept.
+- **Code layout:** browser code moves into modules under `web/static/app/`,
+  and the plain scripts, templates, routes, and tests each island replaces are
+  removed in the same change.
+- **Tests:** component and hook tests run in Node with a DOM library and
+  Testing Library, and type checking of the JavaScript joins CI. End-to-end
+  tests in a real browser are added once the islands are in place.
+- **Security:** the policy is unchanged. Tests keep templates free of inline
+  code and keep `eval`, `Function`, and raw HTML insertion out of the browser
+  code.
+- **Later:** if the interface outgrows this setup, moving to React with a
+  bundler stays mostly mechanical, since the components already follow its
+  model.

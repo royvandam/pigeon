@@ -7,7 +7,8 @@ instead of rediscovering it.
 
 | Number | Decision | Status |
 | --- | --- | --- |
-| [0001](0001-frontend-framework.md) | How to structure the browser interface as it grows | Proposed |
+| [0001](0001-frontend-framework.md) | How to structure the browser interface as it grows | Accepted |
+| [0002](0002-json-api.md) | A JSON API for the browser interface and scripts | Proposed |
 
 ## Adding a decision
 
