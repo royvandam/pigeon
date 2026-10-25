@@ -50,6 +50,9 @@ changed pages in the local preview as well, especially tables and code blocks.
   instance-specific data out of examples.
 - Keep the [audit archive](../audit/README.md) as historical records. Update
   resolutions without rewriting the findings.
+- Record significant choices about how Pigeon is built as
+  [decision records](../decisions/README.md). Leave an accepted record as it
+  was decided, and supersede it with a new one when the decision changes.
 
 The README uses `web/static/logo.webp`; the site has a copy at
 `docs/assets/logo.webp` so local previews and deployments serve their own logo.
