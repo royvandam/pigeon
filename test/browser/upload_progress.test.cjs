@@ -40,6 +40,7 @@ function page(size = 10000, options = {}) {
     setRequestHeader(name, value) { this.headers[name] = value; }
     getResponseHeader() { return null; }
     send(body) { this.body = body; }
+    abort() { this.aborted = true; this.onabort(); }
   }
   const documentEvents = new Map();
   vm.runInNewContext(script, {
@@ -47,11 +48,11 @@ function page(size = 10000, options = {}) {
       getElementById(id) { return elements.get(id); },
       addEventListener(name, callback) { documentEvents.set(name, callback); }
     },
-    XMLHttpRequest: XHR, FormData, crypto: webcrypto, AbortController,
+    XMLHttpRequest: XHR, FormData, URLSearchParams, crypto: webcrypto, AbortController,
     performance: {now() { return now; }},
     setTimeout(callback, delay) {
       const id = ++nextTimer;
-      timers.set(id, {callback, due: now + delay});
+      timers.set(id, {callback, delay, due: now + delay});
       return id;
     },
     clearTimeout(id) { timers.delete(id); },
@@ -97,13 +98,23 @@ function page(size = 10000, options = {}) {
     xhr.responseText = status === 200 ? 'ok\nsaved_as=test.bin\nbytes=' + size : responseText;
     xhr.onload();
   }
+  // closeProgress runs the timer that closes the progress panel after a
+  // successful upload, if one is pending, and reports whether it ran.
+  function closeProgress() {
+    const timer = [...timers.entries()].find(([, timer]) => timer.delay === 3000);
+    if (!timer) return false;
+    timers.delete(timer[0]);
+    now = Math.max(now, timer[1].due);
+    timer[1].callback();
+    return true;
+  }
   // drag sends a document drag event carrying dataTransfer, and returns it.
   function drag(name, dataTransfer) {
     const event = {dataTransfer, prevented: false, preventDefault() { this.prevented = true; }};
     documentEvents.get(name)(event);
     return event;
   }
-  return {text, elements, xhr, uploads, requests, timers, reply, poll, finish, settle, select, refreshes, drag};
+  return {text, elements, xhr, uploads, requests, timers, reply, poll, finish, settle, select, refreshes, drag, closeProgress};
 }
 
 test('browser send completion does not advance server progress to 100%', async () => {
@@ -141,7 +152,7 @@ test('browser send completion does not advance server progress to 100%', async (
   assert.match(p.elements.get('fileList').innerHTML, /test.bin/);
   assert.equal(p.refreshes[0].url, '/files?dir=My%20folder%2Fdocs');
   assert.equal(p.refreshes[0].options.headers['X-Requested-With'], 'XMLHttpRequest');
-  assert.equal(p.timers.size, 0);
+  assert.deepEqual([...p.timers.values()].map(timer => timer.delay), [3000], 'only the timer that closes the progress panel');
 });
 
 test('expired sessions ask for a reload instead of showing the server response', async () => {
@@ -219,6 +230,7 @@ test('progress polling failure allows the upload to finish and late responses ca
   assert.equal(p.text('pct'), '100%');
   assert.equal(p.text('eta'), '0s');
   assert.equal(p.text('phase'), 'Done');
+  assert.equal(p.closeProgress(), true, 'only the progress panel waits to close');
   assert.equal(p.timers.size, 0);
 });
 
@@ -385,12 +397,67 @@ test('one area chooses files or a folder, and progress shows only once an upload
   assert.equal(p.elements.get('progressPanel').hidden, false);
   assert.equal(p.elements.get('chooseFiles').disabled, true);
   assert.equal(p.elements.get('chooseFolder').disabled, true);
-  // The finished upload's result stays until the next selection.
+  // A finished upload's result shows for a few seconds, then closes.
   p.uploads[0].status = 200;
   p.uploads[0].responseText = 'ok';
   p.uploads[0].onload();
   assert.equal(p.elements.get('progressPanel').hidden, false);
   assert.equal(p.elements.get('chooseFiles').disabled, false);
+  p.closeProgress();
+  assert.equal(p.elements.get('progressPanel').hidden, true);
+});
+
+test('a failed upload keeps its progress until the next selection', () => {
+  const p = page();
+  p.finish(413);
+  assert.equal(p.elements.get('progressPanel').hidden, false);
+  assert.equal(p.closeProgress(), false, 'nothing closes it on its own');
   p.select(10);
   assert.equal(p.elements.get('progressPanel').hidden, true);
+});
+
+test('a new selection or upload is not hidden by an earlier upload\'s timer', () => {
+  const p = page();
+  p.finish(200);
+  p.select(10);
+  p.elements.get('btn').dispatch('click');
+  assert.equal(p.elements.get('progressPanel').hidden, false);
+  assert.equal(p.closeProgress(), false, 'the earlier timer was canceled');
+  assert.equal(p.elements.get('progressPanel').hidden, false);
+});
+
+test('Cancel shows only while an upload runs and aborts it', async () => {
+  const p = page();
+  const cancel = p.elements.get('cancelUpload');
+  assert.equal(cancel.hidden, false);
+  cancel.dispatch('click');
+  assert.equal(p.xhr.aborted, true);
+  // The server is asked to stop the upload, too.
+  const stop = p.requests.find(request => request.options?.method === 'POST');
+  assert.equal(stop.url, '/upload-progress?id=' + p.xhr.headers['X-Upload-ID']);
+  assert.equal(stop.options.body.get('action'), 'cancel');
+  assert.equal(stop.options.body.get('csrf_token'), 'a'.repeat(43));
+  assert.equal(stop.options.keepalive, true);
+  stop.settled = true;
+  assert.equal(cancel.hidden, true);
+  assert.equal(p.text('phase'), 'Canceled');
+  assert.equal(p.elements.get('progressPanel').hidden, true, 'a canceled upload closes its progress at once');
+  assert.equal(p.elements.get('btn').disabled, false);
+  await p.reply('uploading', 5000, 4000); // A late answer to the aborted poll.
+  assert.equal(p.text('phase'), 'Canceled');
+  assert.equal(p.timers.size, 0, 'progress polling stopped');
+  assert.equal(p.refreshes.length, 1, 'the file list shows whether the batch was saved');
+  // A finished upload hides it too.
+  const done = page();
+  done.finish(200);
+  assert.equal(done.elements.get('cancelUpload').hidden, true);
+});
+
+test('Cancel on the upload link page asks its link to stop the upload', () => {
+  const p = page(10000, {settings: {remainingBytes: undefined, csrfToken: undefined, directory: undefined, uploadUrl: '/u/link-token', progressUrl: '/u/link-token/progress'}, missing: ['fileList', 'explorerMessage', 'storageUsed', 'storageQuota', 'storageRemaining']});
+  p.elements.get('cancelUpload').dispatch('click');
+  const stop = p.requests.find(request => request.options?.method === 'POST');
+  assert.equal(stop.url, '/u/link-token/progress?id=' + p.xhr.headers['X-Upload-ID']);
+  assert.equal(stop.options.body.get('action'), 'cancel');
+  assert.equal(stop.options.body.has('csrf_token'), false);
 });
