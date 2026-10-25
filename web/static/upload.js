@@ -33,9 +33,16 @@
   }
 
   const btn = document.getElementById('btn');
+  // A browser picks either files or one folder, never both, so each has its
+  // own button for its hidden input.
   const fileInput = document.getElementById('file');
   const directoryInput = document.getElementById('directory');
+  const chooseFiles = document.getElementById('chooseFiles');
+  const chooseFolder = document.getElementById('chooseFolder');
   const supportsDirectories = 'webkitdirectory' in directoryInput;
+  // The progress panel shows from the start of an upload until the next
+  // selection, so it holds the final result but stays out of the way before.
+  const progressPanel = document.getElementById('progressPanel');
   let selectedFiles = [];
 
   const pct = document.getElementById('pct');
@@ -61,8 +68,8 @@
 
   function setDisabled(disabled) {
     btn.disabled = disabled || selectedFiles.length === 0 || REMAINING_BYTES < ALLOCATION_UNIT || chargedSize() > REMAINING_BYTES;
-    fileInput.disabled = disabled;
-    directoryInput.disabled = disabled || !supportsDirectories;
+    fileInput.disabled = chooseFiles.disabled = disabled;
+    directoryInput.disabled = chooseFolder.disabled = disabled || !supportsDirectories;
   }
 
   function selectedSize() {
@@ -93,8 +100,11 @@
 
   setDisabled(false);
   if (!supportsDirectories) {
-    document.getElementById('directoryHelp').textContent = 'Directory selection is unavailable in this browser. Use Choose files instead.';
+    chooseFolder.hidden = true;
+    document.getElementById('directoryHelp').textContent = 'This browser cannot choose folders. Choose files instead.';
   }
+  chooseFiles.addEventListener('click', () => fileInput.click());
+  chooseFolder.addEventListener('click', () => directoryInput.click());
 
   function updateStorage(xhr) {
     const remaining = xhr.getResponseHeader('X-Quota-Remaining');
@@ -108,6 +118,7 @@
   function selectFiles(input, otherInput) {
     otherInput.value = '';
     selectedFiles = Array.from(input.files || []);
+    progressPanel.hidden = true;
     const size = selectedSize();
 
     if (selectedFiles.length === 0) {
@@ -147,6 +158,7 @@
     }
 
     setDisabled(true);
+    progressPanel.hidden = false;
 
     setProgress(0);
     spd.textContent = "0 B/s";

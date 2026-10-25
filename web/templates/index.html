@@ -44,7 +44,7 @@
 
       <div id="uploadPanel" data-remaining-bytes="{{.RemainingBytes}}" data-allocation-unit="{{.AllocationUnit}}" data-directory="{{.Directory}}" data-csrf-token="{{.CSRFToken}}" class="mt-6 space-y-4">
         <div>
-          <h2 class="text-base font-semibold"><i class="fa-solid fa-cloud-arrow-up mr-2 text-zinc-400" aria-hidden="true"></i>Upload files or a directory</h2>
+          <h2 class="text-base font-semibold"><i class="fa-solid fa-cloud-arrow-up mr-2 text-zinc-400" aria-hidden="true"></i>Upload files or folders</h2>
           <p class="mt-1 text-sm text-zinc-400">Upload to: <strong class="text-zinc-200">/{{.Directory}}</strong></p>
         </div>
         {{template "uploadControls" .}}

@@ -16,9 +16,11 @@ empty subfolders.
 
 ## Upload files or directories
 
-Use **Choose files** to select one or several files, or **Or choose a directory**
-to upload a directory and all files in its subfolders. The page shows the number
-of selected files, their combined size, and progress for the whole upload.
+Use **Choose files** to select one or several files, or **Choose folder** to
+select a folder and all files in its subfolders, and then **Upload here**;
+browsers pick either files or one folder at a time. The page shows the number
+of selected files and their combined size, and once an upload starts, its
+progress.
 
 Uploads go into the folder currently open in the explorer. Original filenames
 (including spaces, Unicode, and dotfiles) and directory hierarchies are preserved,
