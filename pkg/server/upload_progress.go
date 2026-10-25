@@ -2,7 +2,7 @@ package server
 
 import (
 	"encoding/json"
-	"fmt"
+	"errors"
 	"net/http"
 	"regexp"
 	"sync"
@@ -11,18 +11,25 @@ import (
 
 const uploadProgressRetention = 5 * time.Minute
 
+// maxTrackedUploads is how many uploads one account or upload link may have
+// tracked at a time. A finished record makes room for a new one, so only
+// uploads still in progress count against it, and nobody can grow the tracker
+// without bound.
+const maxTrackedUploads = 16
+
 var uploadIDPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]{16,64}$`)
+
+var (
+	errInvalidUploadID = errors.New("invalid upload ID")
+	errUploadIDInUse   = errors.New("upload ID already in use")
+	errTooManyUploads  = errors.New("too many uploads in progress; wait for one to finish")
+)
 
 // uploadOwner is whose uploads a progress record belongs to: an account's, or
 // those through one upload link, identified by its token's hash.
 type uploadOwner struct {
 	userID int64
 	link   string
-}
-
-type uploadProgressKey struct {
-	owner uploadOwner
-	id    string
 }
 
 type uploadProgressSnapshot struct {
@@ -38,42 +45,96 @@ type uploadProgress struct {
 
 // uploadTracker keeps the progress of uploads that asked for it. Progress
 // belongs to the authenticated user, or to the upload link it came through,
-// and lives only in this server. Terminal
-// records expire so callers can fetch a final snapshot without keeping an
-// ever-growing upload history in memory.
+// and lives only in this server. Finished records expire so callers can fetch
+// a final snapshot without keeping an ever-growing upload history in memory.
 type uploadTracker struct {
-	progress sync.Map
+	mu        sync.Mutex
+	uploads   map[uploadOwner]map[string]*uploadProgress
+	lastSweep time.Time
 }
 
 func newUploadTracker() *uploadTracker {
-	return &uploadTracker{}
+	return &uploadTracker{uploads: make(map[uploadOwner]map[string]*uploadProgress)}
 }
 
 // begin starts tracking upload id of owner, or returns nil when the upload
-// has no ID.
+// has no ID. It fails when owner already tracks maxTrackedUploads uploads in
+// progress.
 func (t *uploadTracker) begin(owner uploadOwner, id string) (*uploadProgress, error) {
 	if id == "" {
 		return nil, nil // Existing API clients need not request progress tracking.
 	}
 	if !uploadIDPattern.MatchString(id) {
-		return nil, fmt.Errorf("invalid upload ID")
+		return nil, errInvalidUploadID
 	}
 	now := time.Now()
-	t.progress.Range(func(key, value any) bool {
-		p := value.(*uploadProgress)
-		p.mu.Lock()
-		expired := !p.finished.IsZero() && now.Sub(p.finished) >= uploadProgressRetention
-		p.mu.Unlock()
-		if expired {
-			t.progress.CompareAndDelete(key, p)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	// Owners who stopped uploading leave expired records behind. Sweeping them
+	// once per retention period keeps each upload's work proportional to its
+	// own owner's records.
+	if now.Sub(t.lastSweep) >= uploadProgressRetention {
+		for other := range t.uploads {
+			t.prune(other, now)
 		}
-		return true
-	})
-	p := &uploadProgress{snapshot: uploadProgressSnapshot{State: "queued"}}
-	if _, loaded := t.progress.LoadOrStore(uploadProgressKey{owner, id}, p); loaded {
-		return nil, fmt.Errorf("upload ID already in use")
+		t.lastSweep = now
+	} else {
+		t.prune(owner, now)
 	}
+	records := t.uploads[owner]
+	if _, ok := records[id]; ok {
+		return nil, errUploadIDInUse
+	}
+	if len(records) >= maxTrackedUploads && !evictOldestFinished(records) {
+		return nil, errTooManyUploads
+	}
+	if records == nil {
+		records = make(map[string]*uploadProgress)
+		t.uploads[owner] = records
+	}
+	p := &uploadProgress{snapshot: uploadProgressSnapshot{State: "queued"}}
+	records[id] = p
 	return p, nil
+}
+
+// prune removes owner's expired records, and owner once it has none left.
+// The tracker's lock must be held.
+func (t *uploadTracker) prune(owner uploadOwner, now time.Time) {
+	records := t.uploads[owner]
+	for id, p := range records {
+		if p.expired(now) {
+			delete(records, id)
+		}
+	}
+	if len(records) == 0 {
+		delete(t.uploads, owner)
+	}
+}
+
+// evictOldestFinished removes the finished record that finished first, and
+// reports false if every record is still in progress.
+func evictOldestFinished(records map[string]*uploadProgress) bool {
+	oldest, oldestTime := "", time.Time{}
+	for id, p := range records {
+		p.mu.Lock()
+		finished := p.finished
+		p.mu.Unlock()
+		if !finished.IsZero() && (oldest == "" || finished.Before(oldestTime)) {
+			oldest, oldestTime = id, finished
+		}
+	}
+	if oldest == "" {
+		return false
+	}
+	delete(records, oldest)
+	return true
+}
+
+// expired reports whether p finished at least uploadProgressRetention ago.
+func (p *uploadProgress) expired(now time.Time) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return !p.finished.IsZero() && now.Sub(p.finished) >= uploadProgressRetention
 }
 
 func (p *uploadProgress) setState(state string) {
@@ -118,20 +179,19 @@ func (p *uploadProgress) Written(n int64) {
 
 // snapshot returns the progress of owner's upload, if it is still tracked.
 func (t *uploadTracker) snapshot(owner uploadOwner, id string) (uploadProgressSnapshot, bool) {
-	key := uploadProgressKey{owner, id}
-	value, ok := t.progress.Load(key)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	p, ok := t.uploads[owner][id]
 	if !ok {
 		return uploadProgressSnapshot{}, false
 	}
-	p := value.(*uploadProgress)
-	p.mu.Lock()
-	expired := !p.finished.IsZero() && time.Since(p.finished) >= uploadProgressRetention
-	snapshot := p.snapshot
-	p.mu.Unlock()
-	if expired {
-		t.progress.CompareAndDelete(key, p)
+	if now := time.Now(); p.expired(now) {
+		t.prune(owner, now)
 		return uploadProgressSnapshot{}, false
 	}
+	p.mu.Lock()
+	snapshot := p.snapshot
+	p.mu.Unlock()
 	return snapshot, true
 }
 
