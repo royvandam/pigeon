@@ -81,6 +81,9 @@ nav:
   - Decisions:
       - Decision records: decisions/README.md
       - "0001: Browser interface": decisions/0001-frontend-framework.md
+      - "0002: JSON API": decisions/0002-json-api.md
+  - Plans:
+      - Preact migration: plans/preact-migration.md
   - Audits:
       - Review archive: audit/README.md
       - Security (2026-10-17): audit/2026-10-17-security.md
