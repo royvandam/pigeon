@@ -14,9 +14,9 @@ contents, including files added after the link was created.
 ## Upload links
 
 Anyone with a folder's upload link can upload files and folders into it
-without an account, from a page that shows only the folder's name and an
-upload form. They cannot see, download, or change what the folder already
-holds, or anything uploaded by others.
+without an account, by dropping them onto a page that shows only the folder's
+name and an upload form, or choosing them there. They cannot see, download, or
+change what the folder already holds, or anything uploaded by others.
 
 - **Taken names are renamed.** An upload whose name is taken in the folder is
   saved under the next free name, such as `report (2).pdf` or `Photos (2)`. An

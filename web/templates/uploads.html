@@ -1,6 +1,10 @@
 {{define "uploadControls"}}
+  <div id="dropZone" hidden aria-hidden="true" class="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/80 p-6">
+    <p class="rounded-2xl border-2 border-dashed border-zinc-400 bg-zinc-900 px-8 py-6 text-lg font-semibold text-zinc-100"><i class="fa-solid fa-cloud-arrow-up mr-2 text-zinc-400" aria-hidden="true"></i>Drop to upload</p>
+  </div>
+
   <div class="rounded-xl border border-dashed border-zinc-700 bg-zinc-950/20 p-5 text-center">
-    <p class="text-sm text-zinc-300"><i class="fa-solid fa-cloud-arrow-up mr-2 text-zinc-400" aria-hidden="true"></i>Choose files, or a folder with everything in it</p>
+    <p class="text-sm text-zinc-300"><i class="fa-solid fa-cloud-arrow-up mr-2 text-zinc-400" aria-hidden="true"></i>Drop files or folders anywhere on this page, or choose them</p>
     <p id="directoryHelp" class="mt-1 text-xs text-zinc-500">Folders keep their names and everything in their subfolders.</p>
     <div class="mt-4 flex flex-wrap justify-center gap-2">
       <button id="chooseFiles" type="button" class="rounded-lg bg-zinc-800 px-3 py-2 font-medium text-zinc-100 hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"><i class="fa-solid fa-file mr-1" aria-hidden="true"></i>Choose files</button>
