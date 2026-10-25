@@ -40,9 +40,35 @@
   const chooseFiles = document.getElementById('chooseFiles');
   const chooseFolder = document.getElementById('chooseFolder');
   const supportsDirectories = 'webkitdirectory' in directoryInput;
-  // The progress panel shows from the start of an upload until the next
-  // selection, so it holds the final result but stays out of the way before.
+  // The progress panel shows only around an upload: from its start until a
+  // few seconds after it succeeds, or at once when it is canceled. After a
+  // failure it stays, next to the error, until the next selection.
   const progressPanel = document.getElementById('progressPanel');
+  const PROGRESS_LINGER_MS = 3000;
+  let hideProgressTimer = null;
+  function setProgressShown(shown) {
+    clearTimeout(hideProgressTimer);
+    hideProgressTimer = null;
+    progressPanel.hidden = !shown;
+  }
+  // Canceling asks the server to stop the upload and closes its connection,
+  // and the server discards the files it received. Asking matters when
+  // something between them, such as a proxy, keeps the server's connection
+  // open: the upload would otherwise keep the next one waiting until it timed
+  // out. A cancel that arrives while the server saves the batch may be too
+  // late; batches are saved whole or not at all.
+  const cancelButton = document.getElementById('cancelUpload');
+  let currentUpload = null;
+  cancelButton.addEventListener('click', () => {
+    if (!currentUpload) return;
+    const {xhr, id} = currentUpload;
+    const body = new URLSearchParams({action: 'cancel'});
+    if (CSRF_TOKEN) body.set('csrf_token', CSRF_TOKEN);
+    fetch(PROGRESS_URL + '?id=' + encodeURIComponent(id), {
+      method: 'POST', credentials: 'same-origin', headers: BROWSER_HEADERS, body, keepalive: true
+    }).catch(() => {}); // The aborted connection still ends the upload in most setups.
+    xhr.abort();
+  });
   // Each selected file with its path relative to the destination folder, which
   // keeps the structure of a chosen or dropped folder.
   let selectedFiles = [];
@@ -135,7 +161,7 @@
   // whether it fits the storage that is left.
   function useSelection(files, label) {
     selectedFiles = files;
-    progressPanel.hidden = true;
+    setProgressShown(false);
     const size = selectedSize();
     fileName.textContent = label;
     fileCount.textContent = selectedFiles.length + (selectedFiles.length === 1 ? ' file' : ' files');
@@ -253,7 +279,7 @@
     }
 
     setDisabled(true);
-    progressPanel.hidden = false;
+    setProgressShown(true);
 
     setProgress(0);
     spd.textContent = "0 B/s";
@@ -276,6 +302,8 @@
     // getRandomValues also works on local HTTP; randomUUID requires HTTPS.
     const uploadID = Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
     xhr.setRequestHeader("X-Upload-ID", uploadID);
+    currentUpload = {xhr, id: uploadID};
+    cancelButton.hidden = false;
 
     const tStart = performance.now();
     const samples = [{time: tStart, bytes: 0}];
@@ -283,6 +311,11 @@
     let progressSeen = false;
     let pollTimer = null;
     let progressRequest = null;
+
+    function uploadEnded() {
+      currentUpload = null;
+      cancelButton.hidden = true;
+    }
 
     function stopProgress() {
       stopped = true;
@@ -372,6 +405,7 @@
     xhr.upload.onload = pollProgress;
 
     xhr.onload = () => {
+      uploadEnded();
       stopProgress();
 
       updateStorage(xhr);
@@ -387,6 +421,7 @@
         spd.textContent = humanBytes(avgBps) + "/s avg";
         phase.textContent = "Done";
         refreshFiles();
+        hideProgressTimer = setTimeout(() => setProgressShown(false), PROGRESS_LINGER_MS);
       } else {
         eta.textContent = "—";
         spd.textContent = "—";
@@ -397,6 +432,7 @@
     };
 
     xhr.onerror = () => {
+      uploadEnded();
       stopProgress();
       eta.textContent = "—";
       spd.textContent = "—";
@@ -405,11 +441,15 @@
     };
 
     xhr.onabort = () => {
+      uploadEnded();
       stopProgress();
       eta.textContent = "—";
       spd.textContent = "—";
       phase.textContent = "Canceled";
+      setProgressShown(false);
       setDisabled(false);
+      // The server may have finished saving the batch before the cancel.
+      refreshFiles();
     };
 
     xhr.send(form);

@@ -49,6 +49,14 @@ confirms a successful upload. Speed and the approximate time remaining use a
 rolling five-second window of server progress, excluding multipart overhead.
 Queued uploads and storage checks show their current phase; final saving shows
 **Finishing…** until confirmed. A stalled transfer stops reporting a countdown.
+The progress closes a few seconds after an upload succeeds; after a failure it
+stays, next to the error, until you choose or drop other files.
+
+Choose **Cancel** to stop an upload while it runs; its progress closes at once,
+and the next upload can start right away, also behind a proxy. The server
+discards the files it received, so nothing from the upload is saved,
+unless the cancel arrives while the server is already saving the batch; the file
+list then shows the whole batch. Uploads are never saved in part.
 
 For request errors and stalled transfers, see [troubleshooting](../troubleshooting.md).
 For scripts and command-line uploads, see the [HTTP API](../reference/api.md).
