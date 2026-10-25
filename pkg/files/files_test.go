@@ -471,6 +471,53 @@ func TestUploadLinksRenameTakenNamesAndChargeTheOwner(t *testing.T) {
 	}
 }
 
+func TestUploadLinksNeverAddToAFolderCreatedDuringTheUpload(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	f := newFixture(t, 100)
+	f.write(t, "inbox/Photos/old.jpg", "o")
+	secret := f.shareUploads(t, "inbox")
+	upload := func() *Upload {
+		up, err := f.BeginSharedUpload(ctx, secret, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := up.Prepare(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if err := up.Add(ctx, "Photos/new.jpg", strings.NewReader("n")); err != nil {
+			t.Fatal(err)
+		}
+		return up
+	}
+
+	// The upload chooses "Photos (2)", and the owner creates a folder with
+	// that name before it publishes.
+	up := upload()
+	a := f.open(t)
+	if err := a.Mkdir(ctx, "inbox", "Photos (2)"); err != nil {
+		t.Fatal(err)
+	}
+	a.Close()
+	if _, err := up.Publish(ctx); !errors.Is(err, storage.ErrConflict) {
+		t.Fatalf("published into a folder created during the upload: %v", err)
+	}
+	up.Close()
+	if entries, err := os.ReadDir(filepath.Join(f.dir, f.user.Slug, "inbox", "Photos (2)")); err != nil || len(entries) != 0 {
+		t.Fatalf("the owner's new folder holds %v, %v", entries, err)
+	}
+
+	// Trying again chooses a name that is free now.
+	up = upload()
+	defer up.Close()
+	if _, err := up.Publish(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if f.read(t, "inbox/Photos (3)/new.jpg") != "n" {
+		t.Fatal("the retried upload was not saved under a new name")
+	}
+}
+
 func TestUploadLinksStopWhenTheLinkChanges(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

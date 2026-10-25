@@ -21,7 +21,9 @@ holds, or anything uploaded by others.
 - **Taken names are renamed.** An upload whose name is taken in the folder is
   saved under the next free name, such as `report (2).pdf` or `Photos (2)`. An
   uploaded folder whose name is taken becomes a new folder, so nothing is added
-  to an existing one, and nothing is ever replaced.
+  to an existing one, and nothing is ever replaced. If you create an item with
+  the new name while the upload is still running, the upload fails instead;
+  trying again picks another name.
 - **Uploads count against your quota.** People with the link can fill your
   storage. Use a lifetime, and revoke the link when you have what you need.
 - **Uploads share your upload queue.** Uploads to one account run one at a

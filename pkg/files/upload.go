@@ -316,13 +316,17 @@ func (up *Upload) currentCharge(ctx context.Context) (int64, error) {
 
 // Publish checks the account and its quota again and publishes the files.
 // The account may have been deleted, its quota lowered, or its storage filled
-// by file actions while the files streamed.
+// by file actions while the files streamed. An upload through a link also
+// checks that the names it chose are still free; see checkFreeNames.
 func (up *Upload) Publish(ctx context.Context) (Receipt, error) {
 	access, err := up.open(ctx)
 	if err != nil {
 		return Receipt{}, err
 	}
 	defer access.Close()
+	if err := up.checkFreeNames(ctx); err != nil {
+		return Receipt{}, err
+	}
 	usage, err := access.Usage(ctx) // Staged files are never counted.
 	if err != nil {
 		return Receipt{}, err
@@ -385,6 +389,25 @@ func (up *Upload) freeName(ctx context.Context, name string) (string, error) {
 		return free + "/" + rest, nil
 	}
 	return free, nil
+}
+
+// checkFreeNames reports a storage.ErrConflict if an item has taken one of the
+// names that an upload through a link chose as free. Files stream without the
+// account lock, so the owner may have created one since; publishing would then
+// add files to an existing folder. Publish calls it with the lock held, so the
+// names stay free until the files are published, and trying again chooses new
+// ones.
+func (up *Upload) checkFreeNames(ctx context.Context) error {
+	for _, free := range up.renamed {
+		_, err := up.tree.Stat(ctx, path.Join(up.target, free))
+		if err == nil {
+			return fmt.Errorf("%w: a name was taken during the upload; try again", storage.ErrConflict)
+		}
+		if !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
 }
 
 func (up *Upload) freeFirstElement(ctx context.Context, first string, folder bool) (string, error) {
