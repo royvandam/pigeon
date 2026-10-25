@@ -118,3 +118,22 @@ func TestUploadLinksHideTheOwnersQuota(t *testing.T) {
 		t.Fatalf("over-quota upload through a link: %d, %s", w.Code, w.Body)
 	}
 }
+
+func TestInvalidUploadLinksKeepNoState(t *testing.T) {
+	t.Parallel()
+	srv := newTestServer(t, 100)
+	for i := range 8 {
+		secret := strings.Repeat(string(rune('A'+i)), 43)
+		r := httptest.NewRequest(http.MethodPost, "/u/"+secret, strings.NewReader(""))
+		r.Header.Set("Content-Type", "multipart/form-data; boundary=review")
+		r.Header.Set("X-Upload-ID", testUploadID[:30]+strings.Repeat(string(rune('a'+i)), 2))
+		if w := serve(srv.Handler(), r); w.Code != http.StatusNotFound {
+			t.Fatalf("upload through an invalid link: %d, %s", w.Code, w.Body)
+		}
+	}
+	srv.uploads.mu.Lock()
+	defer srv.uploads.mu.Unlock()
+	if len(srv.uploads.uploads) != 0 {
+		t.Fatalf("invalid links left progress records: %v", srv.uploads.uploads)
+	}
+}

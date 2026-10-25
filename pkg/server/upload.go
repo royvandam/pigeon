@@ -55,13 +55,23 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	s.receiveUpload(w, r, upload, boundary, progress, false)
 }
 
-// handleSharedUpload receives an upload through an upload link, after the
-// page in handleUploadPage. The link's token authorizes it; there is no
-// session, so there is no CSRF token to check.
+// handleSharedUpload receives an upload through an upload link, from the
+// page that handleUploadLink serves. The link's token authorizes it; there is
+// no session, so there is no CSRF token to check.
 func (s *Server) handleSharedUpload(w http.ResponseWriter, r *http.Request) {
 	secret := r.PathValue("token")
 	if !s.sameOrigin(r) {
 		http.Error(w, "invalid request origin", http.StatusForbidden)
+		return
+	}
+	// Check the link before keeping any state for the request, so a made-up
+	// token costs nothing. BeginSharedUpload, Prepare, and Publish check it
+	// again, since it may be revoked at any time.
+	if _, err := s.files.UploadLink(r.Context(), secret); errors.Is(err, share.ErrNotFound) {
+		http.Error(w, uploadLinkGone, http.StatusNotFound)
+		return
+	} else if err != nil {
+		writeUploadError(w, r, err, true)
 		return
 	}
 	boundary, ok := multipartBoundary(w, r)
@@ -109,15 +119,17 @@ func multipartBoundary(w http.ResponseWriter, r *http.Request) (string, bool) {
 // the request and reports false.
 func (s *Server) beginProgress(w http.ResponseWriter, r *http.Request, owner uploadOwner) (*uploadProgress, bool) {
 	progress, err := s.uploads.begin(owner, r.Header.Get("X-Upload-ID"))
-	if err != nil {
-		status := http.StatusConflict
-		if !uploadIDPattern.MatchString(r.Header.Get("X-Upload-ID")) {
-			status = http.StatusBadRequest
-		}
-		http.Error(w, err.Error(), status)
-		return nil, false
+	switch {
+	case errors.Is(err, errInvalidUploadID):
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	case errors.Is(err, errTooManyUploads):
+		http.Error(w, err.Error(), http.StatusTooManyRequests)
+	case err != nil:
+		http.Error(w, err.Error(), http.StatusConflict)
+	default:
+		return progress, true
 	}
-	return progress, true
+	return nil, false
 }
 
 // receiveUpload streams the files of r into upload and publishes them. An

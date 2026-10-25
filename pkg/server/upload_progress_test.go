@@ -3,6 +3,8 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -221,10 +223,60 @@ func TestUploadProgressExpiration(t *testing.T) {
 	if _, ok := uploads.snapshot(uploadOwner{userID: 1}, testUploadID); ok {
 		t.Fatal("expired progress is still accessible")
 	}
-	if _, ok := uploads.progress.Load(uploadProgressKey{uploadOwner{userID: 1}, testUploadID}); ok {
-		t.Fatal("expired progress was not removed")
+	if len(uploads.uploads) != 0 {
+		t.Fatalf("expired progress was not removed: %v", uploads.uploads)
 	}
 	if _, err := uploads.begin(uploadOwner{userID: 1}, testUploadID); err != nil {
 		t.Fatalf("expired ID is still reserved: %v", err)
+	}
+}
+
+func TestUploadProgressIsBoundedPerOwner(t *testing.T) {
+	t.Parallel()
+	uploads := newUploadTracker()
+	owner, other := uploadOwner{link: "link-hash"}, uploadOwner{userID: 1}
+	id := func(i int) string { return fmt.Sprintf("%s%04d", testUploadID[:16], i) }
+	var first *uploadProgress
+	for i := range maxTrackedUploads {
+		p, err := uploads.begin(owner, id(i))
+		if err != nil {
+			t.Fatalf("upload %d: %v", i, err)
+		}
+		if i == 0 {
+			first = p
+		}
+	}
+	// Uploads in progress are never dropped to make room.
+	if _, err := uploads.begin(owner, id(maxTrackedUploads)); !errors.Is(err, errTooManyUploads) {
+		t.Fatalf("upload beyond the limit: %v", err)
+	}
+	if _, err := uploads.begin(other, testUploadID); err != nil {
+		t.Fatalf("another owner was limited: %v", err)
+	}
+	// A finished upload makes room, and its record goes first.
+	first.setState("complete")
+	if _, err := uploads.begin(owner, id(maxTrackedUploads)); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := uploads.snapshot(owner, id(0)); ok {
+		t.Fatal("the finished upload's record was kept")
+	}
+	if _, ok := uploads.snapshot(owner, id(1)); !ok {
+		t.Fatal("an upload in progress lost its record")
+	}
+
+	// Expired records of owners who stopped uploading are swept periodically.
+	for _, p := range uploads.uploads[owner] {
+		p.fail()
+		p.mu.Lock()
+		p.finished = time.Now().Add(-uploadProgressRetention)
+		p.mu.Unlock()
+	}
+	uploads.lastSweep = time.Now().Add(-uploadProgressRetention)
+	if _, err := uploads.begin(other, id(1)); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := uploads.uploads[owner]; ok || len(uploads.uploads) != 1 {
+		t.Fatalf("expired records were not swept: %v", uploads.uploads)
 	}
 }

@@ -221,7 +221,9 @@ The JSON response has `bytes_received` (file bytes written so far) and `state`
 (`queued`, `preparing`, `uploading`, `finalizing`, `complete`, or `failed`).
 Progress records are held in memory and expire five minutes after completion or
 failure; other users cannot read them. Reusing an existing ID returns HTTP 409.
-The header is optional for clients that do not need progress.
+An account, or an upload link, can have 16 tracked uploads in progress at a
+time; another tracked upload returns HTTP 429 until one finishes. The header is
+optional for clients that do not need progress.
 
 For example, start an upload with a fresh ID:
 
@@ -274,5 +276,5 @@ code to decide what to do, rather than depending on exact error wording.
 | `408` | Stalled request body or canceled operation. | Check the connection and retry when ready. |
 | `409` | Existing destination, conflicting paths, or reused upload ID. | Resolve the conflict or choose a new ID. |
 | `413` | Account quota or request-size limit exceeded. | Free storage, raise quota, or reduce the request. |
-| `429` | Too many failed authentication attempts. | Wait for the `Retry-After` interval. |
+| `429` | Too many failed authentication attempts, or tracked uploads in progress. | Wait for the `Retry-After` interval, or for an upload to finish. |
 | `500` | Database or filesystem failure. | Check server logs and storage permissions. |
