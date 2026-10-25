@@ -1,37 +1,20 @@
 {{define "uploadControls"}}
-  <div>
-    <label for="file" class="block font-medium text-zinc-200">Choose files</label>
-    <div class="mt-2 rounded-xl border border-dashed border-zinc-800 bg-zinc-950/20 p-4">
-      <input
-        id="file"
-        type="file"
-        multiple
-        class="block w-full text-zinc-200 file:mr-4 file:rounded-lg file:border-0 file:bg-zinc-800 file:px-3 file:py-2 file:font-medium file:text-zinc-100 hover:file:bg-zinc-700"
-      />
+  <div class="rounded-xl border border-dashed border-zinc-700 bg-zinc-950/20 p-5 text-center">
+    <p class="text-sm text-zinc-300"><i class="fa-solid fa-cloud-arrow-up mr-2 text-zinc-400" aria-hidden="true"></i>Choose files, or a folder with everything in it</p>
+    <p id="directoryHelp" class="mt-1 text-xs text-zinc-500">Folders keep their names and everything in their subfolders.</p>
+    <div class="mt-4 flex flex-wrap justify-center gap-2">
+      <button id="chooseFiles" type="button" class="rounded-lg bg-zinc-800 px-3 py-2 font-medium text-zinc-100 hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"><i class="fa-solid fa-file mr-1" aria-hidden="true"></i>Choose files</button>
+      <button id="chooseFolder" type="button" class="rounded-lg bg-zinc-800 px-3 py-2 font-medium text-zinc-100 hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"><i class="fa-solid fa-folder mr-1" aria-hidden="true"></i>Choose folder</button>
     </div>
-  </div>
-
-  <div>
-    <label for="directory" class="block font-medium text-zinc-200">Or choose a directory</label>
-    <div class="mt-2 rounded-xl border border-dashed border-zinc-800 bg-zinc-950/20 p-4">
-      <input
-        id="directory"
-        type="file"
-        webkitdirectory
-        multiple
-        aria-describedby="directoryHelp"
-        class="block w-full text-zinc-200 file:mr-4 file:rounded-lg file:border-0 file:bg-zinc-800 file:px-3 file:py-2 file:font-medium file:text-zinc-100 hover:file:bg-zinc-700"
-      />
-      <p id="directoryHelp" class="mt-3 text-xs text-zinc-500">Includes files in all subfolders and preserves their names and folder structure.</p>
-    </div>
-  </div>
-
-  <div class="text-xs text-zinc-500" aria-live="polite">
-    Selected: <span id="fileName" class="text-zinc-300">none</span>
-    <span class="mx-2 text-zinc-700">|</span>
-    <span id="fileCount" class="text-zinc-300">0 files</span>
-    <span class="mx-2 text-zinc-700">|</span>
-    Size: <span id="fileSize" class="text-zinc-300">0 B</span>
+    <input id="file" type="file" multiple hidden />
+    <input id="directory" type="file" webkitdirectory multiple hidden />
+    <p class="mt-4 text-xs text-zinc-500" aria-live="polite">
+      Selected: <span id="fileName" class="text-zinc-300">none</span>
+      <span class="mx-2 text-zinc-700">|</span>
+      <span id="fileCount" class="text-zinc-300">0 files</span>
+      <span class="mx-2 text-zinc-700">|</span>
+      Size: <span id="fileSize" class="text-zinc-300">0 B</span>
+    </p>
   </div>
 
   <div class="flex items-center gap-3">
@@ -48,7 +31,7 @@
     </div>
   </div>
 
-  <div class="rounded-xl border border-zinc-800 bg-zinc-950/30 p-4">
+  <div id="progressPanel" hidden class="rounded-xl border border-zinc-800 bg-zinc-950/30 p-4">
     <div class="flex items-center justify-between text-xs text-zinc-400">
       <div>Progress</div>
       <div><span id="pct">0%</span></div>

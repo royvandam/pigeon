@@ -20,7 +20,8 @@ function page(size = 10000, options = {}) {
     const events = new Map();
     let value = '';
     const element = {
-      textContent: '', disabled: false, files: [], style: {}, attributes: {},
+      textContent: '', disabled: false, files: [], style: {}, attributes: {}, clicks: 0,
+      click() { this.clicks++; },
       classList: {add() {}, remove() {}},
       setAttribute(name, value) { this.attributes[name] = value; },
       addEventListener(name, callback) { events.set(name, callback); },
@@ -64,8 +65,11 @@ function page(size = 10000, options = {}) {
     elements.get('file').files = [new File([new Uint8Array(bytes)], 'test.bin')];
     elements.get('file').dispatch('change');
   }
-  select(size);
-  elements.get('btn').dispatch('click');
+  // An idle page waits for a test to select files.
+  if (!options.idle) {
+    select(size);
+    elements.get('btn').dispatch('click');
+  }
   const xhr = uploads[0];
   async function settle() { for (let i = 0; i < 8; i++) await Promise.resolve(); }
   async function reply(state, bytes, at, status = 200) {
@@ -89,7 +93,7 @@ function page(size = 10000, options = {}) {
     xhr.responseText = status === 200 ? 'ok\nsaved_as=test.bin\nbytes=' + size : responseText;
     xhr.onload();
   }
-  return {text, elements, xhr, requests, timers, reply, poll, finish, settle, select, refreshes};
+  return {text, elements, xhr, uploads, requests, timers, reply, poll, finish, settle, select, refreshes};
 }
 
 test('browser send completion does not advance server progress to 100%', async () => {
@@ -276,4 +280,26 @@ test('the upload link page posts to its link without a session or a storage chec
   await p.settle();
   assert.equal(p.text('phase'), 'Done');
   assert.equal(p.refreshes.length, 0);
+});
+
+test('one area chooses files or a folder, and progress shows only once an upload starts', () => {
+  const p = page(0, {idle: true});
+  p.elements.get('chooseFiles').dispatch('click');
+  p.elements.get('chooseFolder').dispatch('click');
+  assert.equal(p.elements.get('file').clicks, 1);
+  assert.equal(p.elements.get('directory').clicks, 1);
+  p.select(1000);
+  assert.equal(p.elements.get('progressPanel').hidden, true);
+  p.elements.get('btn').dispatch('click');
+  assert.equal(p.elements.get('progressPanel').hidden, false);
+  assert.equal(p.elements.get('chooseFiles').disabled, true);
+  assert.equal(p.elements.get('chooseFolder').disabled, true);
+  // The finished upload's result stays until the next selection.
+  p.uploads[0].status = 200;
+  p.uploads[0].responseText = 'ok';
+  p.uploads[0].onload();
+  assert.equal(p.elements.get('progressPanel').hidden, false);
+  assert.equal(p.elements.get('chooseFiles').disabled, false);
+  p.select(10);
+  assert.equal(p.elements.get('progressPanel').hidden, true);
 });
