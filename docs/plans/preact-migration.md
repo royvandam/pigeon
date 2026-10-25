@@ -287,7 +287,7 @@ Update this section in each phase's pull request.
 
 | Phase | Status | Pull request |
 | --- | --- | --- |
-| 0. Decide and plan | In review | — |
+| 0. Decide and plan | In review | #28 |
 | 1. Foundation | Not started | — |
 | 2a. JSON API and explorer | Not started | — |
 | 2b. Sharing | Not started | — |
