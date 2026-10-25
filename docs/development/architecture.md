@@ -173,7 +173,9 @@ still points to that folder, before and after taking the lock, so revoking,
 replacing, or expiring the link, or moving its folder, discards an upload in
 progress. `Add` gives each first path element whose name is taken the next
 free numbered name, the same for every file below it, so an upload through a
-link never adds to or replaces an existing item.
+link never adds to or replaces an existing item. Names are chosen while files
+stream without the lock, so `Publish` checks again under the lock that they are
+still free, and fails with a conflict if the owner took one meanwhile.
 
 ## HTTP server
 

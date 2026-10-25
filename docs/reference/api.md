@@ -184,8 +184,9 @@ curl --fail-with-body --form 'file=@scan.pdf' \
 
 Invalid, revoked, or expired links, and download links, return HTTP 404. An
 upload also fails with 404 when its link is revoked, replaced, or expires, or
-its folder is renamed, moved, or deleted, before the files are saved.
-Cross-site browser posts return HTTP 403.
+its folder is renamed, moved, or deleted, before the files are saved, and with
+409 when an item takes one of its new names meanwhile; trying again chooses
+another. Cross-site browser posts return HTTP 403.
 
 ## Change files and folders
 
