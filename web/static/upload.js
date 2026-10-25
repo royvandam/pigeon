@@ -34,7 +34,7 @@
 
   const btn = document.getElementById('btn');
   // A browser picks either files or one folder, never both, so each has its
-  // own button for its hidden input.
+  // own button for its hidden input. Drops can mix them.
   const fileInput = document.getElementById('file');
   const directoryInput = document.getElementById('directory');
   const chooseFiles = document.getElementById('chooseFiles');
@@ -43,7 +43,10 @@
   // The progress panel shows from the start of an upload until the next
   // selection, so it holds the final result but stays out of the way before.
   const progressPanel = document.getElementById('progressPanel');
+  // Each selected file with its path relative to the destination folder, which
+  // keeps the structure of a chosen or dropped folder.
   let selectedFiles = [];
+  let busy = false;
 
   const pct = document.getElementById('pct');
   const spd = document.getElementById('spd');
@@ -67,17 +70,18 @@
   }
 
   function setDisabled(disabled) {
+    busy = disabled;
     btn.disabled = disabled || selectedFiles.length === 0 || REMAINING_BYTES < ALLOCATION_UNIT || chargedSize() > REMAINING_BYTES;
     fileInput.disabled = chooseFiles.disabled = disabled;
     directoryInput.disabled = chooseFolder.disabled = disabled || !supportsDirectories;
   }
 
   function selectedSize() {
-    return selectedFiles.reduce((total, file) => total + file.size, 0);
+    return selectedFiles.reduce((total, {file}) => total + file.size, 0);
   }
 
   function chargedSize() {
-    return selectedFiles.reduce((total, file) => total + Math.max(1, Math.ceil(file.size / ALLOCATION_UNIT)) * ALLOCATION_UNIT, 0);
+    return selectedFiles.reduce((total, {file}) => total + Math.max(1, Math.ceil(file.size / ALLOCATION_UNIT)) * ALLOCATION_UNIT, 0);
   }
 
   function showQuotaError(charged) {
@@ -117,17 +121,23 @@
 
   function selectFiles(input, otherInput) {
     otherInput.value = '';
-    selectedFiles = Array.from(input.files || []);
+    const files = Array.from(input.files || []);
+    let label = 'none';
+    if (files.length > 0 && input === directoryInput) {
+      label = files[0].webkitRelativePath.split('/')[0];
+    } else if (files.length > 0) {
+      label = files.length === 1 ? files[0].name : files[0].name + ' and ' + (files.length - 1) + ' more';
+    }
+    useSelection(files.map(file => ({file, path: file.webkitRelativePath || file.name})), label);
+  }
+
+  // useSelection makes files the selection, described by label, and reports
+  // whether it fits the storage that is left.
+  function useSelection(files, label) {
+    selectedFiles = files;
     progressPanel.hidden = true;
     const size = selectedSize();
-
-    if (selectedFiles.length === 0) {
-      fileName.textContent = 'none';
-    } else if (input === directoryInput) {
-      fileName.textContent = selectedFiles[0].webkitRelativePath.split('/')[0];
-    } else {
-      fileName.textContent = selectedFiles.length === 1 ? selectedFiles[0].name : selectedFiles[0].name + ' and ' + (selectedFiles.length - 1) + ' more';
-    }
+    fileName.textContent = label;
     fileCount.textContent = selectedFiles.length + (selectedFiles.length === 1 ? ' file' : ' files');
     fileSize.textContent = humanBytes(size);
     tot.textContent = humanBytes(size);
@@ -140,13 +150,98 @@
 
     if (chargedSize() > REMAINING_BYTES) {
       showQuotaError(chargedSize());
+      return false;
     }
+    return true;
   }
 
   fileInput.addEventListener('change', () => selectFiles(fileInput, directoryInput));
   directoryInput.addEventListener('change', () => selectFiles(directoryInput, fileInput));
 
-  btn.addEventListener('click', () => {
+  // readEntry lists the files in a dropped file or folder, with paths that
+  // start at the dropped item. Folders without files add nothing, as with the
+  // folder input.
+  async function readEntry(entry, parent) {
+    const path = parent + entry.name;
+    if (entry.isFile) {
+      const file = await new Promise((resolve, reject) => entry.file(resolve, reject));
+      return [{file, path}];
+    }
+    if (!entry.isDirectory) return [];
+    const reader = entry.createReader();
+    const files = [];
+    // A folder is read a batch at a time, until an empty batch.
+    for (;;) {
+      const batch = await new Promise((resolve, reject) => reader.readEntries(resolve, reject));
+      if (batch.length === 0) return files;
+      for (const child of batch) {
+        for (const item of await readEntry(child, path + '/')) files.push(item);
+      }
+    }
+  }
+
+  // Files and folders dropped anywhere on the page are uploaded at once, as if
+  // chosen and uploaded with the controls. The overlay shows only while files
+  // are dragged over the page; dragging other things, such as text, is left
+  // alone.
+  const dropZone = document.getElementById('dropZone');
+  let dragDepth = 0;
+  function carriesFiles(event) {
+    return Array.from(event.dataTransfer?.types || []).includes('Files');
+  }
+  document.addEventListener('dragenter', event => {
+    if (!carriesFiles(event)) return;
+    event.preventDefault();
+    dragDepth++;
+    dropZone.hidden = false;
+  });
+  document.addEventListener('dragover', event => {
+    if (!carriesFiles(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = busy ? 'none' : 'copy';
+  });
+  document.addEventListener('dragleave', event => {
+    if (!carriesFiles(event)) return;
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) dropZone.hidden = true;
+  });
+  document.addEventListener('drop', async event => {
+    if (!carriesFiles(event)) return;
+    event.preventDefault();
+    dragDepth = 0;
+    dropZone.hidden = true;
+    if (busy) {
+      phase.textContent = 'Wait for the current upload to finish, then drop the files again.';
+      return;
+    }
+    // The dropped items can only be read during the event, before any await.
+    const items = Array.from(event.dataTransfer.items || []);
+    const entries = items.map(item => item.kind === 'file' && item.webkitGetAsEntry?.()).filter(Boolean);
+    const names = entries.length > 0 ? entries.map(entry => entry.name) : Array.from(event.dataTransfer.files, file => file.name);
+    const fallback = Array.from(event.dataTransfer.files, file => ({file, path: file.name}));
+    fileInput.value = directoryInput.value = '';
+    setDisabled(true);
+    phase.textContent = 'Reading dropped files…';
+    let files;
+    try {
+      files = entries.length > 0 ? (await Promise.all(entries.map(entry => readEntry(entry, '')))).flat() : fallback;
+    } catch {
+      setDisabled(false);
+      phase.textContent = 'The dropped files could not be read. Try choosing them instead.';
+      return;
+    }
+    if (files.length === 0) {
+      useSelection([], 'none');
+      phase.textContent = 'The dropped folders contain no files.';
+      return;
+    }
+    const label = names.length === 1 ? names[0] : names[0] + ' and ' + (names.length - 1) + ' more';
+    if (useSelection(files, label)) startUpload();
+  });
+
+  btn.addEventListener('click', startUpload);
+
+  function startUpload() {
     const files = selectedFiles.slice();
     const totalSize = selectedSize();
 
@@ -169,8 +264,8 @@
     phase.textContent = "Connecting to server";
 
     const form = new FormData();
-    for (const file of files) {
-      form.append("file", file, file.webkitRelativePath || file.name);
+    for (const {file, path} of files) {
+      form.append("file", file, path);
     }
 
     const xhr = new XMLHttpRequest();
@@ -319,5 +414,5 @@
 
     xhr.send(form);
     pollProgress();
-  });
+  }
 })();

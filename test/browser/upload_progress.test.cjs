@@ -41,8 +41,12 @@ function page(size = 10000, options = {}) {
     getResponseHeader() { return null; }
     send(body) { this.body = body; }
   }
+  const documentEvents = new Map();
   vm.runInNewContext(script, {
-    document: {getElementById(id) { return elements.get(id); }},
+    document: {
+      getElementById(id) { return elements.get(id); },
+      addEventListener(name, callback) { documentEvents.set(name, callback); }
+    },
     XMLHttpRequest: XHR, FormData, crypto: webcrypto, AbortController,
     performance: {now() { return now; }},
     setTimeout(callback, delay) {
@@ -65,7 +69,7 @@ function page(size = 10000, options = {}) {
     elements.get('file').files = [new File([new Uint8Array(bytes)], 'test.bin')];
     elements.get('file').dispatch('change');
   }
-  // An idle page waits for a test to select files.
+  // An idle page waits for a test to select or drop files.
   if (!options.idle) {
     select(size);
     elements.get('btn').dispatch('click');
@@ -93,7 +97,13 @@ function page(size = 10000, options = {}) {
     xhr.responseText = status === 200 ? 'ok\nsaved_as=test.bin\nbytes=' + size : responseText;
     xhr.onload();
   }
-  return {text, elements, xhr, uploads, requests, timers, reply, poll, finish, settle, select, refreshes};
+  // drag sends a document drag event carrying dataTransfer, and returns it.
+  function drag(name, dataTransfer) {
+    const event = {dataTransfer, prevented: false, preventDefault() { this.prevented = true; }};
+    documentEvents.get(name)(event);
+    return event;
+  }
+  return {text, elements, xhr, uploads, requests, timers, reply, poll, finish, settle, select, refreshes, drag};
 }
 
 test('browser send completion does not advance server progress to 100%', async () => {
@@ -280,6 +290,87 @@ test('the upload link page posts to its link without a session or a storage chec
   await p.settle();
   assert.equal(p.text('phase'), 'Done');
   assert.equal(p.refreshes.length, 0);
+});
+
+// Dropped items as browsers describe them: entries for files and folders,
+// whose folders are read a batch at a time.
+function fileEntry(name, contents = 'x') {
+  return {name, isFile: true, isDirectory: false, file(resolve) { resolve(new File([contents], name)); }};
+}
+function folderEntry(name, children) {
+  return {name, isFile: false, isDirectory: true, createReader() {
+    let next = 0;
+    return {readEntries(resolve) { resolve(children.slice(next, next += 2)); }};
+  }};
+}
+function dropped(entries) {
+  return {types: ['Files'], items: entries.map(entry => ({kind: 'file', webkitGetAsEntry() { return entry; }})), files: [], dropEffect: 'none'};
+}
+async function settled() { for (let i = 0; i < 50; i++) await Promise.resolve(); }
+
+test('dropped files and folders upload at once with their folder structure', async () => {
+  const p = page(0, {idle: true});
+  const transfer = dropped([
+    folderEntry('Photos', [fileEntry('a.jpg'), folderEntry('trip', [fileEntry('b.jpg')]), fileEntry('c.jpg'), folderEntry('empty', [])]),
+    fileEntry('notes.txt', 'hello')
+  ]);
+  assert.equal(p.drag('dragenter', transfer).prevented, true);
+  assert.equal(p.elements.get('dropZone').hidden, false);
+  assert.equal(p.drag('dragover', transfer).prevented, true);
+  assert.equal(transfer.dropEffect, 'copy');
+  assert.equal(p.drag('drop', transfer).prevented, true);
+  assert.equal(p.elements.get('dropZone').hidden, true);
+  await settled();
+  assert.equal(p.uploads.length, 1);
+  assert.equal(p.uploads[0].url, '/upload?dir=My%20folder%2Fdocs');
+  assert.deepEqual(p.uploads[0].body.getAll('file').map(file => file.name), ['Photos/a.jpg', 'Photos/trip/b.jpg', 'Photos/c.jpg', 'notes.txt']);
+  assert.equal(p.text('fileName'), 'Photos and 1 more');
+  assert.equal(p.text('fileCount'), '4 files');
+  assert.equal(p.text('phase'), 'Connecting to server');
+});
+
+test('a drop during an upload is refused and the overlay follows nested drags', async () => {
+  const p = page();
+  const transfer = dropped([fileEntry('late.txt')]);
+  p.drag('dragenter', transfer);
+  p.drag('dragenter', transfer); // Entering a child element.
+  p.drag('dragleave', transfer);
+  assert.equal(p.elements.get('dropZone').hidden, false);
+  p.drag('dragleave', transfer);
+  assert.equal(p.elements.get('dropZone').hidden, true);
+  p.drag('dragover', transfer);
+  assert.equal(transfer.dropEffect, 'none');
+  p.drag('drop', transfer);
+  await settled();
+  assert.equal(p.uploads.length, 1);
+  assert.match(p.text('phase'), /Wait for the current upload to finish/);
+});
+
+test('dragging text is left alone, and empty or oversized drops do not upload', async () => {
+  const p = page(0, {idle: true, settings: {remainingBytes: '8192', allocationUnit: '4096'}});
+  const text = {types: ['text/plain'], items: [], files: []};
+  assert.equal(p.drag('dragenter', text).prevented, false);
+  assert.equal(p.drag('drop', text).prevented, false);
+  assert.notEqual(p.elements.get('dropZone').hidden, false, 'the overlay never showed');
+
+  p.drag('drop', dropped([folderEntry('empty', [])]));
+  await settled();
+  assert.equal(p.uploads.length, 0);
+  assert.equal(p.text('phase'), 'The dropped folders contain no files.');
+
+  p.drag('drop', dropped([fileEntry('big.bin', 'x'.repeat(9000))]));
+  await settled();
+  assert.equal(p.uploads.length, 0);
+  assert.match(p.text('phase'), /^Not enough storage/);
+  assert.equal(p.elements.get('btn').disabled, true);
+});
+
+test('browsers without folder entries upload the dropped files', async () => {
+  const p = page(0, {idle: true});
+  const transfer = {types: ['Files'], items: [{kind: 'file'}], files: [new File(['x'], 'plain.txt')]};
+  p.drag('drop', transfer);
+  await settled();
+  assert.deepEqual(p.uploads[0].body.getAll('file').map(file => file.name), ['plain.txt']);
 });
 
 test('one area chooses files or a folder, and progress shows only once an upload starts', () => {
