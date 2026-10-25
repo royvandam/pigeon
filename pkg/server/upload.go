@@ -10,7 +10,6 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
-	"time"
 
 	"github.com/royvandam/pigeon/internal/size"
 	"github.com/royvandam/pigeon/internal/token"
@@ -43,7 +42,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer progress.fail()
-	r, stop := stoppable(w, r, progress)
+	r, deadline, stop := stoppable(w, r, progress)
 	defer stop()
 
 	// The upload holds the account lock only to check the quota and to
@@ -55,7 +54,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "upload canceled", http.StatusRequestTimeout)
 		return
 	}
-	s.receiveUpload(w, r, upload, boundary, progress, false)
+	s.receiveUpload(w, r, upload, boundary, progress, deadline, false)
 }
 
 // handleSharedUpload receives an upload through an upload link, from the
@@ -86,7 +85,7 @@ func (s *Server) handleSharedUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer progress.fail()
-	r, stop := stoppable(w, r, progress)
+	r, deadline, stop := stoppable(w, r, progress)
 	defer stop()
 	upload, err := s.files.BeginSharedUpload(r.Context(), secret, progress)
 	if errors.Is(err, share.ErrNotFound) {
@@ -97,7 +96,7 @@ func (s *Server) handleSharedUpload(w http.ResponseWriter, r *http.Request) {
 		writeUploadError(w, r, err, true)
 		return
 	}
-	s.receiveUpload(w, r, upload, boundary, progress, true)
+	s.receiveUpload(w, r, upload, boundary, progress, deadline, true)
 }
 
 // uploadLinkGone answers a request through an upload link that was revoked,
@@ -141,21 +140,20 @@ func (s *Server) beginProgress(w http.ResponseWriter, r *http.Request, owner upl
 // stopUpload. Stopping cancels the returned request's context, which ends a
 // wait for the upload slot or the account lock, and ends a read of the body
 // that waits for data. The caller cancels the context when done.
-func stoppable(w http.ResponseWriter, r *http.Request, progress *uploadProgress) (*http.Request, context.CancelFunc) {
+func stoppable(w http.ResponseWriter, r *http.Request, progress *uploadProgress) (*http.Request, *bodyDeadline, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(r.Context())
-	controller := http.NewResponseController(w)
+	deadline := newBodyDeadline(w)
 	progress.onStop(func() {
 		cancel()
-		// Recorders in tests do not support deadlines; real connections do.
-		_ = controller.SetReadDeadline(time.Now())
+		deadline.stop()
 	})
-	return r.WithContext(ctx), cancel
+	return r.WithContext(ctx), deadline, cancel
 }
 
 // receiveUpload streams the files of r into upload and publishes them. An
 // upload through a link reveals nothing about its owner's storage: it sends
 // no quota headers, and errors do not say how much space is left.
-func (s *Server) receiveUpload(w http.ResponseWriter, r *http.Request, upload *files.Upload, boundary string, progress *uploadProgress, shared bool) {
+func (s *Server) receiveUpload(w http.ResponseWriter, r *http.Request, upload *files.Upload, boundary string, progress *uploadProgress, deadline *bodyDeadline, shared bool) {
 	defer func() {
 		if err := upload.Close(); err != nil {
 			slog.Warn("could not discard staged upload files", "err", err)
@@ -174,10 +172,15 @@ func (s *Server) receiveUpload(w http.ResponseWriter, r *http.Request, upload *f
 		writeUploadError(w, r, err, shared)
 		return
 	}
+	// A stop during preparation must not let the upload start reading.
+	if err := r.Context().Err(); err != nil {
+		writeUploadError(w, r, err, shared)
+		return
+	}
 
 	// The deadline stays in place on failure: the server then reads the rest of
 	// a small body before responding, and must not wait for a stalled client.
-	body := newIdleTimeoutReader(w, r.Body, s.uploadTimeout)
+	body := newIdleTimeoutReader(r.Body, deadline, s.uploadTimeout)
 	r.Body = http.MaxBytesReader(w, body, usage.Remaining()+multipartOverhead)
 	defer r.Body.Close()
 	mr := multipart.NewReader(r.Body, boundary)
@@ -293,7 +296,7 @@ func uploadReadErrorStatus(err error) int {
 	if errors.As(err, &maxBytesErr) {
 		return http.StatusRequestEntityTooLarge
 	}
-	if errors.Is(err, os.ErrDeadlineExceeded) {
+	if errors.Is(err, os.ErrDeadlineExceeded) || errors.Is(err, context.Canceled) {
 		return http.StatusRequestTimeout
 	}
 	return http.StatusBadRequest
