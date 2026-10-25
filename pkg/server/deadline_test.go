@@ -3,7 +3,9 @@ package server
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -118,5 +120,42 @@ func TestSlowRequestBodiesAreCutOff(t *testing.T) {
 	defer response.Body.Close()
 	if text, _ := io.ReadAll(response.Body); response.StatusCode != http.StatusOK || time.Since(start) < srv.uploadTimeout {
 		t.Fatalf("slow but active upload: %d after %v: %s", response.StatusCode, time.Since(start), strings.TrimSpace(string(text)))
+	}
+}
+
+func TestAStoppedBodyCannotBeExtendedAgain(t *testing.T) {
+	t.Parallel()
+	// The body never sends data, like an upload whose preparation finished
+	// after its uploader canceled it.
+	reader, writer := io.Pipe()
+	defer writer.Close()
+	deadline := newBodyDeadline(httptest.NewRecorder())
+	body := newIdleTimeoutReader(reader, deadline, time.Minute)
+	deadline.stop()
+	done := make(chan error, 1)
+	go func() {
+		_, err := body.Read(make([]byte, 1))
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if !errors.Is(err, errReadStopped) || !errors.Is(err, context.Canceled) {
+			t.Fatalf("read after stop: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a read after stop extended the deadline and waited for data")
+	}
+	if deadline.set(time.Now().Add(time.Minute)) {
+		t.Fatal("a stopped deadline was extended")
+	}
+	// A read soon after an extension still sees the stop.
+	fresh := newBodyDeadline(httptest.NewRecorder())
+	extended := newIdleTimeoutReader(io.NopCloser(strings.NewReader("data")), fresh, time.Minute)
+	if _, err := extended.Read(make([]byte, 1)); err != nil {
+		t.Fatal(err)
+	}
+	fresh.stop()
+	if _, err := extended.Read(make([]byte, 1)); !errors.Is(err, errReadStopped) {
+		t.Fatalf("read after stop within the extension interval: %v", err)
 	}
 }
