@@ -8,6 +8,7 @@ their outcomes traced later.
 | 2026-10-17 | [Security](2026-10-17-security.md) | `636b71b` | 11 (1 high, 4 medium, 5 low, 1 informational) | All fixed |
 | 2026-10-20 | [Code quality and design](2026-10-20-quality.md) | `845a0e1` | 12 (1 high, 5 medium, 6 low) | Open |
 | 2026-10-24 | [Package structure](2026-10-24-structure.md) | `8e8779d` | 6 (1 medium, 5 low) | Open |
+| 2026-10-25 | [Functional review](2026-10-25-features.md) | `6c1a084` | 13 suggestions (5 high, 7 medium, 1 low value) | Open |
 
 ## Adding an audit
 
